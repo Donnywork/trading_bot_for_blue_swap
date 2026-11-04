@@ -1,0 +1,48 @@
+exact V3 pool from the real tick layout; the big bot flips side with p=0.93 (observed), sizes 24-41 fETH, gaps 120-1800 s (median 360); 600 sessions of 8 h per line after a 3 h warm-up; 1000 f564 per buy unless stated
+model check: simulated 8 h price range 999-1146 (median of runs); real: 997-1103
+
+--- A. pattern as observed (flip 93%)
+sharp_drop, guard OFF          mean   +921.6  median   +761.1  p5    +46.1  p95  +2311.3  worst    -62.6  profit  97%  trades/run 21.4  win  95%  maxDD   48.9  stuck  45%
+sharp_drop, guard ON 80/5      mean   +843.3  median   +704.6  p5    +25.2  p95  +2160.9  worst    -61.1  profit  97%  trades/run 19.7  win  95%  maxDD   46.7  stuck  43%
+
+--- A-cold. same, but a cold start (no warm-up history)
+sharp_drop, guard OFF          mean   +847.6  median   +733.2  p5    +49.6  p95  +1977.3  worst    -60.7  profit  97%  trades/run 20.7  win  95%  maxDD   45.0  stuck  41%
+sharp_drop, guard ON 80/5      mean   +709.8  median   +615.9  p5    +26.5  p95  +1699.6  worst    -64.8  profit  96%  trades/run 17.3  win  95%  maxDD   40.8  stuck  38%
+
+--- B. no pattern: random direction
+sharp_drop, guard OFF          mean   +147.1  median   +115.8  p5   -281.0  p95   +701.9  worst   -716.4  profit  66%  trades/run 19.3  win  61%  maxDD  230.7  stuck  31%
+sharp_drop, guard ON 80/5      mean    +33.0  median     +0.0  p5   -131.7  p95   +337.5  worst   -286.6  profit  43%  trades/run  2.8  win  61%  maxDD   64.8  stuck   6%
+
+--- C70. weaker pattern, flip 70%
+sharp_drop, guard OFF          mean   +442.1  median   +388.6  p5    -10.2  p95  +1053.8  worst   -268.0  profit  94%  trades/run 20.2  win  75%  maxDD  137.2  stuck  36%
+sharp_drop, guard ON 80/5      mean   +163.7  median   +120.4  p5   -107.1  p95   +567.9  worst   -392.1  profit  77%  trades/run  7.7  win  74%  maxDD   87.8  stuck  14%
+
+--- D. downtrend from the start (65% sells)
+sharp_drop, guard OFF          mean   +402.8  median   +358.3  p5   -184.1  p95  +1113.8  worst   -732.3  profit  86%  trades/run 24.5  win  65%  maxDD  222.2  stuck  34%
+sharp_drop, guard ON 80/5      mean   +193.2  median   +150.3  p5   -116.7  p95   +665.4  worst   -414.0  profit  75%  trades/run  6.7  win  73%  maxDD   97.2  stuck   8%
+
+--- BREAK-trend. pattern, then a downtrend at a random time
+sharp_drop, guard OFF          mean   +450.7  median   +383.9  p5   -139.3  p95  +1280.9  worst   -280.0  profit  87%  trades/run 22.1  win  73%  maxDD  220.3  stuck  35%
+sharp_drop, guard ON 80/5      mean   +394.5  median   +305.7  p5    -48.8  p95  +1102.0  worst   -234.0  profit  89%  trades/run 11.5  win  86%  maxDD   80.3  stuck   7%
+
+--- BREAK-random. pattern, then no pattern
+sharp_drop, guard OFF          mean   +461.9  median   +387.8  p5    -95.0  p95  +1258.6  worst   -336.5  profit  87%  trades/run 20.2  win  76%  maxDD  173.8  stuck  35%
+sharp_drop, guard ON 80/5      mean   +366.1  median   +270.6  p5    -59.3  p95  +1149.5  worst   -178.5  profit  86%  trades/run 10.5  win  87%  maxDD   69.6  stuck   5%
+
+--- BLEED. it still alternates but its sells are 10% bigger
+sharp_drop, guard OFF          mean   +782.8  median   +733.4  p5    +92.9  p95  +1687.9  worst   -125.2  profit  99%  trades/run 22.3  win  93%  maxDD   60.2  stuck  43%
+sharp_drop, guard ON 80/5      mean   +685.8  median   +642.4  p5    +69.9  p95  +1490.3  worst   -125.2  profit  98%  trades/run 20.0  win  93%  maxDD   58.0  stuck  40%
+
+--- E. the bot stops at a random time
+sharp_drop, guard OFF          mean   +448.4  median   +323.8  p5     +0.0  p95  +1409.6  worst    -66.9  profit  87%  trades/run 10.5  win  95%  maxDD   26.5  stuck  42%
+sharp_drop, guard ON 80/5      mean   +407.3  median   +293.9  p5     +0.0  p95  +1305.8  worst    -79.0  profit  87%  trades/run  9.5  win  95%  maxDD   25.6  stuck  38%
+
+--- G. a rival trades the reversal first (50%)
+sharp_drop, guard OFF          mean   +302.3  median   +199.8  p5    -49.9  p95   +951.3  worst   -213.8  profit  87%  trades/run 10.6  win  81%  maxDD   80.9  stuck  42%
+sharp_drop, guard ON 80/5      mean   +182.5  median    +95.5  p5    -60.7  p95   +706.5  worst   -147.9  profit  74%  trades/run  5.8  win  81%  maxDD   52.8  stuck  22%
+
+--- H. we trade 10,000 f564 per buy
+sharp_drop, guard OFF          mean  +8709.5  median  +7082.1  p5   +274.5  p95 +21934.5  worst   -621.2  profit  97%  trades/run 19.9  win  95%  maxDD  491.5  stuck  47%
+sharp_drop, guard ON 80/5      mean  +5948.0  median  +5816.2  p5   +291.4  p95 +12126.6  worst   -553.3  profit  97%  trades/run 15.3  win  95%  maxDD  395.4  stuck  37%
+
+(57 s)

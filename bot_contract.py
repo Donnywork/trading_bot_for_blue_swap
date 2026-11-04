@@ -7,6 +7,7 @@ from pathlib import Path
 import solcx
 from dotenv import load_dotenv
 from web3 import Web3
+from web3.exceptions import TimeExhausted, Web3Exception
 
 import config
 
@@ -19,6 +20,15 @@ BUILD_DIR = ROOT / "build"
 SEPOLIA_CHAIN_ID = 11155111
 GAS_BUFFER = 1.2
 FEE_TIERS = [3000]  # the only pool fee tier the bot trades
+
+
+class NotSent(Exception):
+    """A read failed BEFORE the transaction was broadcast: nothing is on chain, trying later is safe."""
+
+
+class SentUnknown(Exception):
+    """The transaction was (or may have been) broadcast but its outcome could not be read.
+    Never retry: look at the wallet's transactions first."""
 
 
 def standard_json_input():
@@ -106,28 +116,50 @@ def validate_owner(owner, bot_wallet):
 
 def send_tx(w3, account, tx):
     # ------------------------------------
-    # Fill nonce/gas/fees, sign, send, wait for the receipt
+    # Fill nonce/gas/fees, sign, send, wait for the receipt.
+    # The two halves fail differently, and the caller must be able to tell them apart:
+    #   before broadcast: a connection error means nothing was sent      -> NotSent
+    #   from broadcast on: a connection error may hide a sent transaction -> SentUnknown
+    # (a receipt timeout stays TimeExhausted, which the bot also treats as "may still land")
     # ------------------------------------
 
-    tx = {
-        "from": account.address,
-        "nonce": w3.eth.get_transaction_count(account.address, "pending"),
-        "chainId": w3.eth.chain_id,
-        **tx,
-    }
-    # build_transaction already estimates gas; add headroom in case state moves before mining
-    gas = tx.get("gas") or w3.eth.estimate_gas(tx)
-    tx["gas"] = int(gas * GAS_BUFFER)
-    if "maxFeePerGas" not in tx:
-        priority = w3.eth.max_priority_fee
-        base = w3.eth.get_block("latest")["baseFeePerGas"]
-        tx["maxPriorityFeePerGas"] = priority
-        tx["maxFeePerGas"] = base * 2 + priority
+    try:
+        tx = {
+            "from": account.address,
+            "nonce": w3.eth.get_transaction_count(account.address, "pending"),
+            "chainId": w3.eth.chain_id,
+            **tx,
+        }
+        # build_transaction already estimates gas; add headroom in case state moves before mining
+        gas = tx.get("gas") or w3.eth.estimate_gas(tx)
+        tx["gas"] = int(gas * GAS_BUFFER)
+        if "maxFeePerGas" not in tx:
+            priority = w3.eth.max_priority_fee
+            base = w3.eth.get_block("latest")["baseFeePerGas"]
+            tx["maxPriorityFeePerGas"] = priority
+            tx["maxFeePerGas"] = base * 2 + priority
+    except OSError as e:
+        raise NotSent(f"could not prepare the transaction: {e}") from e
 
     signed = account.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    try:
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+    except (
+        OSError
+    ) as e:  # the request may have reached the node before the connection broke
+        raise SentUnknown(f"connection error while sending: {e}") from e
     print("Tx sent:", tx_hash.to_0x_hex())
-    receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    try:
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+    except TimeExhausted:
+        raise
+    except (
+        OSError,
+        Web3Exception,
+    ) as e:  # it is on its way; we just cannot see how it ended
+        raise SentUnknown(
+            f"sent {tx_hash.to_0x_hex()} but reading its receipt failed: {e}"
+        ) from e
     if receipt["status"] != 1:
         raise RuntimeError(f"Transaction reverted: {tx_hash.to_0x_hex()}")
     return receipt
@@ -182,23 +214,33 @@ def swap_via_contract(w3, account, bot, quote, fee, dry_run=True):
         quote["amount_out_min"],
     )
 
-    simulated = fn.call({"from": account.address})
-    print(f"Simulated amountOut: {simulated}")
+    try:
+        simulated = fn.call({"from": account.address})
+        print(f"Simulated amountOut: {simulated}")
 
-    if dry_run:
-        print("DRY_RUN=true: not sending")
-        return None
+        if dry_run:
+            print("DRY_RUN=true: not sending")
+            return None
 
-    return send_tx(w3, account, fn.build_transaction({"from": account.address}))
+        tx = fn.build_transaction({"from": account.address})
+    except OSError as e:  # nothing has been sent yet
+        raise NotSent(f"could not read the chain before sending: {e}") from e
+    return send_tx(w3, account, tx)
 
 
-def connect():
+def connect_read_only():
+    # RPC only, no key: for scripts that just read the chain
     load_dotenv()
     w3 = Web3(Web3.HTTPProvider(os.environ["RPC_URL"]))
     if not w3.is_connected():
         raise ConnectionError("Failed to connect to Ethereum RPC")
     if w3.eth.chain_id != SEPOLIA_CHAIN_ID:
         raise ValueError(f"Wrong network! Expected Sepolia, got {w3.eth.chain_id}")
+    return w3
+
+
+def connect():
+    w3 = connect_read_only()
     account = w3.eth.account.from_key(os.environ["PRIVATE_KEY"])
     return w3, account
 

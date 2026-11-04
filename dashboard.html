@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading bot dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --ink-3: #6b6a65;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series: #2a78d6;
+    --good: #0ca30c;
+    --good-text: #006300;
+    --warn: #fab219;
+    --bad: #d03b3b;
+    --bad-text: #b02a2a;
+    --warn-text: #9a6700;
+    --primary: #1a62bd;
+    --wash: rgba(11, 11, 11, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #f0efec;
+      --ink-2: #c3c2b7;
+      --ink-3: #a3a29a;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series: #3987e5;
+      --good-text: #0ca30c;
+      --bad-text: #e66767;
+      --warn-text: #fab219;
+      --primary: #2468c2;
+      --wash: rgba(255, 255, 255, 0.05);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  h2 { font-size: 15px; margin: 0 0 12px; font-weight: 650; }
+  .muted { color: var(--ink-2); }
+  header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 16px; }
+  header .spacer { flex: 1; }
+  .pill {
+    display: inline-flex; gap: 6px; align-items: center; padding: 3px 10px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 13px;
+  }
+  .pill.live { border-color: var(--bad); }
+  .icon { font-size: 12px; line-height: 1; }
+  .ok { color: var(--good); } .stale { color: var(--warn-text); } .halted, .bad { color: var(--bad); } .unknown { color: var(--ink-3); }
+  .banner {
+    border: 1px solid var(--warn); background: var(--surface); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 14px;
+  }
+  .banner p { margin: 2px 0; }
+  .grid { display: grid; gap: 16px; }
+  .cards { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 16px; }
+  .two { grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { .two { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+    min-width: 0;
+  }
+  .label { font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
+  .hero { font-size: 48px; line-height: 1.05; font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+  .big { font-size: 26px; font-weight: 650; line-height: 1.15; }
+  .sub { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .pos { color: var(--good-text); } .neg { color: var(--bad-text); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; font-size: 14px; }
+  dt { color: var(--ink-2); } dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* chart */
+  .chart-wrap { position: relative; }
+  svg { display: block; width: 100%; touch-action: pan-y; }
+  svg text { fill: var(--ink-3); font-size: 11px; font-family: inherit; }
+  svg .tick text { font-variant-numeric: tabular-nums; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .axis-line { stroke: var(--axis); stroke-width: 1; }
+  .series-line { fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .ring { stroke: var(--surface); stroke-width: 2; }
+  .crosshair { stroke: var(--ink-3); stroke-width: 1; }
+  .ref-label { fill: var(--ink-2) !important; }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    white-space: nowrap; z-index: 2;
+  }
+  .tooltip strong { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+  .key span { display: inline-flex; align-items: center; gap: 5px; }
+  .empty { padding: 56px 8px; text-align: center; color: var(--ink-2); }
+  details { margin-top: 10px; font-size: 13px; }
+  summary { cursor: pointer; color: var(--ink-2); }
+  /* tables */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  th { font-weight: 600; color: var(--ink-2); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; max-height: 340px; overflow-y: auto; }
+  /* form */
+  fieldset { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+  legend { font-weight: 650; font-size: 14px; padding: 0; margin-bottom: 8px; }
+  .strategy {
+    display: flex; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 8px; cursor: pointer; align-items: flex-start;
+  }
+  .strategy:hover { background: var(--wash); }
+  .strategy.selected { border-color: var(--series); box-shadow: inset 0 0 0 1px var(--series); }
+  .strategy input { margin-top: 3px; accent-color: var(--series); }
+  .strategy b { display: block; font-weight: 600; }
+  .strategy span { font-size: 13px; color: var(--ink-2); }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 3px; }
+  .field input {
+    width: 100%; padding: 7px 9px; font: inherit; color: var(--ink); background: var(--page);
+    border: 1px solid var(--ink-3); border-radius: 8px;
+  }
+  .field small { color: var(--ink-3); font-size: 12px; }
+  :focus-visible { outline: 2px solid var(--series); outline-offset: 2px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button {
+    font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--axis);
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  button.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #message { font-size: 14px; min-height: 1.4em; margin-top: 10px; }
+  .note { font-size: 13px; color: var(--ink-2); margin-top: 14px; }
+  .dim { opacity: 0.6; transition: opacity .15s; }
+  .spaced { margin-bottom: 16px; }
+  .offline .cards, .offline .spaced { opacity: 0.55; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header>
+    <h1>Trading bot</h1>
+    <span class="pill" id="mode"></span>
+    <span class="pill" id="health"></span>
+    <span class="spacer"></span>
+    <span class="muted" id="updated">loading…</span>
+  </header>
+
+  <div class="banner" id="problems" role="status" hidden></div>
+
+  <section class="grid cards" aria-label="Summary">
+    <div class="card">
+      <div class="label" id="price-label">Price</div>
+      <div class="hero" id="price">–</div>
+      <div class="sub" id="price-sub"></div>
+    </div>
+    <div class="card" id="position-card"></div>
+    <div class="card" id="guard-card"></div>
+    <div class="card" id="pnl-card"></div>
+    <div class="card" id="vault-card"></div>
+  </section>
+
+  <section class="card spaced" aria-label="Price chart">
+    <h2 id="chart-title">Price</h2>
+    <div class="chart-wrap" id="chart"></div>
+    <div class="sr-only" id="chart-live" aria-live="polite"></div>
+    <div class="key" id="chart-key"></div>
+    <details>
+      <summary>Table view</summary>
+      <div class="scroll" tabindex="0" role="region" aria-label="Price table"><table id="price-table"></table></div>
+    </details>
+  </section>
+
+  <section class="grid two">
+    <section class="card" aria-label="Settings">
+      <h2>Strategy and exit rules</h2>
+      <form id="form" novalidate>
+        <fieldset><legend>When to buy</legend><div id="strategies"></div></fieldset>
+        <fieldset><legend id="params-legend">Settings</legend><div class="fields" id="params"></div></fieldset>
+        <fieldset><legend>When to sell (applies to every strategy)</legend>
+          <div class="fields" id="exits"></div></fieldset>
+        <fieldset><legend>Pause new buys when the market looks wrong (never stops a sale)</legend>
+          <div class="fields" id="guard"></div></fieldset>
+        <div class="actions">
+          <button type="submit" class="primary" id="save" disabled>Save</button>
+          <button type="button" id="discard" disabled>Discard changes</button>
+          <button type="button" id="reset">Reset form to defaults</button>
+        </div>
+        <div id="message" role="status" aria-live="polite"></div>
+      </form>
+      <p class="note">The bot reads these before every tick (about every 30 s), so no restart is needed.
+        An open position uses the new take profit and stop loss straight away; a new strategy only
+        decides the next buy. Dry run, trade size and keys cannot be changed here: they live in
+        <code>.env</code> on the server. A &ldquo;sample&rdquo; is one price reading: one per bot tick, about every 30 seconds.</p>
+    </section>
+
+    <section class="card" aria-label="Trades">
+      <h2>Closed trades</h2>
+      <div class="scroll" tabindex="0" role="region" aria-label="Closed trades table"><table id="trades"></table></div>
+    </section>
+  </section>
+
+</main>
+
+<script>
+"use strict";
+
+// ---------- small helpers (all page text goes through textContent, never innerHTML) ----------
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const kid of kids) node.append(kid);
+  return node;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs, text) {
+  const node = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+const fmt = (x, digits = 6) =>
+  Number(x).toLocaleString(undefined, { maximumSignificantDigits: digits });
+const fixed = (x, d) => Number(x).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const isZero = (text) => !/[1-9]/.test(text);   // "0.00" and "-0.000000" both read as zero
+const signed = (x, d = 2) => {
+  if (!Number.isFinite(x)) return "n/a";
+  const text = fixed(Math.abs(x), d);
+  return (isZero(text) ? "" : x < 0 ? "−" : "+") + text;
+};
+function ago(seconds) {
+  if (seconds < 120) return Math.max(0, Math.round(seconds)) + "s";
+  if (seconds < 7200) return Math.round(seconds / 60) + "m";
+  return (seconds / 3600).toFixed(1) + "h";
+}
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const stamp = (ts) => new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+// profit text always carries a sign and an arrow, so colour is never the only cue
+function plSpan(valueStr, extra) {
+  const v = Number(valueStr);
+  const text = signed(v, Math.abs(v) < 1 ? 6 : 4);
+  const zero = isZero(text);
+  return el("span", { class: zero ? "" : v > 0 ? "pos" : "neg" }, (zero ? "" : v > 0 ? "▲ " : "▼ ") + text + (extra || ""));
+}
+
+// the token names, remembered from the last time the chain could be read
+const tokens = { base: "base token", quote: "quote token" };
+function rememberTokens(s) { if (s.chain) { tokens.base = s.chain.base; tokens.quote = s.chain.quote; } }
+
+let snap = null;          // last status from the server
+let draft = null;         // the form's values
+let dirty = false;        // the user has edited the form since it was last synced
+let shownConfig = "";     // JSON of the config the form was last built from
+
+// ---------- header ----------
+function renderHeader(s) {
+  const mode = $("mode");
+  mode.className = "pill" + (s.mode === "live" ? " live" : "");
+  mode.replaceChildren(
+    el("span", { class: "icon " + (s.mode === "live" ? "bad" : "unknown") }, s.mode === "live" ? "●" : "○"),
+    document.createTextNode(s.mode === "live" ? "LIVE: real transactions" : "DRY RUN: nothing is sent"));
+
+  const icons = { running: "●", stale: "▲", halted: "■", unknown: "?" };
+  const names = { running: "Bot running", stale: "Bot not ticking", halted: "Bot HALTED", unknown: "Bot status unknown" };
+  const h = s.health;
+  $("health").replaceChildren(
+    el("span", { class: "icon " + (h.kind === "running" ? "ok" : h.kind) }, icons[h.kind] || "?"),
+    document.createTextNode(names[h.kind] + ": " + h.text));
+
+  const lines = s.problems.map((p) => "⚠ " + p);
+  if (h.kind === "halted") {
+    lines.unshift("■ The bot stopped itself and will not restart on its own. Read the reason above, fix the cause, " +
+      "delete logs/HALTED on the server, then restart the bot (docs/DEPLOY.md, “After a halt”).");
+  }
+  const box = $("problems");
+  box.hidden = lines.length === 0;
+  box.replaceChildren(...lines.map((p) => el("p", {}, p)));
+  $("updated").textContent = "updated " + new Date(s.now * 1000).toLocaleTimeString();
+}
+
+// ---------- cards ----------
+function renderCards(s) {
+  const c = s.chain;
+  const { base, quote } = tokens;
+  $("price-label").textContent = c ? `${base} price in ${quote}` : "Price";
+  const hero = $("price"), heroText = c ? fmt(c.price) : "–";
+  hero.textContent = heroText;
+  hero.style.fontSize = heroText.length <= 9 ? "" : heroText.length <= 12 ? "36px" : "28px";   // long prices must fit the card
+  const p = s.prices;
+  let sub = c ? "" : "chain not readable right now";
+  if (c && p.length > 1) {
+    const change = (p[p.length - 1][1] / p[0][1] - 1) * 100;
+    sub = `${signed(change)}% over the last ${ago(p[p.length - 1][0] - p[0][0])}`;
+  }
+  $("price-sub").textContent = sub;
+
+  // position
+  const pos = s.position, cfg = s.config;
+  const card = $("position-card");
+  card.replaceChildren(el("div", { class: "label" }, "Position"));
+  if (!pos) {
+    card.append(el("div", { class: "big" }, "None"),
+      el("div", { class: "sub" }, "Waiting for a buy signal from “" + s.schema.strategies[cfg.strategy].label + "”."));
+  } else {
+    card.append(el("div", { class: "big" }, "Holding " + fmt(pos.base, 4) + " " + base),
+      el("div", { class: "sub" }, "bought " + ago(s.now - pos.opened) + " ago for " + fmt(pos.quote_spent, 4) + " " + quote));
+    const rows = [["Entry price", fmt(pos.entry_price)],
+      [`Take profit (+${cfg.take_profit_pct}%)`, fmt(pos.take_profit_price)],
+      [`Stop loss (−${cfg.stop_loss_pct}%)`, fmt(pos.stop_loss_price)]];
+    const dl = el("dl");
+    for (const [k, v] of rows) dl.append(el("dt", {}, k), el("dd", {}, v));
+    if (pos.unrealized !== undefined) {
+      dl.append(el("dt", {}, "Now vs entry"), el("dd", {}, signed(pos.change_pct) + "%"),
+        el("dt", {}, "If sold now"), el("dd", {}, plSpan(pos.unrealized, ` ${quote}`)));
+    }
+    card.append(dl);
+  }
+
+  // the pattern guard: is buying allowed right now?
+  const g = s.guard, gc = $("guard-card");
+  gc.replaceChildren(el("div", { class: "label" }, "New buys"));
+  if (cfg.guard_flip_pct === 0 && cfg.guard_drift_pct === 0) {
+    gc.append(el("div", { class: "big" }, "Guard off"), el("div", { class: "sub" }, "Buying is never paused by the market check."));
+  } else {
+    // "Allowed" must not claim more than was checked: say which checks are on and have data
+    const checked = [];
+    if (cfg.guard_flip_pct > 0) checked.push("the big price steps still alternate up and down");
+    if (cfg.guard_drift_pct > 0) checked.push(g.drift_pct === null ? "the price slide is not checked yet (it needs about an hour of prices)" : "the price is not sliding");
+    let title, icon, note;
+    if (s.health.kind === "halted") { title = " Bot halted"; icon = ["bad", "■"]; note = "The bot is not trading."; }
+    else if (s.position) { title = " Not buying: holding a position"; icon = ["unknown", "○"]; note = g.reason ? "When it is sold, buying stays paused: " + g.reason : "Buying resumes after the sale."; }
+    else if (g.reason) { title = " Paused"; icon = ["bad", "■"]; note = g.reason; }
+    else { title = " Allowed"; icon = ["ok", "●"]; note = "Nothing tripped: " + checked.join("; ") + "."; }
+    gc.append(el("div", { class: "big" }, el("span", { class: "icon " + icon[0] }, icon[1]), document.createTextNode(title)),
+      el("div", { class: "sub" }, note));
+    const rows = el("dl");
+    rows.append(el("dt", {}, "Steps alternating"), el("dd", {}, g.flip_pct === null ? "not enough steps" : `${fixed(g.flip_pct, 0)}% of the pairs in the last ${g.steps} steps`),
+      el("dt", {}, "Price average vs before"), el("dd", {}, g.drift_pct === null ? "not enough samples" : signed(g.drift_pct) + "%"));
+    gc.append(rows);
+  }
+
+  // realized profit
+  const sum = s.summary, pnl = $("pnl-card");
+  pnl.replaceChildren(el("div", { class: "label" }, "Realized profit / loss"));
+  if (sum.trades === 0) {
+    pnl.append(el("div", { class: "big" }, "–"), el("div", { class: "sub" }, "No closed trades yet."));
+  } else {
+    pnl.append(el("div", { class: "big" }, plSpan(sum.profit, ` ${quote}`)),
+      el("div", { class: "sub" }, `${signed(sum.profit_pct)}% on ${fmt(sum.spent, 4)} ${quote} spent, after fees`));
+    const dl = el("dl");
+    dl.append(el("dt", {}, "Closed trades"), el("dd", {}, String(sum.trades)),
+      el("dt", {}, "Won / lost"), el("dd", {}, `${sum.wins} / ${sum.losses}`),
+      el("dt", {}, "By take profit / stop loss"), el("dd", {}, `${sum.take_profit} / ${sum.stop_loss}`));
+    pnl.append(dl);
+  }
+
+  // vault
+  const vault = $("vault-card");
+  vault.replaceChildren(el("div", { class: "label" }, "Vault balances"),
+    el("div", { class: "sub" }, "funds held by the bot's contract"));
+  if (!c) { vault.append(el("div", { class: "sub" }, "unavailable")); return; }
+  const dl = el("dl");
+  dl.append(el("dt", {}, base), el("dd", {}, fmt(c.vault_base)),
+    el("dt", {}, quote), el("dd", {}, fmt(c.vault_quote)),
+    el("dt", {}, "Bot wallet gas"), el("dd", {}, fixed(c.operator_eth, 4) + " ETH"));
+  vault.append(dl);
+}
+
+// ---------- chart ----------
+const M = { top: 12, bottom: 26 };
+const CHAR = 6.4;          // average px per character of the 11px axis labels
+let drawKey = "";          // what the chart was last drawn from: an unchanged refresh does not redraw it
+let hoverTs = null;        // time under the pointer or arrow-key cursor (an index would drift as the window slides)
+
+function markers(s, lo, hi) {
+  // buys and sells from the ledger that fall inside the chart's time range
+  const out = [];
+  const add = (ts, price, kind, text) => { if (ts >= lo && ts <= hi) out.push({ ts, price, kind, text }); };
+  for (const t of s.trades) {
+    add(t.opened, t.entry_price, "buy", "Bought at " + fmt(t.entry_price));
+    add(t.closed, t.exit_price, t.reason, (t.reason === "take_profit" ? "Sold at take profit " : "Sold at stop loss ") + fmt(t.exit_price));
+  }
+  if (s.position) add(s.position.opened, s.position.entry_price, "buy", "Bought at " + fmt(s.position.entry_price));
+  return out;
+}
+
+function spread(ys, gap) {
+  // push labels apart (top to bottom) so two nearby reference lines do not print over each other
+  const order = ys.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  for (let k = 1; k < order.length; k++) if (order[k].v - order[k - 1].v < gap) order[k].v = order[k - 1].v + gap;
+  const out = [];
+  for (const e of order) out[e.i] = e.v;
+  return out;
+}
+
+function drawChart() {
+  const box = $("chart");
+  const s = snap, pts = s.prices;
+  const { base, quote } = tokens;
+  if (pts.length < 2 || pts[pts.length - 1][0] <= pts[0][0]) {
+    drawKey = "";
+    box.replaceChildren(el("div", { class: "empty" },
+      "No price history yet. The bot records one price every tick (about 30 s), so the chart appears after two ticks. " +
+      "If the bot is running and this stays empty, it is writing to a different folder than this dashboard reads."));
+    $("chart-title").textContent = "Price";
+    $("chart-key").replaceChildren();
+    $("price-table").replaceChildren();
+    return;
+  }
+
+  const W = Math.max(280, box.clientWidth), H = W < 520 ? 230 : 300;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0], span = t1 - t0;
+  const pos = s.position;
+  const key = JSON.stringify([W, pts.length, pts[pts.length - 1], pos && [pos.opened, pos.entry_price, pos.take_profit_price, pos.stop_loss_price], s.trades.length, base, quote]);
+  if (key === drawKey && box.querySelector("svg")) return;
+  drawKey = key;
+  $("chart-title").textContent = `${base} price in ${quote}, last ${ago(span)}`;
+
+  const refs = pos ? [
+    { price: pos.take_profit_price, label: "TP", color: "var(--good)" },
+    { price: pos.entry_price, label: "entry", color: "var(--ink-3)" },
+    { price: pos.stop_loss_price, label: "SL", color: "var(--bad)" }] : [];
+  let lo = Math.min(...pts.map((p) => p[1]), ...refs.map((r) => r.price));
+  let hi = Math.max(...pts.map((p) => p[1]), ...refs.map((r) => r.price));
+  if (hi === lo) { const m = Math.abs(hi) * 0.01 || 1; hi += m; lo -= m; }   // a flat price still gets a sensible axis
+  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+
+  // margins sized from the labels, so very small or very large prices are not cut off
+  const yLabels = [0, 1, 2, 3, 4].map((i) => fmt(lo + (hi - lo) * i / 4, 5));
+  const refLabels = refs.map((r) => `${r.label} ${fmt(r.price, 5)}`);
+  const L = Math.min(Math.max(58, 14 + CHAR * Math.max(...yLabels.map((l) => l.length))), W * 0.3);
+  const R = refs.length ? Math.min(Math.max(74, 14 + CHAR * Math.max(...refLabels.map((l) => l.length))), W * 0.35) : 24;
+  const x = (t) => L + (t - t0) / span * (W - L - R);
+  const y = (p) => M.top + (hi - p) / (hi - lo) * (H - M.top - M.bottom);
+
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", tabindex: "0",
+    "aria-label": `Line chart of the ${base} price, ${pts.length} points from ${clock(t0)} to ${clock(t1)}. Use the left and right arrow keys to read values, or open the table view.` });
+
+  // grid and y labels (hairlines, solid, recessive)
+  yLabels.forEach((label, i) => {
+    const v = lo + (hi - lo) * i / 4;
+    root.append(svg("line", { class: i === 0 ? "axis-line" : "grid-line", x1: L, x2: W - R, y1: y(v), y2: y(v) }));
+    const g = svg("g", { class: "tick" });
+    g.append(svg("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, label));
+    root.append(g);
+  });
+  const when = span > 20 * 3600 ? stamp : clock;   // across more than a day, times alone are ambiguous
+  for (let i = 0; i <= 3; i++) {
+    const t = t0 + span * i / 3;
+    root.append(svg("text", { x: x(t), y: H - 6, "text-anchor": i === 0 ? "start" : i === 3 ? "end" : "middle" }, when(t)));
+  }
+
+  // entry / take profit / stop loss, labelled on the right edge (text stays in ink, the line carries the colour)
+  const labelY = spread(refs.map((r) => y(r.price)), 13);
+  refs.forEach((r, i) => {
+    root.append(svg("line", { x1: L, x2: W - R, y1: y(r.price), y2: y(r.price), stroke: r.color, "stroke-width": 1 }));
+    root.append(svg("text", { class: "ref-label", x: W - R + 6, y: labelY[i] + 4 }, refLabels[i]));
+  });
+
+  // the price line, 2px, with an end dot that carries a surface ring
+  const d = pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + y(p[1]).toFixed(1)).join("");
+  root.append(svg("path", { class: "series-line", d }));
+  const last = pts[pts.length - 1];
+  root.append(svg("circle", { class: "ring", cx: x(last[0]), cy: y(last[1]), r: 4, fill: "var(--series)" }));
+
+  // trades: shape tells buy (up) from sell (down); sells are coloured by outcome
+  for (const m of markers(s, t0, t1)) {
+    const cx = x(m.ts), cy = y(m.price), up = m.kind === "buy";
+    const tri = up ? `${cx},${cy - 6} ${cx - 6},${cy + 5} ${cx + 6},${cy + 5}` : `${cx},${cy + 6} ${cx - 6},${cy - 5} ${cx + 6},${cy - 5}`;
+    const fill = up ? "var(--ink)" : m.kind === "take_profit" ? "var(--good)" : "var(--bad)";
+    const mark = svg("polygon", { class: "ring", points: tri, fill });
+    mark.append(svg("title", {}, `${m.text} (${stamp(m.ts)})`));
+    root.append(mark);
+  }
+
+  // hover layer: a crosshair that snaps to the nearest sample, one tooltip
+  const cross = svg("line", { class: "crosshair", y1: M.top, y2: H - M.bottom, visibility: "hidden" });
+  const dot = svg("circle", { class: "ring", r: 4, fill: "var(--series)", visibility: "hidden" });
+  root.append(cross, dot);
+  const tip = el("div", { class: "tooltip", hidden: "" });
+
+  function indexAt(t) {
+    let a = 0, b = pts.length - 1;
+    while (b - a > 1) { const mid = (a + b) >> 1; if (pts[mid][0] < t) a = mid; else b = mid; }
+    return Math.abs(pts[a][0] - t) <= Math.abs(pts[b][0] - t) ? a : b;
+  }
+  function show(i, announce) {
+    i = Math.max(0, Math.min(pts.length - 1, i));
+    const [t, p] = pts[i];
+    hoverTs = t;
+    cross.setAttribute("x1", x(t)); cross.setAttribute("x2", x(t)); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", x(t)); dot.setAttribute("cy", y(p)); dot.setAttribute("visibility", "visible");
+    tip.replaceChildren(el("strong", {}, fmt(p)), document.createTextNode(`${quote} per ${base} · ${stamp(t)}`));
+    tip.hidden = false;
+    const left = Math.min(Math.max(x(t) + 12, 0), W - tip.offsetWidth - 4);
+    tip.style.left = (x(t) + 12 + tip.offsetWidth > W ? x(t) - 12 - tip.offsetWidth : left) + "px";
+    tip.style.top = Math.max(0, y(p) - 52) + "px";
+    if (announce) $("chart-live").textContent = `${fmt(p)} ${quote} per ${base}, ${stamp(t)}`;
+  }
+  function hide() { hoverTs = null; cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); tip.hidden = true; }
+  function timeAt(clientX) {
+    const r = root.getBoundingClientRect();
+    return t0 + ((clientX - r.left) * (W / r.width) - L) / (W - L - R) * span;
+  }
+  root.addEventListener("pointermove", (e) => show(indexAt(timeAt(e.clientX))));
+  root.addEventListener("pointerleave", hide);
+  root.addEventListener("keydown", (e) => {
+    const at = hoverTs === null ? pts.length : indexAt(hoverTs);
+    if (e.key === "ArrowLeft") { show(at - 1, true); e.preventDefault(); }
+    if (e.key === "ArrowRight") { show(hoverTs === null ? pts.length - 1 : at + 1, true); e.preventDefault(); }
+    if (e.key === "Escape") hide();
+  });
+  root.addEventListener("blur", hide);
+
+  // a redraw keeps the keyboard focus and the reading the reader was on
+  const hadFocus = document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName.toLowerCase() === "svg";
+  const keep = hoverTs;
+  box.replaceChildren(root, tip);
+  if (hadFocus) root.focus({ preventScroll: true });
+  if (keep !== null) show(indexAt(keep));
+
+  // key for the markers and reference lines (a single price series needs no legend box)
+  const keyItem = (glyph, cls, text) => el("span", {}, el("span", { class: "icon " + cls }, glyph), text);
+  $("chart-key").replaceChildren(
+    keyItem("▲", "", "bought"), keyItem("▼", "pos", "sold at take profit"), keyItem("▼", "neg", "sold at stop loss"),
+    ...(refs.length ? [keyItem("━", "ok", "take profit"), keyItem("━", "bad", "stop loss"), keyItem("━", "unknown", "entry")] : []));
+
+  // table view: the same values without hovering
+  const rows = pts.slice(-60).reverse();
+  $("price-table").replaceChildren(
+    el("thead", {}, el("tr", {}, el("th", {}, "Time"), el("th", { class: "num" }, `Price (${quote} per ${base})`))),
+    el("tbody", {}, ...rows.map(([t, p]) => el("tr", {}, el("td", {}, stamp(t)), el("td", { class: "num" }, fmt(p))))));
+}
+
+// ---------- closed trades ----------
+function renderTrades(s) {
+  const t = $("trades");
+  if (!s.trades.length) { t.replaceChildren(el("tbody", {}, el("tr", {}, el("td", {}, "Nothing closed yet.")))); return; }
+  t.replaceChildren(
+    el("thead", {}, el("tr", {}, el("th", {}, "Closed"), el("th", {}, "Why"), el("th", { class: "num" }, "Entry → exit"), el("th", { class: "num" }, `P/L ${tokens.quote}`))),
+    el("tbody", {}, ...s.trades.map((x) => el("tr", {},
+      el("td", {}, stamp(x.closed)),
+      el("td", {}, x.reason === "take_profit" ? "▲ take profit" : "▼ stop loss"),
+      el("td", { class: "num" }, `${fmt(x.entry_price, 5)} → ${fmt(x.exit_price, 5)}`),
+      el("td", { class: "num" }, plSpan(x.profit))))));
+}
+
+// ---------- settings form ----------
+// `shownConfig` is the saved config the form was built from; the form is "dirty" exactly when
+// the draft differs from it, so Save and Discard only light up when there is something to do.
+let saving = false;
+function updateDirty() {
+  dirty = JSON.stringify(draft) !== shownConfig;
+  $("save").disabled = !dirty || saving;
+  $("discard").disabled = !dirty || saving;
+  if (dirty && !saving) $("message").textContent = "Unsaved changes.";
+}
+function field(id, label, value, spec, onInput) {
+  const input = el("input", { id, type: "number", inputmode: "decimal", step: spec.integer ? "1" : "any", min: spec.low, max: spec.high, value, "aria-describedby": id + "-hint" });
+  input.addEventListener("input", () => { onInput(input.value === "" ? NaN : Number(input.value)); updateDirty(); });
+  return el("div", { class: "field" }, el("label", { for: id }, label), input,
+    el("small", { id: id + "-hint" }, `allowed ${spec.low}–${spec.high}` + (spec.low === 0 ? "; 0 = off" : "")));
+}
+function showSelection() {
+  for (const label of $("strategies").children) {
+    const radio = label.querySelector("input");
+    const on = radio.value === draft.strategy;
+    radio.checked = on;
+    label.classList.toggle("selected", on);
+  }
+}
+function buildStrategies() {
+  // built once and then only updated in place: rebuilding the radios would drop keyboard focus
+  const box = $("strategies");
+  if (box.childElementCount === 0) {
+    box.replaceChildren(...Object.entries(snap.schema.strategies).map(([name, st]) => {
+      const radio = el("input", { type: "radio", name: "strategy", value: name });
+      radio.addEventListener("change", () => { draft.strategy = name; showSelection(); buildParams(); updateDirty(); });
+      return el("label", { class: "strategy" }, radio, el("div", {}, el("b", {}, st.label), el("span", {}, st.about)));
+    }));
+  }
+  showSelection();
+}
+function buildParams() {
+  const st = snap.schema.strategies[draft.strategy];
+  $("params-legend").textContent = st.label + " settings";
+  $("params").replaceChildren(...Object.entries(st.params).map(([key, spec]) =>
+    field(`p-${draft.strategy}-${key}`, spec.label, draft.params[draft.strategy][key], spec,
+      (v) => { draft.params[draft.strategy][key] = v; })));
+  const sc = snap.schema;
+  $("exits").replaceChildren(
+    field("tp", "Take profit: sell when up (%)", draft.take_profit_pct, sc.take_profit_pct, (v) => { draft.take_profit_pct = v; }),
+    field("sl", "Stop loss: sell when down (%)", draft.stop_loss_pct, sc.stop_loss_pct, (v) => { draft.stop_loss_pct = v; }));
+  $("guard").replaceChildren(
+    field("gf", "Big price steps must alternate up/down at least (%); 0 = off", draft.guard_flip_pct, sc.guard_flip_pct, (v) => { draft.guard_flip_pct = v; }),
+    field("gd", "Pause if the average price slid more than (%); 0 = off", draft.guard_drift_pct, sc.guard_drift_pct, (v) => { draft.guard_drift_pct = v; }));
+}
+function buildForm() { buildStrategies(); buildParams(); }
+function loadDraft(config) {
+  shownConfig = JSON.stringify(config);
+  draft = JSON.parse(shownConfig);
+  buildForm();
+  updateDirty();
+}
+function syncForm() {
+  // never overwrite what someone is typing; follow the server only when the form is untouched
+  if (dirty || JSON.stringify(snap.config) === shownConfig) return;
+  loadDraft(snap.config);
+}
+$("reset").addEventListener("click", () => {
+  const sc = snap.schema;
+  // same key order as the server's config, or the dirty check (a JSON string comparison) sees a change
+  draft = { strategy: draft.strategy, take_profit_pct: sc.take_profit_pct.default, stop_loss_pct: sc.stop_loss_pct.default, params: {},
+            guard_flip_pct: sc.guard_flip_pct.default, guard_drift_pct: sc.guard_drift_pct.default };
+  for (const [name, st] of Object.entries(sc.strategies)) {
+    draft.params[name] = Object.fromEntries(Object.entries(st.params).map(([k, p]) => [k, p.default]));
+  }
+  buildForm(); updateDirty();
+});
+$("discard").addEventListener("click", () => { loadDraft(JSON.parse(shownConfig)); $("message").textContent = ""; });
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (saving) return;
+  const msg = $("message");
+  const bad = [draft.take_profit_pct, draft.stop_loss_pct, draft.guard_flip_pct, draft.guard_drift_pct, ...Object.values(draft.params).flatMap((p) => Object.values(p))].some((v) => !Number.isFinite(v));
+  if (bad) { msg.textContent = "Every field needs a number."; return; }
+  const sc = snap.schema;
+  const limits = [["Take profit", draft.take_profit_pct, sc.take_profit_pct], ["Stop loss", draft.stop_loss_pct, sc.stop_loss_pct],
+    ["Guard: alternating steps", draft.guard_flip_pct, sc.guard_flip_pct], ["Guard: price slide", draft.guard_drift_pct, sc.guard_drift_pct]];
+  for (const [name, st] of Object.entries(sc.strategies)) {
+    for (const [key, spec] of Object.entries(st.params)) limits.push([`${st.label}: ${spec.label}`, draft.params[name][key], spec]);
+  }
+  const outside = limits.find(([, v, spec]) => v < spec.low || v > spec.high);
+  if (outside) { msg.textContent = `${outside[0]} must be between ${outside[2].low} and ${outside[2].high}.`; return; }
+  const sent = JSON.stringify(draft);
+  saving = true; updateDirty(); msg.textContent = "Saving…";
+  try {
+    const res = await fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: sent, signal: AbortSignal.timeout(15000) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    epoch++;                                   // a status request still in flight is older than this save
+    snap.config = body.config;                 // show what the server now holds without waiting for a poll
+    saving = false;
+    const typedMore = JSON.stringify(draft) !== sent;
+    shownConfig = JSON.stringify(body.config);
+    if (typedMore) { updateDirty(); } else { loadDraft(body.config); }
+    msg.textContent = "Saved " + new Date().toLocaleTimeString() + ". The bot applies it on its next tick." + (typedMore ? " You have newer unsaved changes." : "");
+    renderCards(snap); drawChart();
+  } catch (err) {
+    saving = false; updateDirty();
+    msg.textContent = "Not saved: " + err.message;
+  }
+});
+
+// ---------- refresh loop ----------
+let busy = false, lastOk = null, epoch = 0;
+async function refresh() {
+  if (busy) return;
+  busy = true;
+  const startedAt = epoch;
+  try {
+    const res = await fetch("/api/status", { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    const next = await res.json();
+    if (startedAt !== epoch) return;          // a save landed while this was in flight: it predates it
+    snap = next; lastOk = new Date();
+    document.body.classList.remove("offline");
+    rememberTokens(snap);
+    renderHeader(snap); renderCards(snap); drawChart(); renderTrades(snap); syncForm();
+  } catch (err) {
+    // keep the last render but make it obvious that it is old
+    document.body.classList.add("offline");
+    const box = $("problems");
+    box.hidden = false;
+    box.replaceChildren(el("p", {}, `⚠ Cannot reach the dashboard server (${err.message}). Showing what it last sent${lastOk ? " at " + lastOk.toLocaleTimeString() : ""}.`));
+    $("updated").textContent = "offline";
+  } finally { busy = false; }
+}
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => snap && drawChart(), 150); });
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

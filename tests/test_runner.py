@@ -1,10 +1,15 @@
+import logging
 import os
 import threading
+import time
 from decimal import Decimal
 
 import pytest
 from web3.exceptions import ContractLogicError, TimeExhausted, Web3RPCError
 
+import control
+import history
+import ledger
 import main as bot_main
 import strategy
 from strategy import Position
@@ -20,23 +25,57 @@ def test_strategy_holds_without_enough_history():
     assert strategy.decide([100.0] * (strategy.WINDOW - 1), RICH) == "hold"
 
 
+NO_GUARD = strategy.Config(guard_flip_pct=0, guard_drift_pct=0)
+
+
 def test_strategy_holds_on_a_flat_market():
-    assert strategy.decide(FLAT, RICH) == "hold"
+    assert strategy.decide(FLAT, RICH, NO_GUARD) == "hold"
 
 
-def test_strategy_buys_a_dip_and_sells_a_spike():
-    assert strategy.decide(FLAT[:-1] + [90.0], RICH) == "buy"
-    assert strategy.decide(FLAT[:-1] + [110.0], RICH) == "sell"
+def test_strategy_buys_a_dip_but_never_sells_a_spike_on_its_own():
+    assert strategy.decide(FLAT[:-1] + [90.0], RICH, NO_GUARD) == "buy"
+    # base the bot did not buy has no entry price, so there is nothing to take profit on
+    assert strategy.decide(FLAT[:-1] + [110.0], RICH, NO_GUARD) == "hold"
 
 
 def test_strategy_small_moves_stay_inside_the_fee_band():
-    assert strategy.decide(FLAT[:-1] + [100.5], RICH) == "hold"
-    assert strategy.decide(FLAT[:-1] + [99.5], RICH) == "hold"
+    assert strategy.decide(FLAT[:-1] + [100.5], RICH, NO_GUARD) == "hold"
+    assert strategy.decide(FLAT[:-1] + [99.5], RICH, NO_GUARD) == "hold"
 
 
-def test_strategy_cannot_trade_what_it_does_not_hold():
-    assert strategy.decide(FLAT[:-1] + [90.0], Position(base=1.0, quote=0.0)) == "hold"
-    assert strategy.decide(FLAT[:-1] + [110.0], Position(base=0.0, quote=1.0)) == "hold"
+def test_strategy_cannot_buy_without_quote():
+    no_quote = Position(base=1.0, quote=0.0)
+    assert strategy.decide(FLAT[:-1] + [90.0], no_quote, NO_GUARD) == "hold"
+
+
+HELD = Position(base=1.0, quote=1.0, entry_price=100.0)
+
+
+def test_strategy_takes_profit_and_stops_loss_from_the_entry_price():
+    assert strategy.decide([103.0], HELD) == "sell"
+    assert strategy.decide([102.9], HELD) == "hold"
+    assert strategy.decide([96.0], HELD) == "sell"
+    assert strategy.decide([96.1], HELD) == "hold"
+
+
+def test_strategy_exits_work_without_a_full_price_history():
+    # right after a restart there are no samples, but a stop loss must still fire
+    assert strategy.decide([90.0], HELD) == "sell"
+
+
+def test_strategy_does_not_buy_more_while_holding():
+    assert (
+        strategy.decide(FLAT[:-1] + [90.0], HELD) == "sell"
+    )  # below the stop loss: exit, not buy
+    assert (
+        strategy.decide(FLAT[:-1] + [98.0], HELD) == "hold"
+    )  # a dip, but inside the band
+
+
+def test_exit_reason():
+    assert strategy.exit_reason(105.0, 100.0) == "take_profit"
+    assert strategy.exit_reason(96.0, 100.0) == "stop_loss"
+    assert strategy.exit_reason(101.0, 100.0) is None
 
 
 # ---------------------------------------------------------------- runner
@@ -48,8 +87,11 @@ class FakeIO:
         self._position = position
         self.eth = eth
         self.trades = []
+        self.attempts = 0  # every call to trade(), including the ones that fail
         self.trade_error = None
         self.read_error = None
+        # what the vault receives: base for a buy, quote for a sell
+        self.received = {"buy": Decimal("0.0001"), "sell": Decimal("0.0105")}
 
     def read_price(self):
         if self.read_error:
@@ -63,9 +105,11 @@ class FakeIO:
         return self.eth
 
     def trade(self, decision, amount):
+        self.attempts += 1
         if self.trade_error:
             raise self.trade_error
         self.trades.append((decision, amount))
+        return self.received[decision]
 
 
 def settings(**kw):
@@ -90,8 +134,13 @@ class Clock:
 
 @pytest.fixture
 def make(tmp_path):
-    def build(io, **kw):
+    def build(io, guard=False, **kw):
         clock = Clock()
+        if not guard:
+            control.save(
+                tmp_path / "logs" / "control.json",
+                strategy.parse_config({"guard_flip_pct": 0, "guard_drift_pct": 0}),
+            )
         runner = bot_main.Runner(
             io,
             settings(**kw),
@@ -99,6 +148,9 @@ def make(tmp_path):
             clock=clock,
             halt_file=tmp_path / "logs" / "HALTED",
             heartbeat_file=tmp_path / "logs" / "heartbeat",
+            ledger_file=tmp_path / "logs" / "ledger.json",
+            control_file=tmp_path / "logs" / "control.json",
+            history_file=tmp_path / "logs" / "prices.csv",
         )
         runner.test_clock = clock
         return runner
@@ -129,17 +181,20 @@ def test_trades_on_a_signal_with_the_configured_size(make):
     assert io.trades == [("buy", Decimal("0.01"))]
 
 
-def test_cooldown_blocks_a_second_trade_until_it_expires(make):
+def test_cooldown_blocks_a_new_entry_until_it_expires(make):
     io = FakeIO([100.0])
     runner = make(io)
     warm_up(runner, io)
     io.prices = [90.0]
-    runner.step()
-    runner.step()
-    assert len(io.trades) == 1
+    runner.step()  # buy at 90
+    io.prices = [80.0]
+    runner.step()  # stop loss: sells at once, the cooldown does not apply to exits
+    assert [t[0] for t in io.trades] == ["buy", "sell"]
+    runner.step()  # still a dip, but the cooldown blocks a new entry
+    assert len(io.trades) == 2
     runner.test_clock.now += 301
     runner.step()
-    assert len(io.trades) == 2
+    assert [t[0] for t in io.trades] == ["buy", "sell", "buy"]
 
 
 def test_skips_when_vault_balance_is_below_trade_size(make):
@@ -344,3 +399,729 @@ def test_cli_rejects_bad_arguments(monkeypatch, argv):
     monkeypatch.setattr("sys.argv", ["main.py", *argv])
     with pytest.raises(SystemExit, match="usage"):
         bot_main.cli()
+
+
+# ---------------------------------------------------------------- positions (TP/SL)
+
+
+def open_a_position(runner, io, price=90.0):
+    warm_up(runner, io)
+    io.prices = [price]
+    runner.step()
+
+
+def test_a_buy_opens_a_position_and_saves_it(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io)
+    held = ledger.load(runner.ledger_file)["open"]
+    assert held["entry_price"] == 90.0
+    assert Decimal(held["base"]) == Decimal(
+        "0.0001"
+    )  # what arrived, not the trade size
+    assert Decimal(held["quote_spent"]) == Decimal("0.01")
+
+
+def test_no_second_buy_while_holding(make):
+    io = FakeIO([100.0])
+    runner = make(io, cooldown_seconds=0)
+    open_a_position(runner, io)
+    for _ in range(5):
+        runner.step()
+    assert len(io.trades) == 1
+
+
+def test_take_profit_sells_exactly_what_was_bought_and_records_the_profit(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [94.6]  # +5.1% over the 90.0 entry
+    runner.step()
+    assert io.trades[-1] == ("sell", Decimal("0.0001"))
+    saved = ledger.load(runner.ledger_file)
+    assert saved["open"] is None
+    (trade,) = saved["closed"]
+    assert trade["reason"] == "take_profit"
+    assert ledger.profit(trade) == Decimal("0.0005")  # 0.0105 back for 0.01 spent
+
+
+def test_stop_loss_sells_and_records_the_loss(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [85.0]  # -5.6%
+    io.received["sell"] = Decimal("0.0096")
+    runner.step()
+    (trade,) = ledger.load(runner.ledger_file)["closed"]
+    assert trade["reason"] == "stop_loss"
+    assert ledger.profit(trade) == Decimal("-0.0004")
+
+
+def test_nothing_happens_inside_the_band(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [92.0]
+    runner.step()
+    assert len(io.trades) == 1
+    assert ledger.load(runner.ledger_file)["open"] is not None
+
+
+def test_the_position_survives_a_restart_and_exits_without_a_warm_up(make):
+    io = FakeIO([100.0])
+    first = make(io)
+    open_a_position(first, io, 90.0)
+
+    io2 = FakeIO(
+        [86.0]
+    )  # a fresh process: no price history, price already below the stop
+    second = make(io2)
+    second.step()
+    assert io2.trades == [("sell", Decimal("0.0001"))]
+
+
+def test_a_failed_exit_waits_for_the_cooldown_before_trying_again(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [80.0]
+    io.trade_error = ContractLogicError("STF")
+    runner.step()  # the stop loss fails once
+    runner.step()  # not hammered: cooldown after a failure
+    io.trade_error = None
+    assert runner.trade_failures == 1
+    assert len(io.trades) == 1
+    runner.test_clock.now += 301
+    runner.step()
+    assert io.trades[-1][0] == "sell"
+    assert ledger.load(runner.ledger_file)["open"] is None
+
+
+def test_an_exit_is_skipped_while_the_vault_lacks_the_base(make):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1.0))
+    runner = make(io)
+    runner.ledger = ledger.open_position(
+        ledger.empty(), 90.0, Decimal("0.0001"), Decimal("0.01"), 0
+    )
+    io.prices = [80.0]
+    runner.step()
+    assert io.trades == []
+
+
+def test_a_float_balance_a_hair_under_the_recorded_amount_still_sells(make):
+    io = FakeIO([80.0], position=Position(base=0.0001 - 1e-15, quote=1.0))
+    runner = make(io)
+    runner.ledger = ledger.open_position(
+        ledger.empty(), 90.0, Decimal("0.0001"), Decimal("0.01"), 0
+    )
+    runner.step()
+    assert io.trades == [("sell", Decimal("0.0001"))]
+
+
+def test_a_buy_that_delivers_nothing_halts(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    warm_up(runner, io)
+    io.prices = [90.0]
+    io.received["buy"] = Decimal(0)
+    with pytest.raises(bot_main.Halt, match="received nothing"):
+        runner.step()
+
+
+def test_an_unreadable_ledger_halts_instead_of_starting_over(make, tmp_path):
+    path = tmp_path / "logs" / "ledger.json"
+    path.parent.mkdir()
+    path.write_text("{not json")
+    runner = make(FakeIO([100.0]))
+    runner.run()
+    assert "unreadable" in runner.halt_file.read_text()
+    assert runner.io.prices == [100.0]  # never ticked
+
+
+def test_dry_run_and_live_use_different_ledger_files():
+    assert ledger.file_for(True) != ledger.file_for(False)
+
+
+# ---------------------------------------------------------------- ChainIO.trade
+
+VAULT = "0x" + "aa" * 20
+POOL = "0x" + "bb" * 20
+BASE_ADDRESS = "0x" + "11" * 20
+QUOTE_ADDRESS = "0x" + "22" * 20
+
+
+def transfer_log(token, to, amount, topic=bot_main.TRANSFER_TOPIC):
+    pad = lambda address: bytes.fromhex(address[2:]).rjust(32, b"\0")
+    return {
+        "address": token,
+        "topics": [topic, pad(POOL), pad(to)],
+        "data": amount.to_bytes(32, "big"),
+    }
+
+
+def receipt_with(*logs):
+    return {"status": 1, "logs": list(logs)}
+
+
+class _Call:
+    def __init__(self, value):
+        self.value = value
+
+    def call(self):
+        return self.value
+
+
+class _FakePool:
+    def __init__(self, token0):
+        self.functions = self
+        self._token0 = token0
+
+    def token0(self):
+        return _Call(self._token0)
+
+
+class _FakeBot:
+    address = VAULT
+
+    def __init__(self, cap):
+        self.functions = self
+        self.cap = cap
+
+    def tokenCap(self, token):
+        return _Call(self.cap)
+
+
+BASE = (BASE_ADDRESS, 18, "fETH")
+QUOTE = (QUOTE_ADDRESS, 6, "f564")
+
+
+def make_chain_io(monkeypatch, dry_run, receipt=None, too_large=False, cap=10**30):
+    market = {
+        "pool": _FakePool(BASE_ADDRESS),
+        "fee": 3000,
+        "tokens": {"feth": BASE, "f564": QUOTE},
+    }
+    io = bot_main.ChainIO(None, None, _FakeBot(cap), market, settings(dry_run=dry_run))
+    quote = {"amount_out": 5_000_000, "too_large": too_large}
+    monkeypatch.setattr(bot_main.config, "get_quote", lambda *a: quote)
+    sent = []
+
+    def fake_swap(*args):
+        sent.append(args)
+        return None if dry_run else receipt
+
+    monkeypatch.setattr(bot_main.bot_contract, "swap_via_contract", fake_swap)
+    return io, sent
+
+
+def test_received_from_receipt_counts_only_the_vaults_transfers_of_that_token():
+    other_topic = bytes(32)
+    receipt = receipt_with(
+        transfer_log(BASE_ADDRESS, VAULT, 3 * 10**15),
+        transfer_log(
+            BASE_ADDRESS, VAULT, 10**15
+        ),  # a second leg into the vault adds up
+        transfer_log(BASE_ADDRESS, "0x" + "cc" * 20, 99),  # someone else's tokens
+        transfer_log(QUOTE_ADDRESS, VAULT, 77),  # another token
+        transfer_log(BASE_ADDRESS, VAULT, 5, topic=other_topic),  # not a Transfer event
+    )
+    assert bot_main.received_from_receipt(receipt, BASE_ADDRESS, VAULT) == 4 * 10**15
+    assert bot_main.received_from_receipt(receipt, "0x" + "33" * 20, VAULT) == 0
+    assert bot_main.received_from_receipt(receipt_with(), BASE_ADDRESS, VAULT) == 0
+
+
+def test_received_from_receipt_ignores_case_in_addresses():
+    receipt = receipt_with(transfer_log(BASE_ADDRESS.upper(), VAULT.upper(), 5))
+    assert bot_main.received_from_receipt(receipt, BASE_ADDRESS.lower(), VAULT) == 5
+
+
+def test_chain_io_live_buy_returns_the_base_that_the_receipt_shows(monkeypatch):
+    receipt = receipt_with(transfer_log(BASE_ADDRESS, VAULT, 3 * 10**15))
+    io, sent = make_chain_io(monkeypatch, False, receipt)
+    assert io.trade("buy", Decimal("0.01")) == Decimal("0.003")
+    assert len(sent) == 1
+
+
+def test_chain_io_live_sell_returns_the_quote_that_the_receipt_shows(monkeypatch):
+    receipt = receipt_with(transfer_log(QUOTE_ADDRESS, VAULT, 5_500_000))
+    io, _ = make_chain_io(monkeypatch, False, receipt)
+    assert io.trade("sell", Decimal("0.001")) == Decimal("5.5")
+
+
+def test_chain_io_dry_run_uses_the_quoted_output(monkeypatch):
+    io, _ = make_chain_io(monkeypatch, True)
+    assert io.trade("buy", Decimal("0.01")) == Decimal("5e-12")
+
+
+def test_chain_io_refuses_a_too_large_impact_before_sending(monkeypatch):
+    io, sent = make_chain_io(monkeypatch, False, too_large=True)
+    with pytest.raises(bot_main.Skip):
+        io.trade("buy", Decimal("0.01"))
+    assert sent == []
+
+
+def test_a_buy_whose_base_could_exceed_the_contract_cap_is_refused(monkeypatch):
+    # the sell would have to trade more base than the contract allows per swap: never open it
+    io, sent = make_chain_io(
+        monkeypatch, False, cap=5_000_000
+    )  # quoted out is 5_000_000
+    with pytest.raises(bot_main.Skip, match="per-swap cap"):
+        io.trade("buy", Decimal("0.01"))
+    assert sent == []
+
+
+def test_the_cap_guard_applies_to_buys_only(monkeypatch):
+    receipt = receipt_with(transfer_log(QUOTE_ADDRESS, VAULT, 5_500_000))
+    io, _ = make_chain_io(monkeypatch, False, receipt, cap=1)
+    assert io.trade("sell", Decimal("0.001")) == Decimal("5.5")
+
+
+def test_a_connection_error_before_sending_is_not_sent_and_not_a_halt(monkeypatch):
+    io, sent = make_chain_io(monkeypatch, False)
+
+    def down(*a):
+        raise ConnectionError("rpc down")
+
+    monkeypatch.setattr(bot_main.config, "get_quote", down)
+    with pytest.raises(bot_main.bot_contract.NotSent):
+        io.trade("buy", Decimal("0.01"))
+    assert sent == []
+
+
+# ---------------------------------------------------------------- failures around the send
+
+
+def armed_runner(make, io, **kw):
+    runner = make(io, **kw)
+    warm_up(runner, io)
+    io.prices = [90.0]
+    return runner
+
+
+def test_a_swap_that_was_not_sent_is_neither_a_failure_nor_a_halt(make):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io)
+    io.trade_error = bot_main.bot_contract.NotSent("rpc blip")
+    runner.step()
+    assert runner.trade_failures == 0
+    assert not runner.halt_file.exists()
+    assert ledger.load(runner.ledger_file)["open"] is None
+
+
+def test_a_swap_that_may_be_on_chain_halts_and_is_never_retried(make):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io, cooldown_seconds=0)
+    io.trade_error = bot_main.bot_contract.SentUnknown("receipt poll failed")
+    with pytest.raises(bot_main.Halt, match="may be on chain"):
+        runner.step()
+    assert len(io.trades) == 0
+
+
+def test_run_writes_the_halt_file_for_an_unknown_outcome(make):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io, cooldown_seconds=0, poll_seconds=0)
+    io.trade_error = bot_main.bot_contract.SentUnknown("receipt poll failed")
+    runner.run()
+    assert "may be on chain" in runner.halt_file.read_text()
+
+
+def test_a_ledger_that_cannot_be_saved_halts_with_the_numbers_to_fix_it(
+    make, monkeypatch
+):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io)
+
+    def disk_full(*a):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(ledger, "save", disk_full)
+    with pytest.raises(bot_main.Halt) as halted:
+        runner.step()
+    text = str(halted.value)
+    assert "could not be saved" in text and "0.0001" in text and "0.01" in text
+
+
+def test_an_unreadable_operator_balance_skips_the_trade_instead_of_crashing(make):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io)
+
+    def down():
+        raise ConnectionError("rpc down")
+
+    io.operator_eth = down
+    runner.step()
+    assert io.trades == []
+
+
+def test_a_skipped_exit_is_logged_as_a_warning(make, caplog):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [80.0]
+    io.trade_error = bot_main.Skip("price impact too large")
+    runner.step()
+    skipped = [r for r in caplog.records if "sell skipped" in r.message]
+    assert skipped and skipped[0].levelname == "WARNING"
+
+
+def test_a_skipped_entry_is_only_info(make, caplog):
+    caplog.set_level(logging.INFO)
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io)
+    io.trade_error = bot_main.Skip("price impact too large")
+    runner.step()
+    skipped = [r for r in caplog.records if "buy skipped" in r.message]
+    assert skipped and skipped[0].levelname == "INFO"
+
+
+# ---------------------------------------------------------------- settings changed while running
+
+
+def write_settings(runner, **raw):
+    # the guard is off unless a test asks for it: most tests are about trading, not the guard
+    raw = {"guard_flip_pct": 0, "guard_drift_pct": 0, **raw}
+    control.save(runner.control_file, strategy.parse_config(raw))
+
+
+def test_new_settings_are_picked_up_on_the_next_tick(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [91.5]  # +1.7%: inside the default band
+    runner.step()
+    assert len(io.trades) == 1
+    write_settings(runner, take_profit_pct=1.5)
+    runner.step()
+    assert io.trades[-1][0] == "sell"
+    assert runner.cfg.take_profit_pct == 1.5
+
+
+def test_switching_strategy_changes_what_triggers_a_buy(make):
+    io = FakeIO([100.0])
+    runner = make(io, cooldown_seconds=0)
+    warm_up(runner, io)
+    write_settings(runner, strategy="breakout")
+    io.prices = [90.0]  # a dip: mean reversion would buy, a breakout strategy must not
+    runner.step()
+    assert io.trades == []
+    io.prices = [105.0]
+    runner.step()
+    assert io.trades == [("buy", Decimal("0.01"))]
+
+
+def test_an_invalid_settings_file_keeps_the_current_settings(make, caplog):
+    io = FakeIO([100.0])
+    runner = make(io)
+    write_settings(runner, strategy="rsi")
+    runner.step()
+    assert runner.cfg.strategy == "rsi"
+    runner.control_file.write_text('{"strategy": "yolo"}')
+    runner.step()
+    assert runner.cfg.strategy == "rsi"  # unchanged, and the bot kept running
+    assert any(
+        "ignoring the settings file, keeping the current ones" in r.message
+        for r in caplog.records
+    )
+    assert not runner.halt_file.exists()
+
+
+def test_no_settings_file_means_defaults(make):
+    runner = make(
+        FakeIO([100.0]), guard=True
+    )  # guard=True: no settings file is written
+    runner.step()
+    assert runner.cfg == strategy.DEFAULT
+
+
+def test_settings_are_loaded_when_the_runner_starts(make):
+    first = make(FakeIO([100.0]), guard=True)
+    write_settings(first, strategy="bollinger", stop_loss_pct=2.0)
+    second = make(FakeIO([100.0]), guard=True)  # keeps the file the first one wrote
+    assert (second.cfg.strategy, second.cfg.stop_loss_pct) == ("bollinger", 2.0)
+
+
+def test_saving_the_same_settings_again_is_not_logged_as_a_change(make, caplog):
+    caplog.set_level(logging.INFO)
+    runner = make(FakeIO([100.0]), guard=True)
+    write_settings(runner, strategy="rsi")
+    runner.step()
+    write_settings(runner, strategy="rsi")  # a new file, identical settings
+    runner.step()
+    assert sum("settings changed" in r.message for r in caplog.records) == 1
+
+
+def test_each_tick_appends_a_price_to_the_history(make):
+    io = FakeIO([100.0, 101.0, 102.5])
+    runner = make(io)
+    for _ in range(3):
+        runner.step()
+    prices = [p for _, p in history.tail(runner.history_file, 10)]
+    assert prices == [100.0, 101.0, 102.5]
+
+
+def test_a_failed_read_records_no_price(make):
+    io = FakeIO([100.0])
+    io.read_error = ConnectionError("down")
+    runner = make(io)
+    runner.step()
+    assert history.tail(runner.history_file, 10) == []
+
+
+def test_a_history_write_failure_does_not_stop_the_bot(make, monkeypatch):
+    def fail(*a):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(history, "append", fail)
+    runner = make(FakeIO([100.0]))
+    runner.step()
+    assert len(runner.prices) == 1
+
+
+# ---------------------------------------------------------------- settings edge cases
+
+
+def test_an_invalid_settings_file_at_start_says_the_defaults_are_used(
+    make, tmp_path, caplog
+):
+    path = tmp_path / "logs" / "control.json"
+    path.parent.mkdir()
+    path.write_text('{"strategy": "yolo"}')
+    runner = make(FakeIO([100.0]), guard=True)
+    assert runner.cfg == strategy.DEFAULT
+    assert any(
+        "using the defaults until it is fixed" in r.message for r in caplog.records
+    )
+
+
+def test_a_settings_file_that_cannot_be_read_keeps_the_current_settings(make, caplog):
+    io = FakeIO([100.0])
+    runner = make(io)
+    write_settings(runner, strategy="rsi")
+    runner.step()
+    runner.control_file.unlink()
+    runner.control_file.mkdir()  # reading a directory raises an OSError, not a ValueError
+    runner.step()  # must not crash
+    assert runner.cfg.strategy == "rsi"
+
+
+def test_the_runner_uses_the_dry_run_ledger_file_in_dry_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(ledger, "LOG_DIR", tmp_path)
+    dry = bot_main.Runner(FakeIO([100.0]), settings(dry_run=True), threading.Event())
+    live = bot_main.Runner(FakeIO([100.0]), settings(dry_run=False), threading.Event())
+    assert dry.ledger_file.name == "ledger_dryrun.json"
+    assert live.ledger_file.name == "ledger.json"
+
+
+# ---------------------------------------------------------------- promises the docs make
+
+
+def test_a_failed_buy_waits_for_the_cooldown_before_the_next_attempt(make):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io)
+    io.trade_error = ContractLogicError("STF")
+    runner.step()
+    runner.step()
+    assert io.attempts == 1  # the broken swap is not hammered
+    runner.test_clock.now += 301
+    runner.step()
+    assert io.attempts == 2
+
+
+def test_a_skipped_buy_also_starts_the_cooldown(make):
+    io = FakeIO([100.0])
+    runner = armed_runner(make, io)
+    io.trade_error = bot_main.Skip("price impact too large")
+    runner.step()
+    runner.step()
+    assert io.attempts == 1
+    runner.test_clock.now += 301
+    runner.step()
+    assert io.attempts == 2
+
+
+def test_the_log_lines_the_docs_point_to_exist(make, caplog):
+    caplog.set_level(logging.INFO)
+    io = FakeIO([100.0])
+    runner = make(io)
+    write_settings(runner, strategy="mean_reversion", stop_loss_pct=2.0)
+    open_a_position(runner, io, 90.0)
+    io.prices = [80.0]
+    runner.step()
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "settings changed" in text
+    assert "opened position:" in text
+    assert "closed position (stop_loss)" in text
+    assert "strategy=mean_reversion price=" in text and "decision=" in text
+
+
+@pytest.mark.parametrize(
+    ("value", "dry"),
+    [
+        ("false", False),
+        ("False", False),
+        ("FALSE", False),
+        ("true", True),
+        ("", True),
+        ("no", True),
+        ("0", True),
+        ("fasle", True),
+    ],
+)
+def test_only_the_word_false_turns_dry_run_off(monkeypatch, value, dry):
+    monkeypatch.setenv("MAX_TRADE_AMOUNT", "0.01")
+    monkeypatch.setenv("DRY_RUN", value)
+    assert bot_main.Settings.from_env().dry_run is dry
+
+
+def test_the_bot_refuses_to_start_while_the_halt_file_exists(
+    tmp_path, monkeypatch, caplog
+):
+    halt = tmp_path / "HALTED"
+    halt.write_text("2026-11-04 10:00:00 3 failed trades in a row\n")
+    monkeypatch.setattr(bot_main, "HALT_FILE", halt)
+    monkeypatch.setattr(bot_main, "load_dotenv", lambda: None)
+    monkeypatch.setattr(bot_main, "setup_logging", lambda: None)
+
+    def must_not_connect():
+        raise AssertionError("connected although the bot is halted")
+
+    monkeypatch.setattr(bot_main.bot_contract, "connect", must_not_connect)
+    bot_main.main()
+    assert any("Not starting" in r.getMessage() for r in caplog.records)
+    assert halt.exists()  # only a person removes it
+
+
+# ---------------------------------------------------------------- the pattern guard and restarts
+
+
+def test_the_runner_says_when_buying_pauses_and_resumes(make, caplog):
+    caplog.set_level(logging.INFO)
+    io = FakeIO([100.0])
+    runner = make(io, guard=True)
+    runner.step()
+    runner.step()
+    assert (
+        sum("new buys are paused" in r.message for r in caplog.records) == 1
+    )  # not every tick
+    # an alternating pattern: 4% steps up and down, a few quiet samples between
+    pattern = []
+    price = 100.0
+    for d in [1, -1] * 5:
+        price *= 1.04 if d > 0 else 1 / 1.04
+        pattern += [price] * 3
+    for p in pattern:
+        io.prices = [p]
+        runner.step()
+    assert any("new buys are allowed again" in r.message for r in caplog.records)
+
+
+def test_a_fresh_price_history_is_restored_after_a_restart(make):
+    first = make(FakeIO([100.0]))
+    for _ in range(3):
+        first.step()
+    second = make(FakeIO([100.0]))
+    assert list(second.prices) == [100.0, 100.0, 100.0]
+
+
+def test_a_stale_price_history_is_not_carried_over(make, monkeypatch):
+    first = make(FakeIO([100.0]))
+    first.step()
+    real = time.time()
+    monkeypatch.setattr(
+        bot_main.time, "time", lambda: real + bot_main.PRELOAD_MAX_AGE + 60
+    )
+    second = make(FakeIO([100.0]))
+    assert list(second.prices) == []
+
+
+def alternating(steps=10, quiet=3):
+    # 4% jumps up and down with a few quiet samples between: the pool's pattern
+    prices, price = [], 100.0
+    for d in [1, -1] * (steps // 2):
+        price *= 1.04 if d > 0 else 1 / 1.04
+        prices += [price] * quiet
+    return prices
+
+
+def feed(runner, io, prices):
+    for p in prices:
+        io.prices = [p]
+        runner.step()
+
+
+def test_with_the_guard_on_a_healthy_pattern_still_buys_a_dip(make):
+    io = FakeIO([100.0])
+    runner = make(io, guard=True)
+    feed(runner, io, alternating())
+    assert io.trades == []
+    io.prices = [runner.prices[-1] * 0.9]  # a real dip
+    runner.step()
+    assert [side for side, _ in io.trades] == ["buy"]
+
+
+def test_with_the_guard_on_a_downtrend_blocks_the_buy_and_says_so(make, caplog):
+    caplog.set_level(logging.INFO)
+    io = FakeIO([100.0])
+    runner = make(io, guard=True)
+    prices, price = [], 100.0
+    for _ in range(10):  # ten big drops in a row
+        price /= 1.04
+        prices += [price] * 3
+    feed(runner, io, prices)
+    io.prices = [price * 0.9]  # the entry rule would buy this dip
+    runner.step()
+    assert io.trades == []
+    assert any("new buys are paused" in r.message for r in caplog.records)
+
+
+def hold(runner, price=100.0):
+    # a position the bot already holds, without going through a buy (the guard would block it)
+    runner.ledger = ledger.open_position(
+        ledger.empty(), price, Decimal("0.0001"), Decimal("0.01"), 0
+    )
+
+
+def test_a_stop_loss_is_never_held_back_by_the_guard(make):
+    io = FakeIO([100.0])
+    runner = make(io, guard=True)
+    hold(runner)
+    io.prices = [80.0]  # far below the stop loss, and the guard has seen nothing
+    runner.step()
+    assert io.trades[-1][0] == "sell"
+
+
+def test_a_slow_slide_logs_the_pause_once_not_every_tick(make, caplog):
+    caplog.set_level(logging.INFO)
+    io = FakeIO([100.0])
+    runner = make(io, guard=True)
+    feed(runner, io, alternating())
+    price = runner.prices[-1]
+    for _ in range(120):  # a slide of 0.3% per tick: the reason text changes every tick
+        price *= 0.997
+        feed(runner, io, [price])
+    paused = [r for r in caplog.records if "new buys are paused" in r.message]
+    assert len(paused) <= 3  # once per check that pauses, never once per tick
+
+
+def test_nothing_is_logged_about_the_guard_while_holding_a_position(make, caplog):
+    caplog.set_level(logging.INFO)
+    io = FakeIO([100.0])
+    runner = make(io, guard=True)
+    hold(runner)
+    caplog.clear()
+    io.prices = [100.5]
+    runner.step()
+    assert not any("new buys are" in r.message for r in caplog.records)
+
+
+def test_prices_are_restored_only_from_an_unbroken_recent_stretch(make, tmp_path):
+    path = tmp_path / "logs" / "prices.csv"
+    path.parent.mkdir(exist_ok=True)
+    now = time.time()
+    # an old burst, a two day gap, then a recent run
+    old = [(now - 200_000 + 30 * i, 50.0) for i in range(5)]
+    recent = [(now - 150 + 30 * i, 100.0 + i) for i in range(5)]
+    for ts, price in old + recent:
+        history.append(path, ts, price)
+    runner = make(FakeIO([100.0]))
+    assert list(runner.prices) == [100.0, 101.0, 102.0, 103.0, 104.0]
