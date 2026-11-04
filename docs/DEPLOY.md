@@ -44,7 +44,7 @@ Order of work: Infura key and MetaMask → prepare the server → bot wallet and
 
 1. Sign in at <https://app.infura.io>, create an API key, and make sure the **Sepolia** network is enabled for it (menu names may change; you want the HTTPS endpoint).
 2. The URL looks like `https://sepolia.infura.io/v3/<your-key>`. **The key is part of the URL, so the URL is a secret.** It goes in `.env` as `RPC_URL`, never in git, chat or screenshots. The bot also redacts it from its logs and from `logs/HALTED`.
-3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan.
+3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. An open **dashboard** tab adds about 12 calls every 15 seconds (roughly 70,000 a day): close the tab when you are not watching if the quota is tight. `pool_monitor.py` scans add more.
 
 ### 1.2 MetaMask (your own computer)
 
@@ -71,6 +71,12 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 
 # a dedicated, login-less user for the bot
 sudo adduser --disabled-password --gecos "" tradingbot
+
+# let that user receive files over ssh/rsync/scp with the same key you log in with
+sudo mkdir -p /home/tradingbot/.ssh
+sudo cp ~/.ssh/authorized_keys /home/tradingbot/.ssh/
+sudo chown -R tradingbot:tradingbot /home/tradingbot/.ssh
+sudo chmod 700 /home/tradingbot/.ssh
 ```
 
 SSH hygiene: log in with SSH keys and turn password login off, after you have **tested** that your key works (a mistake here can lock you out):
@@ -117,6 +123,8 @@ source .venv/bin/activate         # from here on, plain `python` is the project'
 
 ### 1.5 Create the bot wallet and `.env` (on the server)
 
+> **Already deployed from your laptop** (GETTING_STARTED steps 1-8)? Skip this section. The contract's operator is the bot wallet whose key is in your laptop's `.env`, so copy that `.env` (and `abis/trading_bot.json`) to the server with `scp`, `chmod 600 .env`, and use the same key there. A new key here would not be the operator and `main.py` would refuse to start (unless the owner sends `setOperator`, section 5).
+
 This generates a brand-new key, writes it into `.env`, and prints **only the address**. The key is never shown on screen.
 
 ```bash
@@ -144,7 +152,7 @@ Now edit `.env` (`nano .env`):
 |---|---|
 | `RPC_URL` | your Infura Sepolia URL from 1.1 |
 | `OWNER_ADDRESS` | your enrolled wallet, copied from MetaMask |
-| `MAX_TRADE_AMOUNT` | one swap's size in human units, e.g. `0.01`. It is also the **on-chain cap** per swap |
+| `MAX_TRADE_AMOUNT` | size of one **buy** in human units of the token being spent (f564), e.g. `0.01`; a sell closes exactly what that buy delivered. It is also the **on-chain cap** per swap, in each token's own units |
 | `DRY_RUN` | leave `true` for now |
 | `BOT_CONTRACT_ADDRESS` | leave **empty**; filled in after deploying |
 
@@ -346,7 +354,9 @@ Then do the one-hour dry run in section 3, and section 4.
 
 ### 3.1 What `main.py` does
 
-Every `POLL_SECONDS` (default 30): read the pool price and the vault's balances → ask `strategy.decide()` for `buy`, `sell` or `hold` → on a signal, check the cooldown, the vault balance, the operator's gas and the price impact, then swap through the contract.
+Every `POLL_SECONDS` (default 30): reload `logs/control.json` if it changed → read the pool price and the vault's balances → ask `strategy.decide()` for `buy`, `sell` or `hold` → on a signal, check the cooldown, the vault balance, the operator's gas and the price impact, then swap through the contract → record the position in `logs/ledger.json`.
+
+While the bot holds nothing, the chosen **strategy** decides when to buy. Once it holds something it bought, only the **take profit** and **stop loss** decide when to sell it, and it sells exactly what it bought. Both are set on the dashboard (see [GETTING_STARTED.md](GETTING_STARTED.md)); a dry run keeps its own paper ledger (`logs/ledger_dryrun.json`).
 
 | Situation | What the bot does |
 |---|---|
@@ -354,14 +364,16 @@ Every `POLL_SECONDS` (default 30): read the pool price and the vault's balances 
 | A swap fails 3 times in a row (`MAX_TRADE_FAILURES`) | **halts**: writes `logs/HALTED` and exits cleanly |
 | No receipt before the timeout, or the connection drops while sending | **halts** at once: the swap may still land, so it won't guess or resend |
 | Operator ETH below `MIN_OPERATOR_ETH` | skips trading and warns until you refill it |
-| Cooldown (`COOLDOWN_SECONDS`) since the last trade | skips |
+| Cooldown (`COOLDOWN_SECONDS`) since the last trade | skips a new buy; an exit right after a successful buy is not delayed, one after a failed attempt waits |
+| `logs/ledger*.json` unreadable | **halts**: it will not guess whether it holds a position |
+| `logs/control.json` invalid | keeps the settings it had and logs `ignoring the settings file` |
 | SIGTERM / Ctrl+C | finishes the current tick (even a swap waiting for its receipt), then exits |
 | Started while `logs/HALTED` exists | refuses to start and prints the reason |
 | Unhandled error | logs it (secrets redacted), exits non-zero so systemd restarts it |
 
 A halted bot exits with status 0 on purpose, so systemd does **not** restart it. After you fix the cause, delete `logs/HALTED`.
 
-> **The strategy is a placeholder.** `strategy.py` is a simple moving-average rule so the loop can run end to end. It needs 20 price samples (about 10 minutes at the default poll) and a 2% move, and a small testnet pool may rarely move that much. Replace `decide()` with your own and unit-test it. Fees are 0.3% each way, so keep thresholds well above 0.6%.
+> **The strategies are placeholders.** `strategy.py` has six simple entry rules (mean reversion, Bollinger bands, RSI, sharp drop, breakout, moving-average cross) so the loop can run end to end and you can compare styles. The default needs 20 price samples (about 10 minutes at the default poll) and a 2% dip, and a small testnet pool may rarely move that much. Replace or add your own and unit-test it. Fees are 0.3% each way, so keep thresholds well above 0.6%. The take profit cannot be set below 1% for that reason.
 
 ### 3.2 Run it in the foreground
 
@@ -374,16 +386,21 @@ Healthy output:
 
 ```
 INFO Started. contract=0x… operator=0x… dry_run=True
-INFO price=1054.267260 decision=hold base=0.500000 quote=100.000000 samples=1
+INFO poll=30s cooldown=300s trade size=0.01 min ETH=0.01
+INFO strategy=mean_reversion take profit +3% stop loss -4% (change it on the dashboard or in control.json)
+WARNING new buys are paused: seen only 0 of the 8 big price steps needed to judge the pattern
+INFO strategy=mean_reversion price=1054.267260 decision=hold base=0.500000 quote=100.000000 samples=1
 ```
+
+The `WARNING` is the pattern guard (see [GETTING_STARTED, the pattern guard](GETTING_STARTED.md#the-pattern-guard)); it is normal on a fresh start.
 
 Let it run an hour or more. On Sepolia Etherscan the **bot wallet must show zero new transactions** (a dry run sends nothing). Ctrl+C should print `Stopped.`.
 
-Logs go to the screen and to `logs/bot.log` (rotated at 5 MB, 3 old files kept). `logs/heartbeat` holds the time of the last completed tick.
+Logs go to the screen and to `logs/bot.log` (rotated at 5 MB, 3 old files kept). `logs/heartbeat` holds the time of the last completed tick. A paper position, once opened, shows as `opened position: …` and later `closed position (take_profit) …`; `python status.py` summarises them.
 
 ### 3.3 Going live
 
-Set `DRY_RUN=false` with a small `MAX_TRADE_AMOUNT`, and watch the first trades in `logs/bot.log` and on Etherscan before leaving it alone.
+Set `DRY_RUN=false` with a small `MAX_TRADE_AMOUNT`, restart the bot **and the dashboard** (it reads `DRY_RUN` at start-up), and watch the first trades in `logs/bot.log`, on the dashboard and on Etherscan before leaving it alone. Live trades use their own ledger (`logs/ledger.json`); dry-run results stay in `logs/ledger_dryrun.json`.
 
 ---
 
@@ -446,6 +463,8 @@ journalctl -u trading-bot -f                  # live log (also in ~/bot/logs/bot
 journalctl -u trading-bot --since "1 hour ago"
 sudo systemctl restart trading-bot
 sudo systemctl stop trading-bot               # graceful
+systemctl status trading-bot-dashboard        # the optional dashboard service (4.4)
+sudo systemctl restart trading-bot-dashboard  # after code updates or editing .env
 sudo systemctl disable trading-bot            # don't start at boot
 ```
 
@@ -462,11 +481,31 @@ find logs/heartbeat -mmin +5 | grep -q . && echo "STALE: bot not ticking"
 
 `python bot_contract.py status` also prints the operator wallet's ETH. When it drops below `MIN_OPERATOR_ETH` the bot stops trading and warns in the log, so top it up.
 
+For the bot's own position and profit and loss, run `python status.py` (read-only, needs `RPC_URL`, `POOL_ADDRESS` and `BOT_CONTRACT_ADDRESS`, no private key). The same, with a chart and a form to change strategy and take profit / stop loss, is the **dashboard**:
+
+```bash
+python dashboard.py                    # listens on 127.0.0.1:8765 only
+# from your laptop:  ssh -L 8765:127.0.0.1:8765 user@server    then open http://localhost:8765
+```
+
+Never open its port in the firewall: it has no login and can change the bot's strategy. It refuses requests whose `Host` or `Origin` is not `localhost`/`127.0.0.1`, and it can never change `DRY_RUN`, the trade size, an address or a key. To keep it running, install `deploy/trading-bot-dashboard.service` the same way as the bot's unit (4.1); it must run as the same user as the bot. Restart it after changing `DRY_RUN` in `.env`. Full tour: [GETTING_STARTED.md](GETTING_STARTED.md).
+
+To see what the *pool* is doing (price, how many other bots are trading, who is new), use the read-only pool monitor. It needs only `RPC_URL` and `POOL_ADDRESS` (no private key) and sends nothing:
+
+```bash
+python pool_monitor.py                     # last 24h, once
+python pool_monitor.py --hours 6           # a shorter window
+python pool_monitor.py --watch 300         # refresh every 5 minutes, announce new actors
+```
+
+An "actor" is a swap recipient (the vault or wallet that receives the tokens). Each row shows its swaps, buys, sells, net base token, how often it trades and when it last did. `scripted?` marks an actor whose gaps between swaps are very regular, `YOU` marks `BOT_CONTRACT_ADDRESS`, and `NEW` marks an address not seen in an earlier run (the first run only records a baseline). Seen addresses are kept in `logs/monitor_seen.json`. It reads Swap logs in chunks, so a long window costs more RPC quota; with Infura prefer `--hours 24` or less.
+
 ### 4.5 After a halt
 
 1. `cat ~/bot/logs/HALTED` and read the reason.
 2. If it mentions "no receipt" or "may have been sent", look at the bot wallet's pending transactions on Etherscan first, and only continue when none is pending.
-3. Fix the cause, then `rm ~/bot/logs/HALTED` and `sudo systemctl restart trading-bot`.
+3. If a **buy** may have landed before the halt, the vault can hold base the bot has no record of (the position is written right after the trade is confirmed). Compare `python bot_contract.py status` with `python status.py`; base the ledger does not know about is never sold by the bot, so sell it by hand or withdraw it (section 5).
+4. Fix the cause, then `rm ~/bot/logs/HALTED` and `sudo systemctl restart trading-bot`.
 
 ### 4.6 Updating
 
@@ -475,9 +514,10 @@ sudo systemctl stop trading-bot
 # on your computer: rsync as in 1.4 (or `git pull` on the server), then on the server:
 cd ~/bot && uv sync --frozen --no-dev
 sudo systemctl start trading-bot
+sudo systemctl restart trading-bot-dashboard   # if you run it: it loads the strategy list at start-up
 ```
 
-Run `uv run pytest` on your own computer before copying. A change to `strategy.py` needs only the copy and a restart. A change to the Solidity means a **new contract** (a deployed contract can't be edited): clear `BOT_CONTRACT_ADDRESS`, deploy, `withdraw` from the old one, re-fund, and re-link on the platform.
+Run `uv run pytest` on your own computer before copying. A change to `strategy.py` needs only the copy and a restart. Your dashboard settings (`logs/control.json`), the position and history (`logs/ledger*.json`) and `logs/prices.csv` live in `logs/` and survive an update; do not `rsync --delete` over `logs/`. A change to the Solidity means a **new contract** (a deployed contract can't be edited): clear `BOT_CONTRACT_ADDRESS`, deploy, `withdraw` from the old one, re-fund, and re-link on the platform.
 
 ### 4.6b Safety on an unattended server
 
@@ -540,4 +580,11 @@ If the bot key leaks: disable or replace the operator, withdraw the funds, and c
 | `live_check.py`: `WARN … rejected, but not with …` | It was refused, but the node didn't return the reason text. Usually harmless; check the line's detail |
 | `live_check.py`: `WARN could not compile` | solc isn't available on this machine (for example ARM). Run the check from an x86 machine if you want the code comparison |
 | `live_check.py`: `SKIP simulated swap … fund the contract` | The contract has none of that token yet (2.7) |
-| Nothing happens for a long time | Normal at first: the strategy needs 20 samples, then a 2% move. Check the `price=` lines in the log |
+| Nothing happens for a long time | Normal at first: a strategy needs its samples (20 by default), then a trigger. Check the `price=` lines in the log, and try another strategy on the dashboard |
+| Dashboard unreachable from the laptop | Is `dashboard.py` running on the server, and is the `ssh -L 8765:127.0.0.1:8765 …` window open? Open `http://localhost:8765`, not the server's address |
+| Dashboard says `use http://localhost through the SSH tunnel` | You used a hostname or IP. Only `localhost` / `127.0.0.1` are accepted (any port) |
+| `ignoring the settings file` in the log | `logs/control.json` is invalid (the message says why). A running bot keeps its previous settings; a bot that starts with an invalid file uses the defaults. Save again from the dashboard, or fix the file (deleting it only takes effect at the next restart) |
+| `sell skipped: vault balance … < trade size` every tick | The ledger says the bot holds base that the vault no longer has. See GETTING_STARTED, "Resetting a stuck position" |
+| Bot halts with `… ledger…json is unreadable` | The position record is damaged. If you are sure the vault holds nothing the bot bought, move the file away; otherwise fix it. Then `rm logs/HALTED` and restart (4.5): the halt wrote that file |
+| Halted with `may be on chain` / `outcome is unknown` | A swap was sent but its receipt could not be read. Check the bot wallet's transactions on Etherscan before anything else (4.5) |
+| `buy skipped: … more base than the contract's per-swap cap` | A buy could return more base than one swap may trade, so the later sell would be refused. Lower `MAX_TRADE_AMOUNT` or raise the cap (section 5) |
