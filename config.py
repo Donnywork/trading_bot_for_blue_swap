@@ -2,20 +2,23 @@ import json
 import os
 import sys
 from decimal import Decimal
+from pathlib import Path
 
 from dotenv import load_dotenv
 from web3 import Web3
 
-with open("abis/erc20.json", "r") as f:
+ROOT = Path(__file__).parent
+
+with open(ROOT / "abis/erc20.json", "r") as f:
     erc20_abi = json.load(f)
 
-with open("abis/pool.json", "r") as f:
+with open(ROOT / "abis/pool.json", "r") as f:
     pool_abi = json.load(f)
 
-with open("abis/router.json", "r") as f:
+with open(ROOT / "abis/router.json", "r") as f:
     router_abi = json.load(f)
 
-with open("abis/quoter.json", "r") as f:
+with open(ROOT / "abis/quoter.json", "r") as f:
     quoter_abi = json.load(f)
 
 SLIPPAGE_BPS = 100  # 1%
