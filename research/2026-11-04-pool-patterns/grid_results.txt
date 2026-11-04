@@ -1,0 +1,35 @@
+
+A2 pattern as observed   (rows: take profit %, columns: stop loss %)
+        SL2       SL3       SL4       SL6       
+TP2         +1056     +1050     +1011      +938 
+TP3         +1055     +1047     +1010      +931 
+TP4          +883      +881      +868      +785 
+TP5          +709      +709      +712      +664 
+
+C70 weaker pattern (flip 70%)   (rows: take profit %, columns: stop loss %)
+        SL2       SL3       SL4       SL6       
+TP2          +482      +490      +506      +504 
+TP3          +482      +491      +504      +501 
+TP4          +443      +453      +468      +462 
+TP5          +400      +413      +434      +436 
+
+B no pattern (flip 50%)   (rows: take profit %, columns: stop loss %)
+        SL2       SL3       SL4       SL6       
+TP2          +117      +120      +145      +172 
+TP3          +117      +121      +146      +173 
+TP4          +123      +125      +154      +179 
+TP5          +120      +124      +158      +179 
+
+D downtrend (65% sells)   (rows: take profit %, columns: stop loss %)
+        SL2       SL3       SL4       SL6       
+TP2          +471      +466      +435      +363 
+TP3          +471      +466      +435      +363 
+TP4          +457      +453      +424      +350 
+TP5          +448      +443      +417      +340 
+
+G rival takes the move (50%)   (rows: take profit %, columns: stop loss %)
+        SL2       SL3       SL4       SL6       
+TP2          +351      +362      +364      +348 
+TP3          +315      +328      +328      +310 
+TP4          +269      +280      +278      +265 
+TP5          +226      +240      +240      +225 
