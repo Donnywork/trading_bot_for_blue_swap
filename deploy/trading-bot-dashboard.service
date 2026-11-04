@@ -1,0 +1,27 @@
+# OPTIONAL systemd unit for the web dashboard (dashboard.py). Replace __USER__ and __PROJECT_DIR__
+# (see docs/GETTING_STARTED.md, step 9). It listens on 127.0.0.1 only: you reach it from your
+# laptop through an SSH tunnel, so no firewall port is opened. It is independent of the bot:
+# stopping or crashing one does not affect the other.
+[Unit]
+Description=Trading bot dashboard (read-only view plus strategy settings, loopback only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# must be the same user as the bot: it writes logs/control.json, which the bot reads
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/.venv/bin/python dashboard.py --port 8765
+Environment=PYTHONUNBUFFERED=1
+
+Restart=on-failure
+RestartSec=10
+
+# light sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
