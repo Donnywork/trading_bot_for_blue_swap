@@ -19,6 +19,7 @@ import config
 import control
 import history
 import ledger
+import state
 import strategy
 
 ROOT = Path(__file__).parent
@@ -31,6 +32,9 @@ BALANCE_TOLERANCE = Decimal("0.999999")
 PRELOAD_MAX_AGE = (
     600  # seconds: a price history older than this is not carried over a restart
 )
+# the operator's gas only changes when a trade is sent, so the dashboard's copy of it is re-read
+# now and then (and after a trade), not every tick
+OPERATOR_ETH_REFRESH = 300
 
 log = logging.getLogger("bot")
 
@@ -135,6 +139,7 @@ class ChainIO:
         self.base = by_address[token0]
         self.quote = next(t for a, t in by_address.items() if a != token0)
         self.token_in = {"buy": self.quote, "sell": self.base}
+        self.symbols = (self.base[2], self.quote[2])
 
     def read_price(self):
         sqrt_price_x96 = self.pool.functions.slot0().call()[0]
@@ -206,6 +211,7 @@ class Runner:
         ledger_file=None,
         control_file=None,
         history_file=None,
+        state_file=None,
     ):
         self.io, self.settings, self.stop, self.clock = io, settings, stop, clock
         self.halt_file, self.heartbeat_file = halt_file, heartbeat_file
@@ -219,6 +225,9 @@ class Runner:
         self.guard_note = None  # why buying is paused right now, for the log
         # settings a person can change while the bot runs (the dashboard writes this file)
         self.control_file, self.history_file = control_file, history_file
+        # what the dashboard shows of the chain: it reads this file instead of asking the RPC
+        self.state_file = state_file
+        self.eth, self.eth_at = None, None
         self.cfg = strategy.DEFAULT
         self.control_stamp = None
         self.reload_config(starting=True)
@@ -295,6 +304,7 @@ class Runner:
                 history.append(self.history_file, time.time(), price)
             except OSError as e:
                 log.warning("could not write the price history: %s", e)
+        self.write_state(price, position)
         prices = list(self.prices)
         decision = strategy.decide(prices, position, self.cfg)
         self.note_guard(prices, position)
@@ -310,6 +320,30 @@ class Runner:
         )
         if decision != "hold":
             self.trade(decision, position, price)
+
+    def write_state(self, price, position):
+        # Only for the dashboard: a failure here is a warning, never a reason to skip the tick.
+        if self.state_file is None:
+            return
+        now = self.clock()
+        try:
+            if self.eth_at is None or now - self.eth_at >= OPERATOR_ETH_REFRESH:
+                self.eth, self.eth_at = self.io.operator_eth(), now
+            base, quote = self.io.symbols
+            state.save(
+                self.state_file,
+                time.time(),
+                {
+                    "base": base,
+                    "quote": quote,
+                    "price": price,
+                    "vault_base": Decimal(str(position.base)),
+                    "vault_quote": Decimal(str(position.quote)),
+                    "operator_eth": self.eth,
+                },
+            )
+        except (*READ_ERRORS, OSError) as e:
+            log.warning("could not update the dashboard's state file: %s", e)
 
     def note_guard(self, prices, position):
         # Log only when buying is paused or allowed again, and when the CHECK that pauses it
@@ -367,6 +401,7 @@ class Runner:
             return
 
         self.last_trade = now  # also after a failure, so a broken trade is not hammered
+        self.eth_at = None  # gas changed: re-read it
         try:
             received = self.io.trade(decision, amount)
         except Skip as e:
@@ -541,6 +576,7 @@ def main(ticks=None):
         stop,
         control_file=control.CONTROL_FILE,
         history_file=history.HISTORY_FILE,
+        state_file=state.STATE_FILE,
     )
     cfg = runner.cfg
     log.info(

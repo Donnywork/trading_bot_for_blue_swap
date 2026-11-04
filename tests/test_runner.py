@@ -11,6 +11,7 @@ import control
 import history
 import ledger
 import main as bot_main
+import state
 import strategy
 from strategy import Position
 
@@ -90,6 +91,9 @@ class FakeIO:
         self.attempts = 0  # every call to trade(), including the ones that fail
         self.trade_error = None
         self.read_error = None
+        self.eth_error = None
+        self.symbols = ("fETH", "f564")
+        self.eth_reads = 0
         # what the vault receives: base for a buy, quote for a sell
         self.received = {"buy": Decimal("0.0001"), "sell": Decimal("0.0105")}
 
@@ -102,6 +106,9 @@ class FakeIO:
         return self._position
 
     def operator_eth(self):
+        self.eth_reads += 1
+        if self.eth_error:
+            raise self.eth_error
         return self.eth
 
     def trade(self, decision, amount):
@@ -151,6 +158,7 @@ def make(tmp_path):
             ledger_file=tmp_path / "logs" / "ledger.json",
             control_file=tmp_path / "logs" / "control.json",
             history_file=tmp_path / "logs" / "prices.csv",
+            state_file=tmp_path / "logs" / "state.json",
         )
         runner.test_clock = clock
         return runner
@@ -310,6 +318,68 @@ def test_run_writes_heartbeat_and_respects_stop(make):
     runner.stop.set()
     runner.run()  # returns immediately
     assert io.prices == [100.0]
+
+
+# ---------------------------------------------------------------- state file for the dashboard
+
+
+def test_each_tick_writes_what_it_read_for_the_dashboard(make):
+    io = FakeIO([100.0], position=Position(base=0.5, quote=12.5), eth=Decimal("0.05"))
+    runner = make(io)
+    runner.step()
+    chain = state.load(runner.state_file)
+    assert (chain["base"], chain["quote"]) == ("fETH", "f564")
+    assert chain["price"] == 100.0
+    assert chain["vault_base"] == Decimal("0.5")
+    assert chain["vault_quote"] == Decimal("12.5")
+    assert chain["operator_eth"] == Decimal("0.05")
+    assert abs(chain["updated"] - time.time()) < 60
+
+
+def test_the_operator_gas_is_not_read_every_tick(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    for _ in range(5):
+        runner.step()
+    assert io.eth_reads == 1
+    runner.test_clock.now += bot_main.OPERATOR_ETH_REFRESH + 1
+    runner.step()
+    assert io.eth_reads == 2
+
+
+def test_the_operator_gas_is_re_read_after_a_trade(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io)
+    reads = io.eth_reads
+    io.eth = Decimal("0.04")  # the swap cost some gas
+    runner.step()
+    assert io.eth_reads > reads
+    assert state.load(runner.state_file)["operator_eth"] == Decimal("0.04")
+
+
+def test_a_state_file_problem_never_skips_the_tick(make, caplog):
+    io = FakeIO([100.0])
+    runner = make(io)
+    io.eth_error = ConnectionError("429 Too Many Requests")
+    with caplog.at_level(logging.WARNING):
+        runner.step()
+    assert not runner.state_file.exists()
+    assert "state file" in caplog.text
+    assert list(runner.prices) == [100.0]  # the tick carried on: price recorded
+    assert runner.read_failures == 0  # and it is not counted as a failed read
+
+    io.eth_error = None
+    runner.state_file.parent.mkdir(exist_ok=True)
+    runner.state_file.mkdir()  # a directory where the file goes: the write fails
+    runner.step()
+    assert list(runner.prices) == [100.0, 100.0]
+
+
+def test_the_state_file_is_optional_so_other_callers_are_unaffected(tmp_path):
+    runner = bot_main.Runner(FakeIO([100.0]), settings(), threading.Event())
+    assert runner.state_file is None
+    runner.write_state(100.0, RICH)  # does nothing
 
 
 def test_settings_from_env(monkeypatch):

@@ -9,6 +9,7 @@ import control
 import dashboard
 import history
 import ledger
+import state
 import strategy
 
 NOW = 1_700_000_000
@@ -24,22 +25,16 @@ CHAIN = {
 
 @pytest.fixture
 def app(tmp_path):
-    reads = []
-
-    def read_chain():
-        reads.append(1)
-        return CHAIN
-
     app = dashboard.Dashboard(
         dry_run=True,
-        read_chain=read_chain,
+        state_file=tmp_path / "state.json",
         control_file=tmp_path / "control.json",
         history_file=tmp_path / "prices.csv",
         ledger_file=tmp_path / "ledger.json",
         clock=lambda: NOW,
     )
-    app.reads = reads
     app.tmp = tmp_path
+    state.save(app.state_file, NOW - 10, CHAIN)  # what the bot wrote on its last tick
     return app
 
 
@@ -113,38 +108,48 @@ def test_snapshot_includes_the_price_history(app):
     assert app.snapshot()["prices"] == [(NOW - 30, 1049.5), (NOW, 1050.0)]
 
 
-def test_the_chain_is_read_at_most_once_per_cache_window(app):
-    clock = {"now": NOW}
-    app.clock = lambda: clock["now"]
-    app.snapshot()
-    app.snapshot()
-    assert len(app.reads) == 1
-    clock["now"] += dashboard.CHAIN_CACHE_SECONDS + 1
-    app.snapshot()
-    assert len(app.reads) == 2
+def test_the_chain_figures_come_from_the_bots_state_file(app):
+    chain = app.snapshot()["chain"]
+    assert chain["base"] == "fETH" and chain["quote"] == "f564"
+    assert chain["updated"] == NOW - 10
+    assert not app.snapshot()["problems"]
 
 
-def test_an_unreadable_chain_is_reported_not_fatal_and_redacted(app, monkeypatch):
-    monkeypatch.setenv(
-        "RPC_URL", "https://sepolia.infura.io/v3/0123456789abcdef0123456789abcdef"
-    )
+def test_the_dashboard_makes_no_rpc_calls(app, monkeypatch):
+    # nothing in the dashboard may open a connection: a tab left open must cost no quota
+    import socket
 
-    def broken():
-        raise ConnectionError("failed for url: " + __import__("os").environ["RPC_URL"])
+    def refuse(*args, **kwargs):
+        raise AssertionError("the dashboard opened a connection")
 
-    app.read_chain = broken
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    for _ in range(3):
+        app.snapshot()
+    assert not hasattr(dashboard, "chain_reader")
+
+
+def test_no_state_file_yet_is_reported_not_fatal(app):
+    app.state_file.unlink()
     snap = app.snapshot()
     assert snap["chain"] is None
-    assert any("could not read the chain" in p for p in snap["problems"])
-    assert "0123456789abcdef" not in json.dumps(snap)
+    assert any("no price data yet" in p for p in snap["problems"])
 
 
-def test_a_missing_contract_does_not_kill_the_request_thread(app):
-    def no_contract():
-        raise SystemExit("No contract at 0x...: check BOT_CONTRACT_ADDRESS")
+def test_an_old_state_file_still_shows_but_says_how_old(app):
+    app.clock = lambda: NOW + 3600
+    snap = app.snapshot()
+    assert snap["chain"]["price"] == 1050.0
+    assert any("price and balances are old" in p for p in snap["problems"])
 
-    app.read_chain = no_contract
-    assert any("No contract" in p for p in app.snapshot()["problems"])
+
+def test_a_broken_state_file_is_reported_not_fatal(app):
+    app.state_file.write_text('{"price": "nan"}')
+    snap = app.snapshot()
+    assert snap["chain"] is None
+    assert any("state.json" in p for p in snap["problems"])
+    app.state_file.write_text("{nope")
+    assert app.snapshot()["chain"] is None
 
 
 def test_a_broken_ledger_or_settings_file_is_reported_not_fatal(app):
@@ -413,8 +418,8 @@ def test_the_dashboard_and_status_read_the_ledger_that_matches_dry_run(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(ledger, "LOG_DIR", tmp_path)
-    dry = dashboard.Dashboard(True, lambda: CHAIN)
-    live = dashboard.Dashboard(False, lambda: CHAIN)
+    dry = dashboard.Dashboard(True, state_file=tmp_path / "state.json")
+    live = dashboard.Dashboard(False, state_file=tmp_path / "state.json")
     assert dry.ledger_file.name == "ledger_dryrun.json"
     assert live.ledger_file.name == "ledger.json"
     assert dry.snapshot()["mode"] == "dry_run" and live.snapshot()["mode"] == "live"
