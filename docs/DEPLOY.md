@@ -44,7 +44,7 @@ Order of work: Infura key and MetaMask → prepare the server → bot wallet and
 
 1. Sign in at <https://app.infura.io>, create an API key, and make sure the **Sepolia** network is enabled for it (menu names may change; you want the HTTPS endpoint).
 2. The URL looks like `https://sepolia.infura.io/v3/<your-key>`. **The key is part of the URL, so the URL is a secret.** It goes in `.env` as `RPC_URL`, never in git, chat or screenshots. The bot also redacts it from its logs and from `logs/HALTED`.
-3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. An open **dashboard** tab adds about 12 calls every 15 seconds (roughly 70,000 a day): close the tab when you are not watching if the quota is tight. `pool_monitor.py` scans add more.
+3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself.
 
 ### 1.2 MetaMask (your own computer)
 

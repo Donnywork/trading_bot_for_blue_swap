@@ -33,7 +33,7 @@ What you get:
 | `main.py` | the bot loop (`Runner`), logging with secret redaction, kill switch |
 | `strategy.py` | the six entry strategies, the shared take profit / stop loss, settings validation: pure functions |
 | `ledger.py` | the bot's open position and closed trades (`logs/ledger.json`), with the profit maths |
-| `control.py`, `history.py` | the runtime settings file the dashboard writes, and the price history for the chart |
+| `control.py`, `history.py`, `state.py` | the runtime settings file the dashboard writes, the price history for the chart, and the price and balances the bot last read (`logs/state.json`, what the dashboard shows) |
 | `dashboard.py`, `dashboard.html` | the web dashboard (loopback only, standard library, no extra dependencies) |
 | `status.py` | read-only status in the terminal: position, profit and loss, bot health |
 | `bot_contract.py` | compile / deploy / status / swap / owner-calldata CLI |

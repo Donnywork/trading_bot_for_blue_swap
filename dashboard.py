@@ -14,22 +14,19 @@ from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
-import bot_contract
 import control
 import history
 import ledger
+import state
 import status
 import strategy
-from main import PRELOAD_MAX_AGE, READ_ERRORS, redact
+from main import PRELOAD_MAX_AGE, redact
 
 # Loopback only, on purpose: the page can change what the bot does, and it has no login. Reach it
 # from your laptop through an SSH tunnel (see docs/DEPLOY.md), never by opening a port.
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PAGE = Path(__file__).parent / "dashboard.html"
-CHAIN_CACHE_SECONDS = (
-    15  # the page refreshes often; the RPC (and its quota) is asked far less
-)
 MAX_BODY = 10_000
 CHART_POINTS = 720  # 6 hours at one sample per 30s
 RECENT_TRADES = 20
@@ -76,44 +73,43 @@ def text_values(chain):
 class Dashboard:
     # ------------------------------------
     # Everything the page needs, kept apart from HTTP so it can be tested. Read-only except
-    # update_config(), which writes the settings file the bot re-reads every tick.
+    # update_config(), which writes the settings file the bot re-reads every tick. It never asks
+    # the RPC anything: the price and balances come from the file the bot writes each tick.
     # ------------------------------------
 
     def __init__(
         self,
         dry_run,
-        read_chain,
+        state_file=state.STATE_FILE,
         control_file=control.CONTROL_FILE,
         history_file=history.HISTORY_FILE,
         ledger_file=None,
         clock=time.time,
     ):
-        self.dry_run, self.read_chain, self.clock = dry_run, read_chain, clock
+        self.dry_run, self.state_file, self.clock = dry_run, state_file, clock
         self.control_file, self.history_file = control_file, history_file
         self.ledger_file = ledger_file or ledger.file_for(dry_run)
-        self.lock = threading.Lock()
         self.write_lock = threading.Lock()  # one settings write at a time
-        self.chain_data, self.chain_error, self.chain_at = None, None, None
-
-    def chain(self):
-        with self.lock:
-            now = self.clock()
-            if self.chain_at is None or now - self.chain_at >= CHAIN_CACHE_SECONDS:
-                self.chain_at = now
-                try:
-                    self.chain_data, self.chain_error = self.read_chain(), None
-                except (
-                    *READ_ERRORS,
-                    SystemExit,
-                ) as e:  # SystemExit: load_bot found no contract
-                    self.chain_data, self.chain_error = None, redact(str(e))
-            return self.chain_data, self.chain_error
 
     def snapshot(self):
         now = self.clock()
-        chain, chain_error = self.chain()
 
         problems = []
+        try:
+            chain = state.load(self.state_file)
+            if chain is None:
+                problems.append(
+                    f"no price data yet: the bot has not written {self.state_file.name} "
+                    "(not started, or running on another machine)"
+                )
+            elif now - chain["updated"] > status.STALE_AFTER_SECONDS:
+                problems.append(
+                    f"the bot last read the chain {status.span(now - chain['updated'])} ago, "
+                    "so the price and balances are old"
+                )
+        except ValueError as e:
+            chain = None
+            problems.append(f"{e}. The bot rewrites it on its next tick.")
         try:
             data = ledger.load(self.ledger_file)
         except ValueError as e:
@@ -124,8 +120,6 @@ class Dashboard:
         except ValueError as e:
             cfg = strategy.DEFAULT
             problems.append(f"{e}. The bot keeps its last valid settings.")
-        if chain_error:
-            problems.append(f"could not read the chain: {chain_error}")
 
         points = history.tail(self.history_file, CHART_POINTS)
         kind, text = status.read_health(now)
@@ -267,22 +261,6 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(500, {"error": "internal error, see the dashboard's console"})
 
 
-def chain_reader():
-    # one connection, rebuilt after a read error
-    held = {}
-
-    def read():
-        try:
-            if "w3" not in held:
-                held["w3"] = bot_contract.connect_read_only()
-            return status.read_chain(held["w3"])
-        except (*READ_ERRORS, SystemExit):
-            held.clear()
-            raise
-
-    return read
-
-
 def serve(app, port):
     handler = type("BoundHandler", (Handler,), {"app": app})
     server = ThreadingHTTPServer((HOST, port), handler)
@@ -306,7 +284,7 @@ def cli():
 
     load_dotenv()
     dry_run = os.environ.get("DRY_RUN", "true").lower() != "false"
-    server = serve(Dashboard(dry_run, chain_reader()), port)
+    server = serve(Dashboard(dry_run), port)
     print(
         f"Dashboard for the {'DRY RUN' if dry_run else 'LIVE'} bot on http://{HOST}:{port}"
     )

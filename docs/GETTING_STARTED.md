@@ -181,7 +181,7 @@ ssh -L 8765:127.0.0.1:8765 youruser@your-server
 - Local port busy? Use another one: `ssh -L 9000:127.0.0.1:8765 …` and open `http://localhost:9000`.
 - The dashboard only listens on the server's loopback address and has no login. **Do not** open its port in the firewall or forward it to `0.0.0.0`; the tunnel is the security.
 - **Only run it on a server where you are the only user.** The loopback port has no password, so anyone with a login on that machine could open it and change your strategy settings (they still cannot send transactions or touch keys, `DRY_RUN` or the trade size). On a shared server, do not run it.
-- An open dashboard tab asks the chain about once every 15 seconds (roughly 12 calls each time). Close the tab when you are not looking if your Infura plan is tight ([DEPLOY 1.1](DEPLOY.md#11-get-an-infura-sepolia-url)).
+- The dashboard never calls the chain itself: the price and vault balances it shows are what the bot last read (`logs/state.json`, written every tick), so an open tab costs no Infura requests. If the bot is not running, the page shows the last values with a warning that they are old.
 - To keep it running after you log out, use the systemd unit in step 9, or `tmux`.
 
 ## Step 8. Choose a strategy and set the exit rules
@@ -381,6 +381,7 @@ Everything lives in `logs/` (git-ignored). None of it contains a secret.
 |---|---|---|
 | `bot.log` | the bot's log (rotated at 5 MB) | yes |
 | `heartbeat` | time of the last completed tick | yes |
+| `state.json` | the price, vault balances and bot-wallet gas the bot read on its last tick; the dashboard shows these instead of calling the chain (no key or URL in it) | yes, the bot rewrites it on the next tick |
 | `HALTED` | exists only after the kill switch fired; holds the reason | only after you fixed the cause (the bot refuses to start while it exists) |
 | `ledger.json` / `ledger_dryrun.json` | the open position and closed trades, live / paper (the dashboard and `status.py` read the one matching `DRY_RUN`) | **not while the bot holds a position** (see below); otherwise deleting just forgets the history |
 | `control.json` | the strategy, take profit, stop loss and strategy settings (what the dashboard writes). Hand-editable: the same six keys as the form (`strategy`, `take_profit_pct`, `stop_loss_pct`, `params`, `guard_flip_pct`, `guard_drift_pct`), missing keys keep their defaults, unknown keys are an error | yes, but a **running** bot keeps its current settings until you save again from the dashboard or restart it |
@@ -412,6 +413,7 @@ On a server, use the venv's Python instead of `uv run`: `source .venv/bin/activa
 |---|---|
 | Browser cannot open `http://localhost:8765` | The tunnel is not up, or the dashboard is not running. Start `python dashboard.py` on the server, then `ssh -L 8765:127.0.0.1:8765 …` on your laptop and keep that window open. Port taken? Pick another local port (step 7) |
 | The page says `use http://localhost through the SSH tunnel` | You opened it by the server's IP or a hostname. Only `localhost`/`127.0.0.1` are accepted, on purpose |
+| The page says `no price data yet` or `the bot last read the chain … ago` | The dashboard shows what the bot wrote to `logs/state.json`. Missing: the bot has not ticked yet, or runs from another folder or machine. Old: the bot stopped, or its reads are failing (look in `logs/bot.log` for `read failed`) |
 | Chart says "No price history yet" | The bot has not ticked yet (or runs from another folder). Start `main.py`; it fills in within a minute |
 | Header says **status unknown** | No `logs/heartbeat`: the bot never ran here, or it runs elsewhere. Start it |
 | Header says **not ticking** | No tick for 5+ minutes: the process stopped, hung, or the RPC is down (while reads fail the bot backs off for longer and longer, up to 10 minutes between ticks). `systemctl status trading-bot` and `tail logs/bot.log` |
