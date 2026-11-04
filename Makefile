@@ -1,4 +1,4 @@
-.PHONY: check format
+.PHONY: check format test run
 
 check:
 	uv run ruff check .
@@ -7,3 +7,9 @@ check:
 format:
 	uv run ruff check --fix .
 	uv run ruff format .
+
+test:
+	uv run pytest
+
+run:
+	uv run python main.py

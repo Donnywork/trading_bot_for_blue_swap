@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "py-solc-x>=2.1.0",
     "python-dotenv>=1.2.4",
     "web3>=7,<8",
 ]
@@ -13,4 +14,8 @@ dependencies = [
 dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.3",
+    "web3[tester]>=7,<8",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

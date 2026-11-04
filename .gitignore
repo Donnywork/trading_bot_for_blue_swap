@@ -3,3 +3,4 @@
 !.env.example
 logs/
 __pycache__/
+build/
