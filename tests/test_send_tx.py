@@ -108,6 +108,34 @@ def test_a_node_that_rejects_the_transaction_is_an_ordinary_failure():
         send(w3)
 
 
+class RecordingAccount(Account):
+    def sign_transaction(self, tx):
+        self.tx = tx
+        return Signed()
+
+
+def gas_limit_of(**kw):
+    account = RecordingAccount()
+    bot_contract.send_tx(
+        W3(), account, {"to": "0x" + "22" * 20, "data": "0x"}, **kw
+    )  # the fake node estimates 100,000
+    return account.tx["gas"]
+
+
+def test_the_gas_limit_is_the_estimate_times_the_buffer():
+    assert gas_limit_of() == int(100_000 * bot_contract.GAS_BUFFER)
+    assert gas_limit_of(gas_buffer=2.0) == 200_000
+
+
+def test_a_swap_gets_far_more_gas_headroom_than_20_percent():
+    # Four swaps of 2026-11-05 ran out of gas inside the pool at estimate x 1.2: another swap moved
+    # the price in the same block, so they crossed more ticks and needed 21 to 38% more. The
+    # headroom has to cover the worst of those with room to spare.
+    worst_seen = 387_117 / 279_578
+    assert bot_contract.GAS_BUFFER < worst_seen
+    assert bot_contract.SWAP_GAS_BUFFER >= worst_seen * 1.4
+
+
 def test_a_reverted_transaction_is_an_ordinary_failure():
     w3 = W3()
     w3.eth.receipt = {"status": 0, "logs": []}

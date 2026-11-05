@@ -18,7 +18,13 @@ CONTRACT_PATH = ROOT / "contracts/TradingBot.sol"
 ABI_PATH = ROOT / "abis/trading_bot.json"
 BUILD_DIR = ROOT / "build"
 SEPOLIA_CHAIN_ID = 11155111
-GAS_BUFFER = 1.2
+GAS_BUFFER = 1.2  # headroom over the estimate for deploys and other owner transactions
+# A swap's gas depends on how many initialised price ticks it crosses, which depends on where the
+# price is when it is MINED, not when it was estimated. On 2026-11-05 four swaps ran out of gas
+# inside the pool (limit = estimate x 1.2) because another swap moved the price in the same block:
+# they then needed 21 to 38% more than estimated; with twice the limit all four succeed. Gas that
+# is not used is refunded, so a generous limit costs nothing on the gas actually burnt.
+SWAP_GAS_BUFFER = 2.0
 FEE_TIERS = [3000]  # the only pool fee tier the bot trades
 
 
@@ -114,9 +120,10 @@ def validate_owner(owner, bot_wallet):
     return owner
 
 
-def send_tx(w3, account, tx):
+def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER):
     # ------------------------------------
-    # Fill nonce/gas/fees, sign, send, wait for the receipt.
+    # Fill nonce/gas/fees, sign, send, wait for the receipt. The gas limit is the estimate times
+    # `gas_buffer`.
     # The two halves fail differently, and the caller must be able to tell them apart:
     #   before broadcast: a connection error means nothing was sent      -> NotSent
     #   from broadcast on: a connection error may hide a sent transaction -> SentUnknown
@@ -132,7 +139,7 @@ def send_tx(w3, account, tx):
         }
         # build_transaction already estimates gas; add headroom in case state moves before mining
         gas = tx.get("gas") or w3.eth.estimate_gas(tx)
-        tx["gas"] = int(gas * GAS_BUFFER)
+        tx["gas"] = int(gas * gas_buffer)
         if "maxFeePerGas" not in tx:
             priority = w3.eth.max_priority_fee
             base = w3.eth.get_block("latest")["baseFeePerGas"]
@@ -225,7 +232,7 @@ def swap_via_contract(w3, account, bot, quote, fee, dry_run=True):
         tx = fn.build_transaction({"from": account.address})
     except OSError as e:  # nothing has been sent yet
         raise NotSent(f"could not read the chain before sending: {e}") from e
-    return send_tx(w3, account, tx)
+    return send_tx(w3, account, tx, SWAP_GAS_BUFFER)
 
 
 def connect_read_only():

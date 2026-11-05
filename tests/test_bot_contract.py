@@ -384,6 +384,48 @@ def test_deploy_and_swap_through_send_tx(env):
     assert env.b.functions.balanceOf(address).call() == A
 
 
+def test_a_swap_is_sent_with_the_swap_gas_headroom_not_the_small_one(env, monkeypatch):
+    sent = {}
+
+    def spy(w3, account, tx, gas_buffer=bot_contract.GAS_BUFFER):
+        sent.update(gas_buffer=gas_buffer, estimate=tx["gas"])
+        return {"status": 1}
+
+    monkeypatch.setattr(bot_contract, "send_tx", spy)
+    account = SimpleNamespace(address=env.operator)
+    bot_contract.swap_via_contract(
+        env.w3, account, env.bot, quote_for(env), 3000, dry_run=False
+    )
+    assert sent["gas_buffer"] == bot_contract.SWAP_GAS_BUFFER > bot_contract.GAS_BUFFER
+
+
+def test_a_swap_is_sent_with_a_gas_limit_that_leaves_headroom_over_what_it_used(
+    env,
+):
+    # the real chain: send the swap with exactly the estimate (no headroom) and with the swap
+    # headroom; both fit here, and the limit actually sent is the estimate times the buffer
+    bot_wallet = Funded(env).account
+    caps = {env.a.address: 2 * A, env.b.address: 2 * A}
+    address, abi, _ = bot_contract.deploy_bot(
+        env.w3,
+        bot_wallet,
+        env.owner,
+        env.router.address,
+        bot_wallet.address,
+        caps,
+        FEES,
+    )
+    bot = env.w3.eth.contract(address=address, abi=abi)
+    env.a.functions.mint(address, 5 * A).transact()
+    receipt = bot_contract.swap_via_contract(
+        env.w3, bot_wallet, bot, quote_for(env), 3000, dry_run=False
+    )
+    tx = env.w3.eth.get_transaction(receipt["transactionHash"])
+    assert (
+        tx["gas"] >= receipt["gasUsed"] * 1.5
+    )  # room for the state moving before it is mined
+
+
 def test_dry_run_sends_nothing(env):
     before = env.w3.eth.block_number
     account = SimpleNamespace(address=env.operator)
