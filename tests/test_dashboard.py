@@ -654,6 +654,180 @@ def test_compare_view_is_cached_until_the_prices_or_settings_change(app, monkeyp
     assert len(calls) == 3
 
 
+def test_the_replay_charges_a_big_trade_its_real_cost_when_the_dashboard_has_the_depth(
+    app,
+):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    app.size = Decimal(20000)
+    fixed = app.compare_view({"hours": ["all"]})
+    # the bot has scanned nothing and not sized a buy yet: the layout that ships with the code
+    app.depth_file = app.tmp / "pool_profile.json"
+    exact = app.compare_view({"hours": ["all"]})
+
+    def total(view):
+        return sum(r["profit"] + r["open"] for r in view["rows"])
+
+    assert sum(r["trades"] + r["holding"] for r in fixed["rows"]) > 0
+    assert total(exact) < total(fixed)
+
+
+def test_a_thinner_pool_reported_by_the_bot_makes_the_replay_cost_more(
+    app, monkeypatch
+):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    app.size = Decimal(20000)
+    app.depth_file = app.tmp / "pool_profile.json"
+    calls = []
+    real = dashboard.compare.compare
+    monkeypatch.setattr(
+        dashboard.compare, "compare", lambda *a: calls.append(1) or real(*a)
+    )
+
+    def total(view):
+        return sum(r["profit"] + r["open"] for r in view["rows"])
+
+    as_saved = app.compare_view({"hours": ["all"]})
+    app.compare_view({"hours": ["all"]})
+    assert len(calls) == 1  # cached
+    # what the bot writes to the state file when it finds the pool half as deep
+    state.save(app.state_file, NOW - 10, {**CHAIN, "depth_scale": 0.5})
+    thin = app.compare_view({"hours": ["all"]})
+    assert len(calls) == 2 and total(thin) < total(as_saved)
+
+
+# ---------------------------------------------------------------- the buttons
+
+
+def post_command(server, command, **headers):
+    base = {"Content-Type": "application/json"}
+    body = json.dumps({"command": command})
+    return request(server, "POST", "/api/command", body, base | headers)
+
+
+def test_pause_and_resume_change_only_the_settings_file(app, server):
+    state_before = app.state_file.read_text()
+    res, data = post_command(server, "pause")
+    assert res.status == 200 and json.loads(data)["control"]["paused"] is True
+    assert control.load(app.control_file).paused is True
+    res, data = post_command(server, "resume")
+    assert res.status == 200 and json.loads(data)["control"]["paused"] is False
+    assert control.load(app.control_file).paused is False
+    # nothing but logs/control.json was written
+    assert sorted(p.name for p in app.tmp.iterdir()) == ["control.json", "state.json"]
+    assert app.state_file.read_text() == state_before
+
+
+def test_a_pause_leaves_the_strategy_settings_alone(app, server):
+    control.save(app.control_file, strategy.parse_config({"take_profit_pct": 7}))
+    post_command(server, "pause")
+    saved = control.load(app.control_file)
+    assert saved.paused and saved.take_profit_pct == 7
+
+
+def test_every_scan_request_is_a_higher_number_than_the_last(app, server):
+    post_command(server, "scan")
+    first = control.load(app.control_file).scan_request
+    post_command(server, "scan")  # the clock has not moved: still higher
+    second = control.load(app.control_file).scan_request
+    assert first >= NOW and second == first + 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"command": "withdraw"},
+        {"command": "pause", "dry_run": False},
+        {"command": ["pause"]},
+        {"command": None},
+        {},
+        [],
+        "pause",
+    ],
+)
+def test_only_the_three_commands_are_accepted(app, server, payload):
+    res, data = request(
+        server,
+        "POST",
+        "/api/command",
+        json.dumps(payload),
+        {"Content-Type": "application/json"},
+    )
+    assert res.status == 400 and "error" in json.loads(data)
+    assert not app.control_file.exists()
+
+
+def test_a_command_does_not_overwrite_a_damaged_settings_file(app, server):
+    app.control_file.write_text("{not json")
+    res, data = post_command(server, "pause")
+    assert res.status == 400 and "control.json" in json.loads(data)["error"]
+    assert app.control_file.read_text() == "{not json"
+
+
+def test_the_command_route_has_the_same_guards_as_the_settings_route(app, server):
+    assert post_command(server, "pause", Origin="http://evil.example")[0].status == 403
+    assert post_command(server, "pause", Host="evil.example")[0].status == 403
+    res, _ = request(
+        server,
+        "POST",
+        "/api/command",
+        '{"command": "pause"}',
+        {"Content-Type": "text/plain"},
+    )
+    assert res.status == 415
+    res, _ = request(
+        server,
+        "POST",
+        "/api/command",
+        json.dumps({"command": "x" * 20_000}),
+        {"Content-Type": "application/json"},
+    )
+    assert res.status == 413
+    assert request(server, "GET", "/api/command")[0].status == 404
+    assert not app.control_file.exists()
+
+
+def test_saving_the_settings_form_cannot_undo_a_pause_or_a_scan_request(app, server):
+    post_command(server, "pause")
+    post_command(server, "scan")
+    asked = control.load(app.control_file).scan_request
+    # a form loaded before the clicks, and even one that tries to say otherwise
+    form = {**strategy.to_dict(strategy.DEFAULT), "paused": False, "scan_request": 0}
+    res, _ = post_config(server, form)
+    assert res.status == 200
+    saved = control.load(app.control_file)
+    assert saved.paused is True and saved.scan_request == asked
+
+
+def test_a_pause_alone_is_not_a_change_in_the_settings_preview(app):
+    control.save(app.control_file, strategy.parse_config({"paused": True}))
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    assert app.preview_view(draft_query())["changed"] is False
+
+
+def test_the_snapshot_tells_the_page_what_the_buttons_show(app):
+    control.save(app.control_file, strategy.parse_config({"paused": True}))
+    view = app.snapshot()["control"]
+    assert view["paused"] is True and view["scan_request"] == 0
+    assert view["scan"] is None and view["pool"] is None  # no depth file given
+    answer = {"done": 5, "block": 123, "at": NOW - 30.0, "error": None}
+    state.save(app.state_file, NOW - 10, {**CHAIN, "scan": answer})
+    app.depth_file = app.tmp / "pool_profile.json"
+    view = app.snapshot()["control"]
+    assert view["scan"] == answer
+    assert view["pool"]["scanned"] is False  # the layout that ships with the code
+    scanned = {**dashboard.v3pool.load_profile(), "block": 123, "request": 5}
+    dashboard.v3pool.save_profile(app.depth_file, scanned)
+    view = app.snapshot()["control"]
+    assert view["pool"]["scanned"] is True and view["pool"]["block"] == 123
+    json.dumps(app.snapshot())
+
+
+def test_the_page_has_the_buttons(app):
+    page = dashboard.PAGE.read_text()
+    for needle in ('id="controls-bar"', "/api/command", '"pause"', '"scan"'):
+        assert needle in page
+
+
 def test_the_views_work_over_http_and_a_bad_query_is_a_400(server):
     assert get_json(server, "/api/prices?range=3600")[0] == 200
     assert get_json(server, "/api/trades?reason=all&limit=5")[0] == 200

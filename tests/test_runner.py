@@ -13,6 +13,7 @@ import ledger
 import main as bot_main
 import state
 import strategy
+import v3pool
 from strategy import Position
 
 FLAT = [100.0] * 30
@@ -94,6 +95,12 @@ class FakeIO:
         self.eth_error = None
         self.symbols = ("fETH", "f564")
         self.eth_reads = 0
+        self.liquidity = None  # what the pool reports as its liquidity in range
+        self.liquidity_error = None
+        self.liquidity_reads = 0
+        self.depth_scan = None  # what a scan of the whole pool returns
+        self.depth_error = None
+        self.depth_reads = 0
         # what the vault receives: base for a buy, quote for a sell
         self.received = {"buy": Decimal("0.0001"), "sell": Decimal("0.0105")}
 
@@ -104,6 +111,18 @@ class FakeIO:
 
     def position(self):
         return self._position
+
+    def read_depth(self):
+        self.depth_reads += 1
+        if self.depth_error:
+            raise self.depth_error
+        return self.depth_scan
+
+    def read_liquidity(self):
+        self.liquidity_reads += 1
+        if self.liquidity_error:
+            raise self.liquidity_error
+        return self.liquidity
 
     def operator_eth(self):
         self.eth_reads += 1
@@ -141,7 +160,7 @@ class Clock:
 
 @pytest.fixture
 def make(tmp_path):
-    def build(io, guard=False, **kw):
+    def build(io, guard=False, depth=None, depth_file=None, **kw):
         clock = Clock()
         if not guard:
             control.save(
@@ -159,6 +178,8 @@ def make(tmp_path):
             control_file=tmp_path / "logs" / "control.json",
             history_file=tmp_path / "logs" / "prices.csv",
             state_file=tmp_path / "logs" / "state.json",
+            depth=depth,
+            depth_file=depth_file,
         )
         runner.test_clock = clock
         return runner
@@ -1236,6 +1257,391 @@ def test_a_buy_is_sized_by_risk_when_asked(make):
     runner.step()
     assert io.trades == [("buy", Decimal("210.526315"))]
     assert runner.ledger["open"]["quote_spent"] == "210.526315"
+
+
+def in_range(price, scale=1.0):
+    # the liquidity a pool as deep as the saved layout (times `scale`) reports at `price`
+    return int(v3pool.V3Pool(v3pool.load_profile(), price).L * 10**18 * scale)
+
+
+def test_a_buy_is_sized_on_the_pools_real_costs_when_it_has_the_depth(make, caplog):
+    # a 40000 vault risking 2% on a 4% stop: the fixed 0.75% cost would ask for 16,842, but a buy
+    # that big pays far more than that to the pool, so the stop loss would cost more than 2%
+    io = FakeIO([1043.0], position=Position(base=0.0, quote=40000.0))
+    io.liquidity = in_range(1000.0)
+    runner = make(
+        io,
+        max_trade=Decimal(40000),
+        risk_pct=Decimal(2),
+        depth=v3pool.load_profile(),
+    )
+    warm_up(runner, io)
+    io.prices = [1000.0]  # a 4% dip under the average: a buy
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    ((decision, amount),) = io.trades
+    assert decision == "buy"
+    assert amount < Decimal(16842)
+
+    def loss(quote):
+        return v3pool.loss_at_stop(v3pool.load_profile(), 1000.0, 4.0, quote)
+
+    assert loss(float(amount)) <= 800 < loss(float(amount) + 1)
+    assert "RISK_PER_TRADE_PCT=2" in caplog.text
+
+
+def buy_amount(make, tmp_path, liquidity, **kw):
+    # the amount a 40000 vault spends on a dip at 1000 when the pool reports `liquidity`
+    for name in ("ledger.json", "prices.csv"):  # a fresh start every time
+        (tmp_path / "logs" / name).unlink(missing_ok=True)
+    io = FakeIO([1043.0], position=Position(base=0.0, quote=40000.0))
+    io.liquidity = liquidity
+    runner = make(
+        io,
+        max_trade=Decimal(40000),
+        risk_pct=Decimal(2),
+        depth=v3pool.load_profile(),
+        **kw,
+    )
+    warm_up(runner, io)
+    io.prices = [1000.0]
+    runner.step()
+    ((decision, amount),) = io.trades
+    assert decision == "buy"
+    return amount
+
+
+def test_a_thinner_pool_gets_a_smaller_buy_and_a_deeper_one_a_bigger(make, tmp_path):
+    as_saved = buy_amount(make, tmp_path, in_range(1000.0))
+    assert buy_amount(make, tmp_path, in_range(1000.0, 0.5)) < as_saved
+    assert buy_amount(make, tmp_path, in_range(1000.0, 2.0)) > as_saved
+
+
+def test_a_pool_with_almost_no_liquidity_limits_the_buy_to_about_the_budget_itself(
+    make, tmp_path
+):
+    # the pool eats about all of any buy, so a stop loss costing 2% of the vault (800) only
+    # allows a buy of about 800
+    amount = buy_amount(make, tmp_path, in_range(1000.0, 1e-6))
+    assert Decimal(800) <= amount < Decimal(1000)
+
+
+def test_the_pools_liquidity_is_read_once_when_a_buy_is_sized_and_not_again_for_a_while(
+    make,
+):
+    io = FakeIO([1043.0], position=Position(base=0.0, quote=40000.0))
+    io.liquidity = in_range(1000.0)
+    runner = make(
+        io, max_trade=Decimal(40000), risk_pct=Decimal(2), depth=v3pool.load_profile()
+    )
+    warm_up(runner, io)
+    assert io.liquidity_reads == 0  # holding nothing and not buying: no read at all
+    runner.buy_size(Position(base=0.0, quote=40000.0), 1000.0)
+    runner.buy_size(Position(base=0.0, quote=40000.0), 1000.0)
+    assert io.liquidity_reads == 1
+    runner.test_clock.now += bot_main.DEPTH_MAX_AGE + 1
+    runner.buy_size(Position(base=0.0, quote=40000.0), 1000.0)
+    assert io.liquidity_reads == 2
+
+
+def test_no_liquidity_is_read_when_risk_sizing_is_off(make):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(500), depth=v3pool.load_profile())
+    warm_up(runner, io)
+    io.prices = [90.0]
+    runner.step()
+    assert io.trades == [("buy", Decimal(500))] and io.liquidity_reads == 0
+
+
+def test_a_price_outside_the_saved_layout_skips_the_buy_and_says_why(make, caplog):
+    io = FakeIO([2086.0], position=Position(base=0.0, quote=40000.0))
+    io.liquidity = in_range(1000.0)  # the read works; the layout holds nothing up here
+    profile = v3pool.load_profile()
+    # (only the positions with a range: the full-range one would hold liquidity at any price)
+    ranged = {
+        **profile,
+        "ticks": [t for t in profile["ticks"] if abs(t["tick"]) < 800_000],
+    }
+    runner = make(io, max_trade=Decimal(40000), risk_pct=Decimal(2), depth=ranged)
+    warm_up(runner, io)
+    io.prices = [2000.0]
+    with caplog.at_level(logging.WARNING):
+        runner.step()
+    assert io.trades == []
+    assert "buy skipped: the pool's depth cannot be sized" in caplog.text
+    assert "could not read" not in caplog.text
+
+
+def test_a_failed_liquidity_read_skips_the_buy_and_nothing_more(make, caplog):
+    io = FakeIO([1043.0], position=Position(base=0.0, quote=40000.0))
+    io.liquidity_error = OSError("connection reset")
+    runner = make(
+        io, max_trade=Decimal(40000), risk_pct=Decimal(2), depth=v3pool.load_profile()
+    )
+    warm_up(runner, io)
+    io.prices = [1000.0]
+    with caplog.at_level(logging.WARNING):
+        runner.step()
+    assert io.trades == []  # skipped: not a halt, not a crash
+    assert "buy skipped: could not read the pool's liquidity" in caplog.text
+    # the next dip, once the read works, buys
+    io.liquidity_error, io.liquidity = None, in_range(1000.0)
+    runner.test_clock.now += 600
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy"]
+
+
+def test_the_state_file_tells_the_dashboard_how_deep_the_pool_was(make, tmp_path):
+    io = FakeIO([1043.0], position=Position(base=0.0, quote=40000.0))
+    io.liquidity = in_range(1000.0, 0.5)
+    runner = make(
+        io, max_trade=Decimal(40000), risk_pct=Decimal(2), depth=v3pool.load_profile()
+    )
+    warm_up(runner, io)
+    # nothing has been read yet, so the state file says nothing about depth (the dashboard then
+    # takes the layout as saved)
+    assert state.load(tmp_path / "logs" / "state.json")["depth_scale"] == 1.0
+    io.prices = [1000.0]
+    runner.step()  # sizes a buy: reads the liquidity
+    runner.step()  # the next tick writes what it found
+    assert state.load(tmp_path / "logs" / "state.json")["depth_scale"] == pytest.approx(
+        0.5, rel=1e-3
+    )
+
+
+def control_with(tmp_path, **extra):
+    # the settings file as the dashboard leaves it (the pattern guard off, as `make` does)
+    control.save(
+        tmp_path / "logs" / "control.json",
+        strategy.parse_config({"guard_flip_pct": 0, "guard_drift_pct": 0, **extra}),
+    )
+
+
+# ---------------------------------------------------------------- the pause button
+
+
+def test_paused_buys_nothing_and_resuming_buys_again(make, tmp_path, caplog):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(500))
+    warm_up(runner, io)
+    control_with(tmp_path, paused=True)
+    io.prices = [90.0]  # a dip: without the pause this is a buy
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    assert io.trades == []
+    assert "new buys are PAUSED" in caplog.text and "decision=hold" in caplog.text
+    assert "PAUSED" in caplog.text.splitlines()[-1] or "PAUSED" in caplog.text
+    control_with(tmp_path, paused=False)
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    assert [t[0] for t in io.trades] == ["buy"]
+    assert "new buys are resumed" in caplog.text
+
+
+def test_a_sale_is_never_held_back_by_the_pause(make, tmp_path):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, paused=True)
+    io.prices = [95.0]  # +5.6%: take profit
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy", "sell"]
+
+
+def test_a_stop_loss_still_sells_while_paused(make, tmp_path):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, paused=True)
+    io.prices = [80.0]  # -11%: stop loss
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy", "sell"]
+
+
+# ---------------------------------------------------------------- the scan button
+
+
+def scan_result(block):
+    # what a scan of the pool returns: the shipped layout, as of another block
+    return {**v3pool.load_profile(), "block": block}
+
+
+def test_a_scan_request_reads_the_pool_saves_it_and_answers_the_dashboard(
+    make, tmp_path
+):
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(777)
+    saved = tmp_path / "logs" / "pool_profile.json"
+    runner = make(io, depth_file=saved)
+    runner.step()
+    assert io.depth_reads == 0  # nobody asked
+    control_with(tmp_path, scan_request=5)
+    runner.step()
+    assert io.depth_reads == 1 and runner.depth["block"] == 777
+    assert v3pool.current_profile(saved)["request"] == 5
+    runner.step()  # the tick after writes the answer to the state file
+    answer = state.load(tmp_path / "logs" / "state.json")["scan"]
+    assert (answer["done"], answer["block"], answer["error"]) == (5, 777, None)
+    assert answer["at"] > 0
+    assert io.depth_reads == 1  # served once, not on every tick
+
+
+def test_the_layout_in_use_is_measured_afresh_after_a_scan(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(1)
+    runner = make(
+        io, depth=v3pool.load_profile(), depth_file=tmp_path / "logs" / "p.json"
+    )
+    runner.scale, runner.scale_at = 0.3, 123.0  # measured against the old layout
+    control_with(tmp_path, scan_request=1)
+    runner.step()
+    assert (runner.scale, runner.scale_at) == (1.0, None)
+
+
+def test_a_failed_scan_is_reported_without_secrets_and_not_retried(
+    make, tmp_path, monkeypatch, caplog
+):
+    url = "https://sepolia.infura.io/v3/0123456789abcdef0123456789abcdef"
+    monkeypatch.setenv("RPC_URL", url)
+    io = FakeIO([100.0])
+    io.depth_error = OSError(f"429 Too Many Requests for url: {url}")
+    saved = tmp_path / "logs" / "pool_profile.json"
+    before = v3pool.load_profile()
+    runner = make(io, depth=before, depth_file=saved)
+    control_with(tmp_path, scan_request=3)
+    with caplog.at_level(logging.WARNING):
+        runner.step()
+        runner.step()
+        runner.step()
+    assert io.depth_reads == 1  # the button asks again, the bot does not
+    assert runner.depth is before and not saved.exists()
+    answer = state.load(tmp_path / "logs" / "state.json")["scan"]
+    assert answer["done"] == 3 and "429" in answer["error"]
+    assert "0123456789abcdef" not in (tmp_path / "logs" / "state.json").read_text()
+    assert "0123456789abcdef" not in caplog.text
+    # a second click is a new request
+    io.depth_error, io.depth_scan = None, scan_result(9)
+    control_with(tmp_path, scan_request=4)
+    runner.step()
+    assert runner.depth["block"] == 9 and saved.exists()
+
+
+def test_a_scan_that_does_not_fit_this_pool_is_refused(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_scan = {
+        **scan_result(9),
+        "fee": 500,
+    }  # another fee tier: the maths is not for it
+    saved = tmp_path / "logs" / "pool_profile.json"
+    runner = make(io, depth=v3pool.load_profile(), depth_file=saved)
+    control_with(tmp_path, scan_request=1)
+    runner.step()
+    runner.step()
+    assert not saved.exists() and runner.depth["block"] != 9
+    assert (
+        "does not match"
+        in state.load(tmp_path / "logs" / "state.json")["scan"]["error"]
+    )
+
+
+def test_a_scan_with_nowhere_to_save_it_says_so(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(9)
+    runner = make(io)  # no depth_file
+    control_with(tmp_path, scan_request=1)
+    runner.step()
+    runner.step()
+    assert io.depth_reads == 0
+    assert (
+        "nowhere to save"
+        in state.load(tmp_path / "logs" / "state.json")["scan"]["error"]
+    )
+
+
+def test_a_restart_does_not_scan_again_for_a_request_it_already_served(make, tmp_path):
+    served = {
+        **scan_result(5),
+        "request": 5,
+    }  # what a scan saves, with the request it answered
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(6)
+    runner = make(io, depth=served, depth_file=tmp_path / "logs" / "pool_profile.json")
+    control_with(tmp_path, scan_request=5)
+    runner.step()
+    assert io.depth_reads == 0
+    control_with(tmp_path, scan_request=6)
+    runner.step()
+    assert io.depth_reads == 1
+
+
+def test_the_dashboard_still_gets_the_answer_to_its_scan_after_a_restart(
+    make, tmp_path
+):
+    saved = tmp_path / "logs" / "pool_profile.json"
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(777)
+    first = make(io, depth_file=saved)
+    control_with(tmp_path, scan_request=5)
+    first.step()
+    first.step()  # the tick after writes the answer to the state file
+    io2 = FakeIO([100.0])
+    io2.depth_scan = scan_result(778)
+    second = make(io2, depth=v3pool.current_profile(saved), depth_file=saved)
+    control_with(tmp_path, scan_request=5)
+    second.step()
+    answer = state.load(tmp_path / "logs" / "state.json")["scan"]
+    # without it the page would show the button as waiting for ever (5 is above "no answer")
+    assert (answer["done"], answer["block"], answer["error"]) == (5, 777, None)
+    assert io2.depth_reads == 0
+
+
+def test_the_answer_comes_from_the_saved_layout_when_there_is_no_state_file(
+    make, tmp_path
+):
+    served = {**scan_result(5), "request": 5}
+    runner = make(FakeIO([100.0]), depth=served)
+    assert runner.scan_info["done"] == 5 and runner.scan_info["block"] == 5
+    assert make(FakeIO([100.0])).scan_info is None  # never asked: no answer
+
+
+def test_a_failed_scan_is_not_retried_after_a_restart(make, tmp_path):
+    saved = tmp_path / "logs" / "pool_profile.json"
+    io = FakeIO([100.0])
+    io.depth_error = OSError("429 Too Many Requests")
+    first = make(io, depth=v3pool.load_profile(), depth_file=saved)
+    control_with(tmp_path, scan_request=3)
+    first.step()
+    first.step()  # writes the failure to the state file
+    io2 = FakeIO([100.0])
+    io2.depth_scan = scan_result(9)
+    second = make(io2, depth=v3pool.load_profile(), depth_file=saved)
+    control_with(tmp_path, scan_request=3)  # the same request, still in the settings
+    second.step()
+    assert io2.depth_reads == 0
+    assert "429" in state.load(tmp_path / "logs" / "state.json")["scan"]["error"]
+
+
+def test_a_scan_that_fails_in_an_unexpected_way_never_takes_the_bot_down(
+    make, tmp_path
+):
+    io = FakeIO([100.0])
+    io.depth_error = KeyError("ticks")  # not one of the read errors
+    runner = make(io, depth_file=tmp_path / "logs" / "pool_profile.json")
+    control_with(tmp_path, scan_request=1)
+    runner.step()
+    runner.step()
+    assert "ticks" in state.load(tmp_path / "logs" / "state.json")["scan"]["error"]
+
+
+def test_a_scan_does_not_hold_up_the_sale_decided_in_the_same_tick(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(2)
+    runner = make(io, depth_file=tmp_path / "logs" / "pool_profile.json")
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, scan_request=1)
+    io.prices = [95.0]  # take profit
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy", "sell"] and io.depth_reads == 1
 
 
 def test_the_buy_size_is_the_ceiling_when_risk_sizing_is_off(make):

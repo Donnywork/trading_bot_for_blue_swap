@@ -7,6 +7,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from functools import partial
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -21,6 +22,7 @@ import history
 import ledger
 import state
 import strategy
+import v3pool
 
 ROOT = Path(__file__).parent
 LOG_DIR = ledger.LOG_DIR
@@ -37,6 +39,12 @@ PRELOAD_MAX_AGE = (
 OPERATOR_ETH_REFRESH = 300
 # a buy sized by risk below this share of MAX_TRADE_AMOUNT is not worth its gas: skip it
 MIN_BUY_SHARE = Decimal("0.01")
+# How deep the pool is (what a buy of a given size costs) is ONE read of its liquidity, made when a
+# buy is being sized and at most this often (seconds)
+DEPTH_MAX_AGE = 300
+# A whole scan of the pool (the dashboard's button) is about 120 reads: this many seconds apart, as
+# the research's own scan did, so a rate-limited RPC (HTTP 429) is not hit with a burst
+DEPTH_CALL_PAUSE = 0.2
 
 log = logging.getLogger("bot")
 
@@ -159,6 +167,20 @@ class ChainIO:
         decimals0, decimals1 = self.base[1], self.quote[1]
         return (sqrt_price_x96 / 2**96) ** 2 * 10 ** (decimals0 - decimals1)
 
+    def read_depth(self):
+        # the pool's whole liquidity layout (about 120 read-only calls, a pause between them)
+        return config.read_depth(
+            self.pool,
+            self.base[1],
+            self.quote[1],
+            self.w3.eth.block_number,
+            DEPTH_CALL_PAUSE,
+        )
+
+    def read_liquidity(self):
+        # how much liquidity the pool has in range right now: one read-only call, like the price
+        return self.pool.functions.liquidity().call()
+
     def raw_balance(self, token):
         erc20 = bot_contract.token_contract(self.w3, token[0])
         return erc20.functions.balanceOf(self.bot.address).call()
@@ -225,8 +247,20 @@ class Runner:
         control_file=None,
         history_file=None,
         state_file=None,
+        depth=None,
+        depth_file=None,
     ):
         self.io, self.settings, self.stop, self.clock = io, settings, stop, clock
+        # the pool's saved liquidity layout (v3pool), to size a buy by its real cost; None sizes by
+        # the fixed strategy.FRICTION_PCT. The layout is scaled to how deep the pool is now (one
+        # read of its liquidity, when a buy is sized, at most every DEPTH_MAX_AGE): `scale` and
+        # when it was read. The dashboard gets the scale through the state file.
+        self.depth = depth
+        self.scale, self.scale_at = 1.0, None
+        # The dashboard's "scan the pool" button: a new layout is read when its request number
+        # (in the settings file) is above the last one served. A scan saves the layout in
+        # `depth_file`, together with the request it answered, so a restart does not scan again.
+        self.depth_file = depth_file
         self.halt_file, self.heartbeat_file = halt_file, heartbeat_file
         self.ledger_file = ledger_file or ledger.file_for(settings.dry_run)
         try:
@@ -240,6 +274,11 @@ class Runner:
         self.control_file, self.history_file = control_file, history_file
         # what the dashboard shows of the chain: it reads this file instead of asking the RPC
         self.state_file = state_file
+        # the last answer to the scan button, for the dashboard (the state file); kept over a restart
+        self.scan_info = self.restored_scan()
+        self.scan_done = max(
+            (depth or {}).get("request", 0), (self.scan_info or {}).get("done", 0)
+        )
         self.eth, self.eth_at = None, None
         self.cfg = strategy.DEFAULT
         self.control_stamp = None
@@ -288,9 +327,100 @@ class Runner:
                 e,
             )
             return
+        if new.paused != self.cfg.paused:
+            if new.paused:
+                log.warning(
+                    "new buys are PAUSED from the dashboard (a sale still runs)"
+                )
+            else:
+                log.info("new buys are resumed from the dashboard")
         if new != self.cfg:
             log.info("settings changed: %s", strategy.to_dict(new))
             self.cfg = new
+
+    def restored_scan(self):
+        # What the last run answered to the scan button. The state file has it, a failed scan
+        # included (so a restart does not retry one by itself); without it, the saved layout
+        # still knows the request it answered. Without either the button is simply unanswered.
+        try:
+            saved = state.load(self.state_file) if self.state_file else None
+        except ValueError:
+            saved = None
+        if saved and saved["scan"]:
+            return saved["scan"]
+        request = (self.depth or {}).get("request", 0)
+        if request:
+            return {
+                "done": request,
+                "block": self.depth.get("block"),
+                "at": None,
+                "error": None,
+            }
+        return None
+
+    def serve_scan_request(self):
+        # ------------------------------------
+        # The dashboard's "scan the pool's liquidity" button: read the pool's whole layout (about
+        # 120 read-only calls, 30 to 40 s) and keep it from now on. Done at the end of a tick, so a
+        # sale decided in this tick is not held up by it. A failed scan is reported to the dashboard
+        # and not retried by itself (the button asks again); it never halts: it is a read.
+        # ------------------------------------
+
+        request = self.cfg.scan_request
+        if request <= self.scan_done:
+            return
+        self.scan_done = request
+        log.info(
+            "scanning the pool's liquidity (asked on the dashboard): about 120 reads"
+        )
+        try:
+            if self.depth_file is None:
+                raise ValueError("nowhere to save the layout")
+            profile = v3pool.check_profile(self.io.read_depth(), "the scanned pool")
+            profile = {**profile, "request": request}
+            v3pool.save_profile(self.depth_file, profile)
+        except Exception as e:  # noqa: BLE001
+            # (a scan is only a read: whatever goes wrong must not take the bot down; and an
+            # error from a failed request can carry the RPC URL and its key)
+            self.scan_info = {"done": request, "error": redact(str(e))[:300]}
+            log.warning("the pool scan failed: %s", redact(str(e)))
+            return
+        self.depth = profile
+        self.scale, self.scale_at = (
+            1.0,
+            None,
+        )  # measured against the layout in use: read afresh
+        self.scan_info = {
+            "done": request,
+            "block": profile["block"],
+            "at": time.time(),
+            "error": None,
+        }
+        log.info(
+            "pool scanned at block %s: %d ticks",
+            profile["block"],
+            len(profile["ticks"]),
+        )
+
+    def pool_now(self, price):
+        # ------------------------------------
+        # The saved liquidity layout, scaled to how deep the pool is now. Liquidity providers add
+        # and pull liquidity, which changes what a buy costs. One read of the pool's liquidity,
+        # only when a buy is being sized and at most every DEPTH_MAX_AGE; a read error propagates
+        # (the caller skips the buy: a read, never a halt).
+        # ------------------------------------
+
+        now = self.clock()
+        if self.scale_at is None or now - self.scale_at >= DEPTH_MAX_AGE:
+            live = self.io.read_liquidity()
+            self.scale = v3pool.depth_scale(self.depth, price, live)
+            self.scale_at = now
+            log.info(
+                "pool depth: %.0f%% of the saved layout (liquidity %s in range)",
+                self.scale * 100,
+                live,
+            )
+        return v3pool.scaled(self.depth, self.scale)
 
     def step(self):
         # ------------------------------------
@@ -322,6 +452,8 @@ class Runner:
         self.write_state(price, position)
         prices = list(self.prices)
         decision = strategy.decide(prices, position, self.cfg)
+        if decision == "buy" and self.cfg.paused:
+            decision = "hold"  # paused on the dashboard: only a new buy waits, a sale never does
         self.note_guard(prices, position)
         log.info(
             "strategy=%s price=%.6f decision=%s base=%.6f quote=%.6f samples=%d%s",
@@ -331,7 +463,8 @@ class Runner:
             position.base,
             position.quote,
             len(self.prices),
-            f" entry={entry_price:.6f}" if held else "",
+            (f" entry={entry_price:.6f}" if held else "")
+            + (" PAUSED" if self.cfg.paused else ""),
         )
         if decision != "hold":
             # why a sale is made is settled now, from the same price and age the decision used: the
@@ -345,6 +478,7 @@ class Runner:
                 else None
             )
             self.trade(decision, position, price, reason)
+        self.serve_scan_request()
 
     def write_state(self, price, position):
         # Only for the dashboard: a failure here is a warning, never a reason to skip the tick.
@@ -355,18 +489,20 @@ class Runner:
             if self.eth_at is None or now - self.eth_at >= OPERATOR_ETH_REFRESH:
                 self.eth, self.eth_at = self.io.operator_eth(), now
             base, quote = self.io.symbols
-            state.save(
-                self.state_file,
-                time.time(),
-                {
-                    "base": base,
-                    "quote": quote,
-                    "price": price,
-                    "vault_base": Decimal(str(position.base)),
-                    "vault_quote": Decimal(str(position.quote)),
-                    "operator_eth": self.eth,
-                },
-            )
+            chain = {
+                "base": base,
+                "quote": quote,
+                "price": price,
+                "vault_base": Decimal(str(position.base)),
+                "vault_quote": Decimal(str(position.quote)),
+                "operator_eth": self.eth,
+            }
+            if self.scale_at is not None:
+                # how deep the pool was when a buy was last sized, for the dashboard's estimates
+                chain["depth_scale"] = self.scale
+            if self.scan_info is not None:
+                chain["scan"] = self.scan_info
+            state.save(self.state_file, time.time(), chain)
         except (*READ_ERRORS, OSError) as e:
             log.warning("could not update the dashboard's state file: %s", e)
 
@@ -396,7 +532,15 @@ class Runner:
             return
 
         if decision == "buy":
-            amount, balance = self.buy_size(position), position.quote
+            try:
+                amount, balance = self.buy_size(position, price), position.quote
+            except READ_ERRORS as e:
+                log.warning("buy skipped: could not read the pool's liquidity: %s", e)
+                return
+            except ValueError as e:
+                # (the read worked; the saved layout holds nothing at this price, or the pool is dry)
+                log.warning("buy skipped: the pool's depth cannot be sized: %s", e)
+                return
             if s.risk_pct > 0 and amount < s.max_trade * MIN_BUY_SHARE:
                 log.info(
                     "buy skipped: the risk-sized buy %s is below %s%% of MAX_TRADE_AMOUNT (%s), "
@@ -472,16 +616,25 @@ class Runner:
         log.info("%s done%s", decision, " (dry run, nothing sent)" if s.dry_run else "")
         self.record(decision, price, amount, received, reason)
 
-    def buy_size(self, position):
+    def buy_size(self, position, price):
         # MAX_TRADE_AMOUNT is the ceiling (the contract's cap is the same number or higher); with
-        # RISK_PER_TRADE_PCT set, a buy is smaller when the vault is small, so a stop loss costs
-        # about that share of it
+        # RISK_PER_TRADE_PCT set, a buy is smaller when the vault is small or the pool is thin at
+        # this size, so a stop loss costs about that share of the vault
         s = self.settings
+        loss_at_stop = None
+        if self.depth is not None and s.risk_pct > 0:
+            loss_at_stop = partial(
+                v3pool.loss_at_stop,
+                self.pool_now(price),
+                price,
+                self.cfg.stop_loss_pct,
+            )
         size = strategy.trade_size(
             Decimal(str(position.quote)),
             s.max_trade,
             s.risk_pct,
             self.cfg.stop_loss_pct,
+            loss_at_stop,
         )
         if size < s.max_trade:
             log.info(
@@ -621,12 +774,25 @@ def main(ticks=None):
         settings.max_trade,
         settings.min_operator_eth,
     )
+    # the layout the dashboard's scan button last saved, else the one that ships with the code
+    try:
+        depth = v3pool.current_profile()
+    except (OSError, ValueError) as e:
+        depth = None
+        if settings.risk_pct > 0:
+            # a risk-sized buy needs the pool's real costs: without them, refuse rather than size
+            # with a number that is only right for small buys
+            raise SystemExit(
+                f"RISK_PER_TRADE_PCT needs {v3pool.PROFILE_FILE.name}: {e}"
+            ) from e
     if settings.risk_pct > 0:
         log.info(
             "buys are sized by risk: a stop loss should cost %s%% of the vault's quote, never more "
-            "than %s per buy",
+            "than %s per buy (pool layout saved at block %s, scaled to the pool's liquidity "
+            "when a buy is sized)",
             settings.risk_pct,
             settings.max_trade,
+            depth["block"],
         )
 
     stop = threading.Event()
@@ -642,6 +808,8 @@ def main(ticks=None):
         control_file=control.CONTROL_FILE,
         history_file=history.HISTORY_FILE,
         state_file=state.STATE_FILE,
+        depth=depth,
+        depth_file=v3pool.LIVE_PROFILE_FILE,
     )
     cfg = runner.cfg
     log.info(

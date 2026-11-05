@@ -23,11 +23,13 @@ MIN_DIP_PCT = 1.0  # a dip smaller than this is noise next to fees: never a buy 
 # minutes, the two losers 11 and 28, so 15 minutes would only have cut the 28-minute one.
 TIME_STOP_MIN = 15.0
 TIME_STOP_RANGE = (1.0, 240.0)  # minutes
+SCAN_REQUEST_MAX = 10**11  # a unix time in seconds is about 1.8e9
 # What one leg (a buy or a sell) costs, in percent of what it trades: the pool's fee tier (3000 =
 # 0.3%) plus an allowance for the price impact of our own swap. A round trip is twice that:
 # 0.75%. Measured on the 15 live trades of 2026-11-04: 0.64 to 0.78, mean 0.73, of which the fee
-# is 0.60 and the impact 0.04 to 0.18. Gas is paid in Sepolia ETH and is not counted. Used to
-# size a trade by the loss it risks, and by the strategy comparison's replay.
+# is 0.60 and the impact 0.04 to 0.18. Gas is paid in Sepolia ETH and is not counted. Only a
+# fallback now: with the pool's liquidity layout (v3pool) the impact is worked out for the size
+# traded, and this fixed figure, right for buys of about 1000, is used without it (tests).
 POOL_FEE_PCT = 0.3
 IMPACT_PCT = 0.075
 FRICTION_PCT = 2 * (POOL_FEE_PCT + IMPACT_PCT)
@@ -261,6 +263,12 @@ class Config:
     guard_drift_pct: float = GUARD_DRIFT_PCT
     time_stop_on: bool = False
     time_stop_min: float = TIME_STOP_MIN
+    # Not part of the strategy form: what the dashboard's buttons set (see control.py).
+    # `paused` holds back new buys only, a sale is never held back. `scan_request` counts the
+    # clicks on "scan the pool's liquidity": a number that only goes up, so the bot can tell a
+    # new request from one it has already served.
+    paused: bool = False
+    scan_request: int = 0
 
     def __post_init__(self):
         full = {
@@ -314,6 +322,8 @@ def parse_config(raw):
         "guard_drift_pct",
         "time_stop_on",
         "time_stop_min",
+        "paused",
+        "scan_request",
     }
     if unknown:
         raise ConfigError(f"unknown setting(s): {sorted(unknown)}")
@@ -346,6 +356,13 @@ def parse_config(raw):
         raise ConfigError("time stop on/off must be true or false")
     time_stop_min = number(
         "time stop (minutes)", raw.get("time_stop_min", TIME_STOP_MIN), *TIME_STOP_RANGE
+    )
+
+    paused = raw.get("paused", False)
+    if not isinstance(paused, bool):
+        raise ConfigError("paused must be true or false")
+    scan_request = number(
+        "scan request", raw.get("scan_request", 0), 0, SCAN_REQUEST_MAX, True
     )
 
     given = raw.get("params", {})
@@ -383,6 +400,8 @@ def parse_config(raw):
         guard_drift,
         time_stop_on,
         time_stop_min,
+        paused,
+        scan_request,
     )
     for (
         strategy_name,
@@ -532,19 +551,54 @@ def exit_reason(price, entry_price, config=DEFAULT, held_seconds=None):
     return None
 
 
-def trade_size(equity, ceiling, risk_pct, stop_loss_pct):
+def largest_within_budget(loss_at_stop, budget, cap):
+    # The biggest quote amount in (0, cap] whose stop loss costs at most `budget`, by bisection:
+    # a bigger buy never loses less. loss_at_stop(quote) -> quote lost, raises ValueError when the
+    # pool cannot absorb that size (taken as a loss that is too big).
+    def too_big(quote):
+        try:
+            return loss_at_stop(quote) > budget
+        except ValueError:
+            return True
+
+    if not too_big(cap):
+        return cap
+    low, high = 0.0, cap
+    for _ in range(60):
+        middle = (low + high) / 2
+        if too_big(middle):
+            high = middle
+        else:
+            low = middle
+    return low
+
+
+def trade_size(equity, ceiling, risk_pct, stop_loss_pct, loss_at_stop=None):
     # ------------------------------------
     # How much quote one buy spends. risk_pct is the share of `equity` (the quote in the vault)
-    # that a stop loss may cost, counting the round-trip fees: size = equity * risk / loss per
-    # unit. Never above `ceiling` (the owner's cap) or the equity itself. 0 turns it off: the
-    # ceiling is the size. All Decimal: this amount goes on chain. A price that jumps past the
-    # stop loss loses more than planned, as live trades have (-4.2% against a 4% stop).
+    # that a stop loss may cost, counting the round-trip fees. Never above `ceiling` (the owner's
+    # cap) or the equity itself. 0 turns it off: the ceiling is the size.
+    #
+    # With `loss_at_stop` (quote spent -> quote lost, see v3pool.loss_at_stop) the loss is the
+    # exact cost on the pool's real liquidity, so it grows with the size. Without it the round
+    # trip is taken as the fixed FRICTION_PCT, which only holds for small buys.
+    #
+    # The amount goes on chain, so the result is a Decimal rounded down (the search itself runs
+    # on floats). A price that jumps past the stop loss loses more than planned, as live trades
+    # have (-4.2% against a 4% stop).
     # ------------------------------------
 
     if risk_pct <= 0:
         return ceiling
-    loss_per_unit = (Decimal(str(stop_loss_pct)) + Decimal(str(FRICTION_PCT))) / 100
-    size = min(ceiling, equity, equity * risk_pct / 100 / loss_per_unit)
+    if loss_at_stop is None:
+        loss_per_unit = (Decimal(str(stop_loss_pct)) + Decimal(str(FRICTION_PCT))) / 100
+        size = min(ceiling, equity, equity * risk_pct / 100 / loss_per_unit)
+    else:
+        cap = min(ceiling, equity)
+        found = largest_within_budget(
+            loss_at_stop, float(equity * risk_pct / 100), float(cap)
+        )
+        size = cap if found >= float(cap) else Decimal(str(found))
     if size >= ceiling:
         return ceiling
     return size.quantize(Decimal(1).scaleb(-6), rounding=ROUND_DOWN)

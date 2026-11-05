@@ -44,7 +44,7 @@ Order of work: Infura key and MetaMask → prepare the server → bot wallet and
 
 1. Sign in at <https://app.infura.io>, create an API key, and make sure the **Sepolia** network is enabled for it (menu names may change; you want the HTTPS endpoint).
 2. The URL looks like `https://sepolia.infura.io/v3/<your-key>`. **The key is part of the URL, so the URL is a secret.** It goes in `.env` as `RPC_URL`, never in git, chat or screenshots. The bot also redacts it from its logs and from `logs/HALTED`.
-3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself.
+3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). With `RISK_PER_TRADE_PCT` above 0 a buy being sized adds one `liquidity()` read, at most every 5 minutes. The dashboard's **Scan pool liquidity** button makes the bot make about 120 more read-only calls, 0.2 s apart: that tick takes 30 to 40 s longer, and a stop (SIGTERM) waits for it to finish. `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself.
 
 ### 1.2 MetaMask (your own computer)
 
@@ -152,7 +152,7 @@ Now edit `.env` (`nano .env`):
 |---|---|
 | `RPC_URL` | your Infura Sepolia URL from 1.1 |
 | `OWNER_ADDRESS` | your enrolled wallet, copied from MetaMask |
-| `RISK_PER_TRADE_PCT` | optional, default `0` (off). Above 0, a buy is sized so a stop loss costs about this share of the vault's f564 (fees included), never above `MAX_TRADE_AMOUNT`. See GETTING_STARTED, "Trade size" |
+| `RISK_PER_TRADE_PCT` | optional, default `0` (off). Above 0, a buy is sized so a stop loss costs about this share of the vault's f564 (pool fee and price impact included, from the pool's liquidity: `pool_profile.json` is in the repo (the pool's layout as of 2026-11-04), scaled by one read of the pool's `liquidity()` when a buy is sized; the dashboard's "Scan pool liquidity" button makes the bot read a fresh layout into `logs/pool_profile.json`; nothing to copy by hand), never above `MAX_TRADE_AMOUNT`. The bot refuses to start with it set if that file is missing. See GETTING_STARTED, "Trade size" |
 | `MAX_TRADE_AMOUNT` | size of one **buy** in human units of the token being spent (f564), e.g. `0.01`; a sell closes exactly what that buy delivered. It is also the **on-chain cap** per swap, in each token's own units |
 | `DRY_RUN` | leave `true` for now |
 | `BOT_CONTRACT_ADDRESS` | leave **empty**; filled in after deploying |

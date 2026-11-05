@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -85,6 +86,56 @@ def read_price(pool, decimals0, decimals1):
     print(f"Price (token0 per token1): {1 / price:.6f}")
 
     return price
+
+
+MIN_TICK, MAX_TICK = -887272, 887272
+# the liquidity worked out from the ticks may differ this much from the pool's own figure: a
+# provider can add or pull liquidity between two of the reads below
+DEPTH_TOLERANCE = 0.01
+
+
+def read_depth(pool, decimals0, decimals1, block, pause=0.0):
+    # ------------------------------------
+    # The pool's whole liquidity layout: every initialised tick and its net liquidity (the input of
+    # v3pool). Read-only eth_calls, about 120 of them (one per 256 ticks, one per initialised
+    # tick), no key and no transaction, `pause` seconds apart so a rate-limited RPC (HTTP 429) is
+    # not hit with a burst. Raises ValueError if the result does not add up to the pool's own
+    # current liquidity. Every call is made AT `block`, so the layout is one snapshot even though
+    # reading it takes 30 to 40 s.
+    # ------------------------------------
+
+    def ask(call):
+        time.sleep(pause)
+        return call.call(block_identifier=block)
+
+    spacing = ask(pool.functions.tickSpacing())
+    sqrt_price_x96, current_tick, *_ = ask(pool.functions.slot0())
+    liquidity = ask(pool.functions.liquidity())
+    ticks = []
+    for word in range((MIN_TICK // spacing) >> 8, ((MAX_TICK // spacing) >> 8) + 1):
+        bits = ask(pool.functions.tickBitmap(word))
+        for bit in range(256):
+            if bits >> bit & 1:
+                tick = (word * 256 + bit) * spacing
+                gross, net, *_ = ask(pool.functions.ticks(tick))
+                ticks.append({"tick": tick, "gross": gross, "net": net})
+    active = sum(t["net"] for t in ticks if t["tick"] <= current_tick)
+    if abs(active - liquidity) > DEPTH_TOLERANCE * liquidity:
+        raise ValueError(
+            f"the ticks add up to {active} liquidity but the pool says {liquidity}: "
+            "it changed while being read, try again"
+        )
+    return {
+        "block": block,
+        "tick": current_tick,
+        "sqrtPriceX96": sqrt_price_x96,
+        "liquidity": liquidity,
+        "spacing": spacing,
+        "fee": ask(pool.functions.fee()),
+        "d0": decimals0,
+        "d1": decimals1,
+        "ticks": ticks,
+    }
 
 
 def quote_swap(quoter, token_in, token_out, fee, amount_in):

@@ -4,6 +4,7 @@ import pytest
 
 import compare
 import strategy
+import v3pool
 from strategy import Config
 
 # a pool where one bot sells (-4%) and buys (+4%) in turn, a sample every 30 s with a few quiet
@@ -37,6 +38,73 @@ def test_the_round_trip_cost_is_taken_off_every_trade():
     # a +4% step minus the 0.75% a round trip costs, per 1000 spent
     per_trade = 1000 * (1.04 * (1 - strategy.FRICTION_PCT / 100) - 1)
     assert row["profit"] / row["trades"] == pytest.approx(per_trade, rel=0.02)
+
+
+DEPTH = v3pool.load_profile()
+
+
+def test_with_the_pool_depth_a_big_trade_pays_what_its_size_really_costs():
+    points = sawtooth(4)
+    fixed = compare.replay(points, NO_GUARD, points[0][0], cooldown=0, size=15000)
+    exact = compare.replay(
+        points, NO_GUARD, points[0][0], cooldown=0, size=15000, depth=DEPTH
+    )
+    assert exact["trades"] == fixed["trades"] > 0
+    assert exact["gross"] == pytest.approx(fixed["gross"])  # the price moved the same
+    # a buy of 15,000 costs about 2.4% for the round trip, not 0.75%
+    assert exact["profit"] < fixed["profit"] - 150 * exact["trades"]
+    assert exact["impact"] > 3 * fixed["impact"]
+    assert exact["fees"] == pytest.approx(
+        fixed["fees"], rel=0.1
+    )  # the 0.3% fee is the same
+    assert exact["profit"] == pytest.approx(
+        exact["gross"] - exact["fees"] - exact["impact"]
+    )
+
+
+def test_with_the_pool_depth_a_small_trade_costs_about_what_the_fixed_cost_says():
+    points = sawtooth(4)
+    fixed = compare.replay(points, NO_GUARD, points[0][0], cooldown=0, size=1000)
+    exact = compare.replay(
+        points, NO_GUARD, points[0][0], cooldown=0, size=1000, depth=DEPTH
+    )
+    assert exact["profit"] == pytest.approx(fixed["profit"], rel=0.05)
+
+
+def test_an_open_position_is_valued_with_its_real_exit_cost_too():
+    points = sawtooth(2)[:-3]
+    cfg = Config(
+        strategy="sharp_drop",
+        guard_flip_pct=0,
+        guard_drift_pct=0,
+        take_profit_pct=100.0,
+    )
+    fixed = compare.replay(points, cfg, points[0][0], cooldown=0, size=15000)
+    exact = compare.replay(
+        points, cfg, points[0][0], cooldown=0, size=15000, depth=DEPTH
+    )
+    assert exact["holding"] and exact["open"] < fixed["open"]
+
+
+def test_the_round_trip_cost_grows_with_the_size_and_is_the_fixed_one_without_depth():
+    point = [(1, 1043.0)]
+    small = compare.friction_pct(DEPTH, point, 1000)
+    big = compare.friction_pct(DEPTH, point, 14000)
+    assert small == pytest.approx(0.73, abs=0.02)
+    assert big == pytest.approx(2.26, abs=0.05)
+    assert compare.friction_pct(None, point, 14000) == strategy.FRICTION_PCT
+    assert compare.friction_pct(DEPTH, [], 14000) == strategy.FRICTION_PCT
+
+
+def test_the_warnings_use_the_cost_of_the_size_when_the_depth_is_known():
+    points = sawtooth(4)
+
+    def first_note(depth):
+        rows = compare.compare(points, NO_GUARD, points[0][0], 0, 14000, None, depth)
+        return next(r for r in rows if r["strategy"] == "sharp_drop")["warnings"][0]
+
+    assert "about 0.15% price impact" in first_note(None)["text"]
+    assert "about 0.15% price impact" not in first_note(DEPTH)["text"]
 
 
 def test_prices_before_the_start_only_warm_the_history_up():

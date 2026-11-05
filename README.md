@@ -11,7 +11,7 @@ A Python bot that reads a Uniswap V3 pool on **Sepolia (testnet only)**, decides
 What you get:
 
 - a **bot** that buys with a strategy you pick (six to choose from) and sells at a **take profit** or **stop loss**, with a **pattern guard** that pauses new buys when the market stops behaving as the strategy assumes;
-- a **dashboard** (`dashboard.py`) showing price, position, profit and loss, with a form to switch strategy and change take profit / stop loss while the bot runs;
+- a **dashboard** (`dashboard.py`) showing price, position, profit and loss, with a form to switch strategy and change take profit / stop loss while the bot runs, a button to **pause new buys** (sales still run) and a button to **scan the pool's liquidity**;
 - a `status.py` command for the same information in a terminal, and a read-only `pool_monitor.py` that shows who else trades in the pool.
 
 ## How it fits together
@@ -32,6 +32,7 @@ What you get:
 |---|---|
 | `main.py` | the bot loop (`Runner`), logging with secret redaction, kill switch |
 | `strategy.py` | the six entry strategies, the shared take profit / stop loss, settings validation: pure functions |
+| `v3pool.py`, `pool_profile.json` | exact Uniswap V3 swap maths over the pool's liquidity layout (a saved snapshot, scaled by one read of the pool's liquidity when a buy is sized, or a fresh scan the dashboard's button makes the bot do, saved in `logs/pool_profile.json`; the maths itself is offline): what a trade of a given size costs, used to size buys by risk and for the dashboard's estimates |
 | `compare.py` | paper replay of every strategy on the recorded prices (the dashboard's comparison table); pure |
 | `ledger.py` | the bot's open position and closed trades (`logs/ledger.json`), with the profit maths |
 | `control.py`, `history.py`, `state.py` | the runtime settings file the dashboard writes, the price history for the chart, and the price and balances the bot last read (`logs/state.json`, what the dashboard shows) |
@@ -42,7 +43,7 @@ What you get:
 | `pool_monitor.py` | read-only pool status: price, swap count, who is trading, new actors (no key needed) |
 | `config.py` | pool and quoter reads, price and quote helpers (also a read-only CLI) |
 | `contracts/TradingBot.sol` | the bot contract (`mocks/` is test-only) |
-| `drafts/` | local scratch space for throwaway scripts and notes; gitignored, so it only exists on your machine (empty it when you are done) |
+| `drafts/` | local scratch space for throwaway scripts and notes; gitignored, so it only exists on your machine (empty it when you are done). Agents work in it with the Read / Write / Edit tools directly, not with shell heredocs or `python -c` |
 | `abis/` | ABIs; `trading_bot.json` is written by `deploy` for your deployment and is gitignored: copy it to the server with `.env` |
 | `deploy/*.service` | systemd units for Ubuntu 24.04 (the bot, and the optional dashboard) |
 | `docs/GETTING_STARTED.md` | **start here**: install, first run, dashboard, strategies, going live |
@@ -93,7 +94,7 @@ See `.env.example` for all variables. The important ones:
 | `OWNER_ADDRESS` | enrolled wallet that owns the contract (checksummed) |
 | `BOT_CONTRACT_ADDRESS` | set after deploying |
 | `MAX_TRADE_AMOUNT` | size of one **buy** (in f564, the quote token); a sell closes exactly what the buy delivered. Also the on-chain per-swap cap set at deploy |
-| `RISK_PER_TRADE_PCT` | optional, `0` = off (every buy is `MAX_TRADE_AMOUNT`). Above 0, a buy is sized so that a stop loss costs about this share of the f564 in the vault, fees included, and never exceeds `MAX_TRADE_AMOUNT` |
+| `RISK_PER_TRADE_PCT` | optional, `0` = off (every buy is `MAX_TRADE_AMOUNT`). Above 0, a buy is sized so that a stop loss costs about this share of the f564 in the vault, pool fee and price impact included (worked out on the liquidity saved in `pool_profile.json`, so a bigger buy pays more impact), and never exceeds `MAX_TRADE_AMOUNT` |
 | `DRY_RUN` | only the word `false` (any capitalisation) sends real transactions; anything else simulates only |
 | `POLL_SECONDS`, `COOLDOWN_SECONDS`, `MIN_OPERATOR_ETH`, `MAX_TRADE_FAILURES` | loop pacing and kill switch |
 
@@ -105,7 +106,7 @@ The strategy, take profit, stop loss, the optional time stop, the pattern-guard 
 - `DRY_RUN` defaults to on, and chain id is checked to be Sepolia before anything is signed.
 - Secrets (the RPC URL and its key, the private key) are redacted from logs and `logs/HALTED`.
 - The kill switch writes `logs/HALTED`; the bot will not start again until you read it and delete the file.
-- The dashboard listens on `127.0.0.1` only, refuses requests whose `Host` or `Origin` is not local, and can change only the strategy settings: never `DRY_RUN`, the trade size, an address or a key.
+- The dashboard listens on `127.0.0.1` only, refuses requests whose `Host` or `Origin` is not local, and can change only the strategy settings, pause new buys and ask the bot for a pool scan: never `DRY_RUN`, the trade size, an address or a key.
 - An unreadable `logs/ledger.json` halts the bot instead of guessing whether it holds a position.
 
 ## Development

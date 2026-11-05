@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import traceback
+from dataclasses import replace
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,6 +24,7 @@ import ledger
 import state
 import status
 import strategy
+import v3pool
 from main import PRELOAD_MAX_AGE, redact
 
 # Loopback only, on purpose: the page can change what the bot does, and it has no login. Reach it
@@ -136,11 +138,17 @@ class Dashboard:
         clock=time.time,
         cooldown=300,
         size=Decimal(1000),
+        depth_file=None,
     ):
         self.dry_run, self.state_file, self.clock = dry_run, state_file, clock
         # only for the strategy comparison's paper replay (the bot's own COOLDOWN_SECONDS and
         # MAX_TRADE_AMOUNT); the dashboard never changes either
         self.cooldown, self.size = cooldown, size
+        # charge the replay's trades what their size really costs on the pool's liquidity layout
+        # (v3pool: the one the bot scanned and saved in `depth_file`, else the one that ships with
+        # the code), scaled by how deep the bot last found the pool (in the state file); None: the
+        # replay uses the fixed cost per trade. Only ever read here, never scanned from here.
+        self.depth_file = depth_file
         self.cache = {}
         self.cache_lock = (
             threading.Lock()
@@ -206,6 +214,7 @@ class Dashboard:
                 history.trailing_run(points, now, PRELOAD_MAX_AGE), cfg
             ),
             "config": strategy.to_dict(cfg),
+            "control": self.control_view(cfg),
             "schema": strategy.schema(),
         }
 
@@ -315,14 +324,41 @@ class Dashboard:
         )
         return points, start, signature
 
+    def pool_depth(self):
+        # The saved layout scaled by what the bot last wrote in the state file (never a chain
+        # read: 1.0, as saved, until the bot has sized a buy); None when not asked for.
+        if self.depth_file is None:
+            return None
+        try:
+            chain = state.load(self.state_file)
+        except ValueError:
+            chain = None  # snapshot() reports it
+        return v3pool.scaled(
+            v3pool.current_profile(self.depth_file),
+            chain["depth_scale"] if chain else 1.0,
+        )
+
+    @staticmethod
+    def depth_key(depth):
+        # what a cached replay depends on: which layout and how deep
+        return (depth["block"], round(depth["scale"], 2)) if depth else None
+
     def replayed(self, points, start, signature, cfg):
-        # every strategy's replay under `cfg`, with warnings; cached per (prices, settings)
-        key = ("rows", signature, json.dumps(strategy.to_dict(cfg), sort_keys=True))
+        # every strategy's replay under `cfg`, with warnings; cached per (prices, settings, depth)
+        depth = self.pool_depth()
+        key = (
+            "rows",
+            signature,
+            json.dumps(strategy.to_dict(cfg), sort_keys=True),
+            self.depth_key(depth),
+        )
 
         def make():
             window = [p for p in points if p[0] >= start]
             stats = compare.step_stats(window)
-            rows = compare.compare(points, cfg, start, self.cooldown, self.size, stats)
+            rows = compare.compare(
+                points, cfg, start, self.cooldown, self.size, stats, depth
+            )
             return {"rows": rows, "steps": stats}
 
         return self.remembered(key, make) if points else {"rows": [], "steps": None}
@@ -349,6 +385,7 @@ class Dashboard:
             json.dumps(strategy.to_dict(cfg), sort_keys=True),
             len(closed),
             closed[-1]["closed"] if closed else None,
+            self.depth_key(self.pool_depth()),
         )
 
         def make():
@@ -386,6 +423,9 @@ class Dashboard:
         except (ValueError, TypeError, OverflowError, RecursionError) as e:
             raise QueryError(f"these settings cannot be used: {e}") from e
         saved = self.saved_config()
+        # the buttons are not part of the form: a draft is the saved pause and scan state, so a
+        # pause alone never shows up as a change
+        draft = replace(draft, paused=saved.paused, scan_request=saved.scan_request)
         points, start, signature = self.replay_window(query)
         before = self.replayed(points, start, signature, saved)
         after = (
@@ -441,8 +481,66 @@ class Dashboard:
             raw
         )  # ValueError if anything is off: nothing saved
         with self.write_lock:
+            # saving the form must not undo a click on a button made since it was loaded
+            current = self.saved_config()
+            config = replace(
+                config, paused=current.paused, scan_request=current.scan_request
+            )
             control.save(self.control_file, config)
         return strategy.to_dict(config)
+
+    COMMANDS: ClassVar[tuple] = ("pause", "resume", "scan")
+
+    def command(self, raw):
+        # ------------------------------------
+        # The buttons. All they do is write logs/control.json, like the settings form: "pause" and
+        # "resume" hold back or allow NEW buys (a sale is never held back), "scan" raises the
+        # request number the bot compares with the last one it served, and the bot then reads the
+        # pool's layout itself on its next tick. This page makes no RPC call. ValueError if the
+        # request is not one of these or the settings file is damaged (it is not overwritten: the
+        # settings form is how it gets fixed).
+        # ------------------------------------
+
+        if (
+            not isinstance(raw, dict)
+            or set(raw) != {"command"}
+            or raw["command"] not in self.COMMANDS
+        ):
+            raise ValueError(
+                f'send exactly {{"command": one of {list(self.COMMANDS)}}}'
+            )
+        name = raw["command"]
+        with self.write_lock:
+            current = control.load(self.control_file)  # ValueError if damaged
+            if name == "scan":
+                # always above the last request (and so above what the bot served)
+                request = max(int(self.clock()), current.scan_request + 1)
+                changed = replace(current, scan_request=request)
+            else:
+                changed = replace(current, paused=name == "pause")
+            control.save(self.control_file, changed)
+        return {"paused": changed.paused, "scan_request": changed.scan_request}
+
+    def control_view(self, cfg):
+        # what the buttons show: the saved pause and scan request, how deep the bot last found the
+        # pool, and its last answer to a scan request (from the state file)
+        try:
+            chain = state.load(self.state_file)
+        except ValueError:
+            chain = None
+        depth = self.pool_depth()
+        return {
+            "paused": cfg.paused,
+            "scan_request": cfg.scan_request,
+            "scan": chain["scan"] if chain else None,
+            "pool": None
+            if depth is None
+            else {
+                "block": depth["block"],
+                "scale": depth["scale"],
+                "scanned": "request" in depth,
+            },
+        }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -530,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.local_only():
             return
-        if self.path != "/api/config":
+        if self.path not in ("/api/config", "/api/command"):
             return self.reply(404, {"error": "not found"})
         # A browser lets any web page POST to localhost. These two checks stop that: a
         # cross-site page cannot set a JSON content type without a preflight we never answer,
@@ -552,7 +650,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(413, {"error": "body too large"})
         try:
             raw = json.loads(self.rfile.read(length))
-            self.reply(200, {"config": self.app.update_config(raw)})
+            if self.path == "/api/command":
+                self.reply(200, {"control": self.app.command(raw)})
+            else:
+                self.reply(200, {"config": self.app.update_config(raw)})
         except (
             ValueError
         ) as e:  # bad JSON and bad settings both end here, with the reason
@@ -592,6 +693,7 @@ def cli():
         dry_run,
         cooldown=int(os.environ.get("COOLDOWN_SECONDS", "300")),
         size=Decimal(os.environ.get("MAX_TRADE_AMOUNT", "1000")),
+        depth_file=v3pool.LIVE_PROFILE_FILE,
     )
     server = serve(app, port)
     print(

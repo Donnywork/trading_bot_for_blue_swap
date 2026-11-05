@@ -1,0 +1,35 @@
+current (no extra filter)                  blocks 0/7 losers, 0/37 winners | kept: 44 trades, 7 losers, sum  +94.6% (all 44: +94.6%) worst -6.3%
+price <= 180-sample avg -0.5%              blocks 4/7 losers, 7/37 winners | kept: 33 trades, 3 losers, sum  +86.2% (all 44: +94.6%) worst -4.8%
+price <= 180-sample avg -1.0%              blocks 4/7 losers, 8/37 winners | kept: 32 trades, 3 losers, sum  +82.8% (all 44: +94.6%) worst -4.8%
+price <= 180-sample avg -1.5%              blocks 5/7 losers, 10/37 winners | kept: 29 trades, 2 losers, sum  +80.3% (all 44: +94.6%) worst -4.8%
+price <= 180-sample avg -2.0%              blocks 5/7 losers, 17/37 winners | kept: 22 trades, 2 losers, sum  +61.5% (all 44: +94.6%) worst -4.8%
+price <= 360-sample avg -0.5%              blocks 4/7 losers, 5/37 winners | kept: 35 trades, 3 losers, sum  +92.3% (all 44: +94.6%) worst -4.8%
+price <= 360-sample avg -1.0%              blocks 5/7 losers, 7/37 winners | kept: 32 trades, 2 losers, sum  +90.7% (all 44: +94.6%) worst -4.8%
+price <= 360-sample avg -1.5%              blocks 5/7 losers, 12/37 winners | kept: 27 trades, 2 losers, sum  +75.3% (all 44: +94.6%) worst -4.8%
+price <= 360-sample avg -2.0%              blocks 5/7 losers, 17/37 winners | kept: 22 trades, 2 losers, sum  +61.7% (all 44: +94.6%) worst -4.8%
+price <= 600-sample avg -0.5%              blocks 4/7 losers, 8/37 winners | kept: 32 trades, 3 losers, sum  +82.0% (all 44: +94.6%) worst -4.8%
+price <= 600-sample avg -1.0%              blocks 4/7 losers, 10/37 winners | kept: 30 trades, 3 losers, sum  +77.2% (all 44: +94.6%) worst -4.8%
+price <= 600-sample avg -1.5%              blocks 5/7 losers, 13/37 winners | kept: 26 trades, 2 losers, sum  +72.0% (all 44: +94.6%) worst -4.8%
+price <= 600-sample avg -2.0%              blocks 5/7 losers, 18/37 winners | kept: 21 trades, 2 losers, sum  +57.6% (all 44: +94.6%) worst -4.8%
+price <= 1080-sample avg -0.5%             blocks 4/7 losers, 15/37 winners | kept: 25 trades, 3 losers, sum  +59.2% (all 44: +94.6%) worst -4.8%
+price <= 1080-sample avg -1.0%             blocks 4/7 losers, 17/37 winners | kept: 23 trades, 3 losers, sum  +53.3% (all 44: +94.6%) worst -4.8%
+price <= 1080-sample avg -1.5%             blocks 5/7 losers, 19/37 winners | kept: 20 trades, 2 losers, sum  +49.7% (all 44: +94.6%) worst -4.8%
+price <= 1080-sample avg -2.0%             blocks 6/7 losers, 22/37 winners | kept: 16 trades, 1 losers, sum  +42.9% (all 44: +94.6%) worst -4.8%
+lowest 30% of 360-range                    blocks 5/7 losers, 10/37 winners | kept: 29 trades, 2 losers, sum  +79.8% (all 44: +94.6%) worst -4.8%
+lowest 40% of 360-range                    blocks 4/7 losers, 8/37 winners | kept: 32 trades, 3 losers, sum  +82.5% (all 44: +94.6%) worst -4.8%
+lowest 50% of 360-range                    blocks 4/7 losers, 4/37 winners | kept: 36 trades, 3 losers, sum  +94.4% (all 44: +94.6%) worst -4.8%
+lowest 30% of 600-range                    blocks 5/7 losers, 12/37 winners | kept: 27 trades, 2 losers, sum  +73.5% (all 44: +94.6%) worst -4.8%
+lowest 40% of 600-range                    blocks 4/7 losers, 7/37 winners | kept: 33 trades, 3 losers, sum  +84.0% (all 44: +94.6%) worst -4.8%
+lowest 50% of 600-range                    blocks 4/7 losers, 7/37 winners | kept: 33 trades, 3 losers, sum  +84.0% (all 44: +94.6%) worst -4.8%
+lowest 30% of 1080-range                   blocks 5/7 losers, 18/37 winners | kept: 21 trades, 2 losers, sum  +53.7% (all 44: +94.6%) worst -4.8%
+lowest 40% of 1080-range                   blocks 4/7 losers, 13/37 winners | kept: 27 trades, 3 losers, sum  +64.6% (all 44: +94.6%) worst -4.8%
+lowest 50% of 1080-range                   blocks 4/7 losers, 12/37 winners | kept: 28 trades, 3 losers, sum  +67.4% (all 44: +94.6%) worst -4.8%
+absolute price <= 1040                     blocks 6/7 losers, 12/37 winners | kept: 26 trades, 1 losers, sum  +75.0% (all 44: +94.6%) worst -4.8%
+absolute price <= 1050                     blocks 5/7 losers, 6/37 winners | kept: 33 trades, 2 losers, sum  +91.3% (all 44: +94.6%) worst -4.8%
+absolute price <= 1060                     blocks 3/7 losers, 4/37 winners | kept: 37 trades, 4 losers, sum  +92.7% (all 44: +94.6%) worst -4.8%
+a single -2.5% step within last 6 samples  blocks 4/7 losers, 12/37 winners | kept: 28 trades, 3 losers, sum  +72.7% (all 44: +94.6%) worst -4.8%
+a single -3.0% step within last 6 samples  blocks 4/7 losers, 14/37 winners | kept: 26 trades, 3 losers, sum  +67.5% (all 44: +94.6%) worst -4.8%
+a single -2.5% step within last 12 samples blocks 3/7 losers, 8/37 winners | kept: 33 trades, 4 losers, sum  +79.8% (all 44: +94.6%) worst -4.8%
+a single -3.0% step within last 12 samples blocks 3/7 losers, 10/37 winners | kept: 31 trades, 4 losers, sum  +74.6% (all 44: +94.6%) worst -4.8%
+a single -2.5% step within last 30 samples blocks 3/7 losers, 8/37 winners | kept: 33 trades, 4 losers, sum  +79.8% (all 44: +94.6%) worst -4.8%
+a single -3.0% step within last 30 samples blocks 3/7 losers, 10/37 winners | kept: 31 trades, 4 losers, sum  +74.6% (all 44: +94.6%) worst -4.8%
