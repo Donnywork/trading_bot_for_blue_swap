@@ -6,3 +6,4 @@ __pycache__/
 build/
 .DS_Store
 drafts/
+abis/trading_bot.json

@@ -75,7 +75,7 @@ Before finishing any change: `make check` and `make test` must both pass.
 - The kill switch exits **0** so systemd (`Restart=on-failure`) does not restart a halted bot. Crashes exit non-zero and are restarted.
 - A signal only sets a flag; the current tick, including a swap waiting for its receipt, finishes first.
 - `main.py` startup refuses to run while `logs/HALTED` exists.
-- The server runs `.venv/bin/python main.py` directly (no `uv run`), and `abis/trading_bot.json` (written by `deploy`) must be present so no compile happens at runtime.
+- The server runs `.venv/bin/python main.py` directly (no `uv run`), and `abis/trading_bot.json` (written by `deploy`, gitignored, copied to the server by hand) must be present so no compile happens at runtime.
 
 ## Docs
 

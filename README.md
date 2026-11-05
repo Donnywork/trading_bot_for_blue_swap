@@ -43,7 +43,7 @@ What you get:
 | `config.py` | pool and quoter reads, price and quote helpers (also a read-only CLI) |
 | `contracts/TradingBot.sol` | the bot contract (`mocks/` is test-only) |
 | `drafts/` | local scratch space for throwaway scripts and notes; gitignored, so it only exists on your machine (empty it when you are done) |
-| `abis/` | ABIs; `trading_bot.json` is written by `deploy` |
+| `abis/` | ABIs; `trading_bot.json` is written by `deploy` for your deployment and is gitignored: copy it to the server with `.env` |
 | `deploy/*.service` | systemd units for Ubuntu 24.04 (the bot, and the optional dashboard) |
 | `docs/GETTING_STARTED.md` | **start here**: install, first run, dashboard, strategies, going live |
 | `docs/DEPLOY.md` | full deploy and 24/7 reference, owner operations, troubleshooting |
