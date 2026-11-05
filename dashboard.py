@@ -1,4 +1,5 @@
 import base64
+import bisect
 import hashlib
 import json
 import os
@@ -10,10 +11,12 @@ import traceback
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from typing import ClassVar
+from urllib.parse import parse_qs, urlsplit
 
 from dotenv import load_dotenv
 
+import compare
 import control
 import history
 import ledger
@@ -28,8 +31,17 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PAGE = Path(__file__).parent / "dashboard.html"
 MAX_BODY = 10_000
+# what /api/status carries: the price card's change over a few hours, the guard, the last trades.
+# The chart and the trades list ask /api/prices and /api/trades for what they show.
 CHART_POINTS = 720  # 6 hours at one sample per 30s
 RECENT_TRADES = 20
+HISTORY_POINTS = 100_000  # more than the history file can hold (see history.MAX_BYTES)
+CHART_MAX_POINTS = (50, 3000)  # what one chart request may ask for
+CHART_DEFAULT_POINTS = 900
+TRADES_PAGE_MAX = 100
+COMPARE_MAX_HOURS = 24 * 30
+COMPARE_REASONS = ("take_profit", "stop_loss", "time_stop")
+CACHE_ENTRIES = 24
 # only these host names may be used to reach the page (any port, as a tunnel may remap it): a
 # web page on another site can point a name of its own at 127.0.0.1 ("DNS rebinding")
 LOCAL_HOST = re.compile(r"(localhost|127\.0\.0\.1|\[::1\])(:\d+)?")
@@ -70,6 +82,43 @@ def text_values(chain):
     return {k: str(v) if isinstance(v, Decimal) else v for k, v in chain.items()}
 
 
+class QueryError(ValueError):
+    """A request's query string is not acceptable; the message says why."""
+
+
+def query_number(query, name, default, low, high):
+    # one number from a query string, inside limits (an HTTP 400 with the reason if it is not)
+    raw = query.get(name, [None])[0]
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not low <= value <= high:  # also false for nan
+        raise QueryError(f"{name} must be a number between {low:g} and {high:g}")
+    return value
+
+
+def downsample(points, limit):
+    # Fewer than `limit` points that keep the shape: the price jumps in steps, so each bucket keeps
+    # its lowest and highest sample (in time order) rather than an average that would hide them.
+    if len(points) <= limit:
+        return points
+    # the first and last sample are always kept, and each of the other buckets adds two at most
+    size = -(-len(points) // max(1, limit // 2 - 1))  # ceiling division
+    out = [points[0]]
+    for i in range(0, len(points), size):
+        bucket = points[i : i + size]
+        low = min(bucket, key=lambda p: p[1])
+        high = max(bucket, key=lambda p: p[1])
+        out.extend(sorted({low, high}))
+    out.append(points[-1])
+    return list(
+        dict.fromkeys(out)
+    )  # a sample picked twice (an end that is also an extreme) once
+
+
 class Dashboard:
     # ------------------------------------
     # Everything the page needs, kept apart from HTTP so it can be tested. Read-only except
@@ -85,8 +134,20 @@ class Dashboard:
         history_file=history.HISTORY_FILE,
         ledger_file=None,
         clock=time.time,
+        cooldown=300,
+        size=Decimal(1000),
     ):
         self.dry_run, self.state_file, self.clock = dry_run, state_file, clock
+        # only for the strategy comparison's paper replay (the bot's own COOLDOWN_SECONDS and
+        # MAX_TRADE_AMOUNT); the dashboard never changes either
+        self.cooldown, self.size = cooldown, size
+        self.cache = {}
+        self.cache_lock = (
+            threading.Lock()
+        )  # the server answers each request in its own thread
+        # one replay at a time: it is CPU work, and a page asking in two tabs must not start the
+        # same one twice (re-entrant: a view's make() may ask for the replay it is built from)
+        self.compute_lock = threading.RLock()
         self.control_file, self.history_file = control_file, history_file
         self.ledger_file = ledger_file or ledger.file_for(dry_run)
         self.write_lock = threading.Lock()  # one settings write at a time
@@ -146,6 +207,215 @@ class Dashboard:
             ),
             "config": strategy.to_dict(cfg),
             "schema": strategy.schema(),
+        }
+
+    def ledger_data(self):
+        try:
+            return ledger.load(self.ledger_file)
+        except ValueError:  # snapshot() reports it; the other views just show nothing
+            return ledger.empty()
+
+    def prices_view(self, query):
+        # ------------------------------------
+        # The chart's data for one time window, thinned to at most `max` points, plus the trades
+        # that touch the window (for the markers). `range` is seconds back from now or "all";
+        # `from` / `to` (unix times) pick an exact window, as a zoom does.
+        # ------------------------------------
+
+        now = self.clock()
+        points = self.recorded_prices()
+        limit = int(query_number(query, "max", CHART_DEFAULT_POINTS, *CHART_MAX_POINTS))
+        if "from" in query or "to" in query:
+            lo = query_number(query, "from", 0, 0, now + 3600)
+            hi = query_number(query, "to", now, 0, now + 3600)
+            if hi <= lo:
+                raise QueryError("to must be after from")
+        elif query.get("range", ["21600"])[0] == "all":
+            lo, hi = 0, now
+        else:
+            lo, hi = now - query_number(query, "range", 21600, 60, 86400 * 400), now
+        stamps = [p[0] for p in points]
+        window = points[
+            bisect.bisect_left(stamps, lo) : bisect.bisect_right(stamps, hi)
+        ]
+        trades = [
+            t
+            for t in self.ledger_data()["closed"]
+            if t["closed"] >= lo and t["opened"] <= hi
+        ]
+        return {
+            "points": downsample(window, limit),
+            "samples": len(window),
+            "trades": trades,
+        }
+
+    def trades_view(self, query):
+        # one page of closed trades, newest first, filtered by why they closed
+        reason = query.get("reason", ["all"])[0]
+        if reason != "all" and reason not in COMPARE_REASONS:
+            raise QueryError(f"reason must be all or one of {list(COMPARE_REASONS)}")
+        limit = int(query_number(query, "limit", 25, 1, TRADES_PAGE_MAX))
+        offset = int(query_number(query, "offset", 0, 0, 10**9))
+        closed = [
+            t
+            for t in reversed(self.ledger_data()["closed"])
+            if reason == "all" or t["reason"] == reason
+        ]
+        total = sum((ledger.profit(t) for t in closed), Decimal(0))
+        spent = sum((Decimal(t["quote_spent"]) for t in closed), Decimal(0))
+        return {
+            "total": len(closed),
+            "profit": str(total),
+            "profit_pct": float(total / spent * 100) if spent else 0.0,
+            "items": [
+                {**t, "profit": str(ledger.profit(t))}
+                for t in closed[offset : offset + limit]
+            ],
+        }
+
+    def remembered(self, key, make):
+        # a few recent answers, so a view that is asked again with nothing new is not recomputed
+        with self.cache_lock:
+            if key in self.cache:
+                return self.cache[key]
+        with self.compute_lock:
+            with self.cache_lock:  # another thread may have just made it
+                if key in self.cache:
+                    return self.cache[key]
+            value = make()
+            with self.cache_lock:
+                self.cache[key] = value
+                while len(self.cache) > CACHE_ENTRIES:
+                    self.cache.pop(next(iter(self.cache)))
+            return value
+
+    def recorded_prices(self):
+        # oldest first, whatever order the file is in (a clock that stepped back, a hand edit): the
+        # views cut windows with bisect, and a replay reads time forwards
+        return sorted(history.tail(self.history_file, HISTORY_POINTS))
+
+    def replay_window(self, query):
+        # the recorded prices and where the replay's window starts, for compare_view and
+        # preview_view; `signature` changes whenever a new price arrives
+        now = self.clock()
+        raw = query.get("hours", ["24"])[0]
+        hours = (
+            None
+            if raw == "all"
+            else query_number(query, "hours", 24, 1, COMPARE_MAX_HOURS)
+        )
+        points = self.recorded_prices()
+        start = points[0][0] if hours is None and points else now - (hours or 24) * 3600
+        # the window's start moves with the clock, so it is part of what an answer is for
+        signature = (
+            points[-1] if points else None,
+            len(points),
+            hours,
+            int(start // 60),
+        )
+        return points, start, signature
+
+    def replayed(self, points, start, signature, cfg):
+        # every strategy's replay under `cfg`, with warnings; cached per (prices, settings)
+        key = ("rows", signature, json.dumps(strategy.to_dict(cfg), sort_keys=True))
+
+        def make():
+            window = [p for p in points if p[0] >= start]
+            stats = compare.step_stats(window)
+            rows = compare.compare(points, cfg, start, self.cooldown, self.size, stats)
+            return {"rows": rows, "steps": stats}
+
+        return self.remembered(key, make) if points else {"rows": [], "steps": None}
+
+    def saved_config(self):
+        try:
+            return control.load(self.control_file)
+        except ValueError:
+            return strategy.DEFAULT
+
+    def compare_view(self, query):
+        # ------------------------------------
+        # Every strategy replayed on the recorded prices with today's settings (compare.py), next
+        # to what the bot really did in the same window. Cached: the answer only changes when a
+        # new price or a new setting arrives, and the page asks every few seconds.
+        # ------------------------------------
+
+        cfg = self.saved_config()
+        points, start, signature = self.replay_window(query)
+        closed = self.ledger_data()["closed"]
+        key = (
+            "compare",
+            signature,
+            json.dumps(strategy.to_dict(cfg), sort_keys=True),
+            len(closed),
+            closed[-1]["closed"] if closed else None,
+        )
+
+        def make():
+            replayed = self.replayed(points, start, signature, cfg)
+            actual = [t for t in closed if t["closed"] >= start]
+            return {
+                "from": start,
+                "size": str(self.size),
+                "active": cfg.strategy,
+                **replayed,
+                "actual": {
+                    "trades": len(actual),
+                    "wins": sum(1 for t in actual if ledger.profit(t) > 0),
+                    "profit": str(sum((ledger.profit(t) for t in actual), Decimal(0))),
+                },
+            }
+
+        return self.remembered(key, make)
+
+    def preview_view(self, query):
+        # ------------------------------------
+        # What-if for the settings form: the settings being typed (`cfg`, a JSON object, checked
+        # like a save but NOT saved) against the saved ones, each strategy replayed on the same
+        # prices. Per strategy: the result with the saved settings, with the typed ones, the
+        # estimated change, and the typed settings' warnings. Reads only; nothing is written.
+        # ------------------------------------
+
+        raw = query.get("cfg", [None])[0]
+        if raw is None or len(raw) > MAX_BODY:
+            raise QueryError(
+                "cfg must be the settings as JSON (at most 10,000 characters)"
+            )
+        try:
+            draft = strategy.parse_config(json.loads(raw))
+        except (ValueError, TypeError, OverflowError, RecursionError) as e:
+            raise QueryError(f"these settings cannot be used: {e}") from e
+        saved = self.saved_config()
+        points, start, signature = self.replay_window(query)
+        before = self.replayed(points, start, signature, saved)
+        after = (
+            before if draft == saved else self.replayed(points, start, signature, draft)
+        )
+        rows = []
+        for old, new in zip(before["rows"], after["rows"], strict=True):
+            was = old["profit"] + old["open"]
+            now = new["profit"] + new["open"]
+            rows.append(
+                {
+                    "strategy": new["strategy"],
+                    "label": new["label"],
+                    "saved": old,
+                    "draft": new,
+                    "change": now - was,
+                    # (a base of floating-point dust would make a huge percentage out of nothing)
+                    "change_pct": (now - was) / abs(was) * 100
+                    if abs(was) > 1e-9
+                    else None,
+                }
+            )
+        return {
+            "from": start,
+            "size": str(self.size),
+            "changed": draft != saved,
+            "saved_strategy": saved.strategy,
+            "draft_strategy": draft.strategy,
+            "steps": after["steps"],
+            "rows": rows,
         }
 
     @staticmethod
@@ -209,8 +479,36 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def same_site(self):
+        # A page on another site can make the browser GET these routes (an <img> is enough) even
+        # though it cannot read the answer; each replay costs CPU, so refuse them like a cross-site
+        # POST. Browsers say where a request comes from; a command-line client says nothing.
+        origin = self.headers.get("Origin")
+        try:
+            foreign = bool(origin) and not LOCAL_HOST.fullmatch(urlsplit(origin).netloc)
+        except ValueError:
+            foreign = True
+        if foreign or self.headers.get("Sec-Fetch-Site", "same-origin") not in (
+            "same-origin",
+            "none",
+        ):
+            self.reply(403, {"error": "cross-site request refused"})
+            return False
+        return True
+
+    # read-only data views that take a query string: path -> Dashboard method
+    VIEWS: ClassVar[dict[str, str]] = {
+        "/api/prices": "prices_view",
+        "/api/trades": "trades_view",
+        "/api/compare": "compare_view",
+        "/api/preview": "preview_view",
+    }
+
     def do_GET(self):
         if not self.local_only():
+            return
+        parts = urlsplit(self.path)
+        if parts.path.startswith("/api/") and not self.same_site():
             return
         try:
             if self.path in ("/", "/index.html"):
@@ -218,8 +516,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, page, "text/html; charset=utf-8", page_csp(page))
             elif self.path == "/api/status":
                 self.reply(200, self.app.snapshot())
+            elif parts.path in self.VIEWS:
+                query = parse_qs(parts.query)
+                self.reply(200, getattr(self.app, self.VIEWS[parts.path])(query))
             else:
                 self.reply(404, {"error": "not found"})
+        except QueryError as e:
+            self.reply(400, {"error": str(e)})
         except Exception:  # noqa: BLE001 - redacted, reported to the page, never a stack dump
             print(redact(traceback.format_exc()), file=sys.stderr)
             self.reply(500, {"error": "internal error, see the dashboard's console"})
@@ -284,7 +587,13 @@ def cli():
 
     load_dotenv()
     dry_run = os.environ.get("DRY_RUN", "true").lower() != "false"
-    server = serve(Dashboard(dry_run), port)
+    # the same two numbers the bot uses, for the comparison's paper replay only
+    app = Dashboard(
+        dry_run,
+        cooldown=int(os.environ.get("COOLDOWN_SECONDS", "300")),
+        size=Decimal(os.environ.get("MAX_TRADE_AMOUNT", "1000")),
+    )
+    server = serve(app, port)
     print(
         f"Dashboard for the {'DRY RUN' if dry_run else 'LIVE'} bot on http://{HOST}:{port}"
     )

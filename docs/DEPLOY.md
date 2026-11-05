@@ -152,6 +152,7 @@ Now edit `.env` (`nano .env`):
 |---|---|
 | `RPC_URL` | your Infura Sepolia URL from 1.1 |
 | `OWNER_ADDRESS` | your enrolled wallet, copied from MetaMask |
+| `RISK_PER_TRADE_PCT` | optional, default `0` (off). Above 0, a buy is sized so a stop loss costs about this share of the vault's f564 (fees included), never above `MAX_TRADE_AMOUNT`. See GETTING_STARTED, "Trade size" |
 | `MAX_TRADE_AMOUNT` | size of one **buy** in human units of the token being spent (f564), e.g. `0.01`; a sell closes exactly what that buy delivered. It is also the **on-chain cap** per swap, in each token's own units |
 | `DRY_RUN` | leave `true` for now |
 | `BOT_CONTRACT_ADDRESS` | leave **empty**; filled in after deploying |
@@ -258,7 +259,7 @@ This writes `build/TradingBot.standard-input.json` (download it to your computer
 4. Upload the JSON file.
 5. Paste the constructor arguments printed by `deploy` (hex, without a leading `0x`).
 
-The script compiled and deployed from this same file, so the bytecode should match.
+The script compiled and deployed from this same file, so the bytecode should match. A verified contract shows "Source Code Verified" and the **Read Contract** / **Write Contract** tabs on Etherscan. If you lost the constructor arguments, they are the end of the deployment transaction's input data: the part after the contract's creation bytecode.
 
 ### 2.6 Link it on the platform
 
@@ -356,7 +357,7 @@ Then do the one-hour dry run in section 3, and section 4.
 
 Every `POLL_SECONDS` (default 30): reload `logs/control.json` if it changed → read the pool price and the vault's balances → ask `strategy.decide()` for `buy`, `sell` or `hold` → on a signal, check the cooldown, the vault balance, the operator's gas and the price impact, then swap through the contract → record the position in `logs/ledger.json`.
 
-While the bot holds nothing, the chosen **strategy** decides when to buy. Once it holds something it bought, only the **take profit** and **stop loss** decide when to sell it, and it sells exactly what it bought. Both are set on the dashboard (see [GETTING_STARTED.md](GETTING_STARTED.md)); a dry run keeps its own paper ledger (`logs/ledger_dryrun.json`).
+While the bot holds nothing, the chosen **strategy** decides when to buy. Once it holds something it bought, only the **take profit** and **stop loss** (and the **time stop**, if ticked on the dashboard) decide when to sell it, and it sells exactly what it bought. Both are set on the dashboard (see [GETTING_STARTED.md](GETTING_STARTED.md)); a dry run keeps its own paper ledger (`logs/ledger_dryrun.json`).
 
 | Situation | What the bot does |
 |---|---|
@@ -537,8 +538,8 @@ The owner key is not in the bot, so these are done from your enrolled wallet. Tw
 
 | Task | Command (prints calldata) |
 |---|---|
-| Withdraw tokens to yourself | `python bot_contract.py withdraw-calldata fETH 0.5` (or `all`) |
-| Change a token's per-swap cap | `python bot_contract.py calldata setTokenCap 0xTOKEN RAW_AMOUNT` (raw smallest units: `20000000000000000` is 0.02 with 18 decimals; `0` removes the token) |
+| Withdraw tokens to yourself | `python bot_contract.py withdraw-calldata fETH 0.5` (or `all`). Stop the bot, or check that `status.py` shows no open position, first. If one is open, withdraw no more than the vault's balance minus the position's base, never `all`: the bot sells exactly what it recorded and cannot close a position the vault no longer covers |
+| Change a token's per-swap cap (no redeploy: it is a parameter, not code) | `python bot_contract.py calldata setTokenCap 0xTOKEN RAW_AMOUNT` (raw smallest units: `20000000000000000` is 0.02 with 18 decimals, `2000000000000000000000` is 2,000; `0` removes the token). Raise it for **both** tokens when you raise the size: the sell trades the base a buy returned, and a buy that could return more base than the base token's cap is skipped. Then raise `MAX_TRADE_AMOUNT` in `.env` to match and restart the bot |
 | Allow another fee tier | `python bot_contract.py calldata setFeeAllowed 500 true` |
 | Replace a leaked or retired bot key | `python bot_contract.py calldata setOperator 0xNEW_BOT_WALLET` |
 | Disable the bot instantly | `python bot_contract.py calldata setOperator 0x0000000000000000000000000000000000000000` |

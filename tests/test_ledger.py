@@ -150,3 +150,14 @@ def test_a_failed_write_leaves_the_old_file_and_no_temp_file(tmp_path, monkeypat
         ledger.atomic_write(path, "new")
     assert path.read_text() == "old"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_summary_counts_time_stops_apart():
+    data = ledger.empty()
+    for received, reason in (("0.0105", "take_profit"), ("0.0100", "time_stop")):
+        data = ledger.open_position(
+            data, 1000.0, Decimal("0.00001"), Decimal("0.01"), 1
+        )
+        data = ledger.close_position(data, 1000.0, Decimal(received), reason, 2)
+    s = ledger.summarize(data)
+    assert (s["take_profit"], s["stop_loss"], s["time_stop"]) == (1, 0, 1)

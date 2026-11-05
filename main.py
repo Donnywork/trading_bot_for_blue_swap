@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, replace
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -35,6 +35,8 @@ PRELOAD_MAX_AGE = (
 # the operator's gas only changes when a trade is sent, so the dashboard's copy of it is re-read
 # now and then (and after a trade), not every tick
 OPERATOR_ETH_REFRESH = 300
+# a buy sized by risk below this share of MAX_TRADE_AMOUNT is not worth its gas: skip it
+MIN_BUY_SHARE = Decimal("0.01")
 
 log = logging.getLogger("bot")
 
@@ -86,9 +88,19 @@ class Settings:
     max_trade_failures: int
     max_trade: Decimal
     dry_run: bool
+    # share of the vault's quote one stop loss may cost; 0 = every buy is `max_trade`
+    risk_pct: Decimal = Decimal(0)
 
     @classmethod
     def from_env(cls):
+        try:
+            risk_pct = Decimal(os.environ.get("RISK_PER_TRADE_PCT", "0"))
+        except InvalidOperation:
+            risk_pct = Decimal("nan")
+        if not risk_pct.is_finite() or not 0 <= risk_pct <= 100:
+            raise SystemExit(
+                "RISK_PER_TRADE_PCT must be between 0 and 100 (0 = every buy is MAX_TRADE_AMOUNT)"
+            )
         return cls(
             poll_seconds=int(os.environ.get("POLL_SECONDS", "30")),
             cooldown_seconds=int(os.environ.get("COOLDOWN_SECONDS", "300")),
@@ -96,6 +108,7 @@ class Settings:
             max_trade_failures=int(os.environ.get("MAX_TRADE_FAILURES", "3")),
             max_trade=Decimal(os.environ["MAX_TRADE_AMOUNT"]),
             dry_run=os.environ.get("DRY_RUN", "true").lower() != "false",
+            risk_pct=risk_pct,
         )
 
 
@@ -296,7 +309,9 @@ class Runner:
 
         held = self.ledger["open"]
         entry_price = held["entry_price"] if held else None
-        position = replace(position, entry_price=entry_price)
+        # (the ledger is stamped with wall-clock time, so the age is too)
+        held_seconds = time.time() - held["opened"] if held else None
+        position = replace(position, entry_price=entry_price, held_seconds=held_seconds)
 
         self.prices.append(price)
         if self.history_file is not None:
@@ -319,7 +334,17 @@ class Runner:
             f" entry={entry_price:.6f}" if held else "",
         )
         if decision != "hold":
-            self.trade(decision, position, price)
+            # why a sale is made is settled now, from the same price and age the decision used: the
+            # ledger keeps this reason, not one worked out again after the swap (a clock that moved
+            # in between could no longer match it)
+            reason = (
+                strategy.exit_reason(
+                    price, entry_price, self.cfg, position.held_seconds
+                )
+                if decision == "sell"
+                else None
+            )
+            self.trade(decision, position, price, reason)
 
     def write_state(self, price, position):
         # Only for the dashboard: a failure here is a warning, never a reason to skip the tick.
@@ -358,7 +383,7 @@ class Runner:
                 log.info("new buys are allowed again")
             self.guard_note = status["kind"]
 
-    def trade(self, decision, position, price):
+    def trade(self, decision, position, price, reason=None):
         s = self.settings
         now = self.clock()
         cooling = (
@@ -371,7 +396,16 @@ class Runner:
             return
 
         if decision == "buy":
-            amount, balance = s.max_trade, position.quote
+            amount, balance = self.buy_size(position), position.quote
+            if s.risk_pct > 0 and amount < s.max_trade * MIN_BUY_SHARE:
+                log.info(
+                    "buy skipped: the risk-sized buy %s is below %s%% of MAX_TRADE_AMOUNT (%s), "
+                    "too small to be worth the gas",
+                    amount,
+                    MIN_BUY_SHARE * 100,
+                    s.max_trade,
+                )
+                return
         else:
             # close exactly what the buy brought in, not the (much larger) base-token trade size
             amount, balance = Decimal(self.ledger["open"]["base"]), position.base
@@ -436,9 +470,32 @@ class Runner:
 
         self.trade_failures = 0
         log.info("%s done%s", decision, " (dry run, nothing sent)" if s.dry_run else "")
-        self.record(decision, price, amount, received)
+        self.record(decision, price, amount, received, reason)
 
-    def record(self, decision, price, amount, received):
+    def buy_size(self, position):
+        # MAX_TRADE_AMOUNT is the ceiling (the contract's cap is the same number or higher); with
+        # RISK_PER_TRADE_PCT set, a buy is smaller when the vault is small, so a stop loss costs
+        # about that share of it
+        s = self.settings
+        size = strategy.trade_size(
+            Decimal(str(position.quote)),
+            s.max_trade,
+            s.risk_pct,
+            self.cfg.stop_loss_pct,
+        )
+        if size < s.max_trade:
+            log.info(
+                "buy size %s (ceiling %s): RISK_PER_TRADE_PCT=%s%% of the vault's %s quote, "
+                "with a %g%% stop loss",
+                size,
+                s.max_trade,
+                s.risk_pct,
+                position.quote,
+                self.cfg.stop_loss_pct,
+            )
+        return size
+
+    def record(self, decision, price, amount, received, reason=None):
         # ------------------------------------
         # Remember the position, so TP/SL survive a restart. Saved at once: a trade that landed
         # but was not written down would leave base in the vault that nothing ever sells.
@@ -457,8 +514,9 @@ class Runner:
                 "opened position: %s base for %s quote at %.6f", received, amount, price
             )
         else:
-            reason = strategy.exit_reason(
-                price, self.ledger["open"]["entry_price"], self.cfg
+            opened = self.ledger["open"]
+            reason = reason or strategy.exit_reason(
+                price, opened["entry_price"], self.cfg, time.time() - opened["opened"]
             )
             self.ledger = ledger.close_position(
                 self.ledger, price, received, reason, time.time()
@@ -563,6 +621,13 @@ def main(ticks=None):
         settings.max_trade,
         settings.min_operator_eth,
     )
+    if settings.risk_pct > 0:
+        log.info(
+            "buys are sized by risk: a stop loss should cost %s%% of the vault's quote, never more "
+            "than %s per buy",
+            settings.risk_pct,
+            settings.max_trade,
+        )
 
     stop = threading.Event()
     # a signal only sets the flag: the current tick (including a swap waiting for its
