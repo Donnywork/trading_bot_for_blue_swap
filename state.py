@@ -43,6 +43,27 @@ def load(path):
         ]
         if not all(math.isfinite(n) for n in numbers) or chain["price"] <= 0:
             raise ValueError("a number is not finite, or the price is not positive")
+        # how deep the pool was when the bot last sized a buy (1.0 = as saved in pool_profile.json);
+        # missing until it has
+        scale = float(raw.get("depth_scale", 1.0))
+        if not math.isfinite(scale) or scale < 0:
+            raise ValueError(
+                "the pool depth scale is not a finite, non-negative number"
+            )
+        chain["depth_scale"] = scale
+        # the bot's last answer to the dashboard's "scan the pool" button: which request it served
+        # ("done"), and either the block it read ("block", "at") or why it could not ("error")
+        scan = raw.get("scan")
+        chain["scan"] = None
+        if scan is not None:
+            chain["scan"] = {
+                "done": int(scan["done"]),
+                "block": None if scan.get("block") is None else int(scan["block"]),
+                "at": None if scan.get("at") is None else float(scan["at"]),
+                "error": None
+                if scan.get("error") is None
+                else str(scan["error"])[:300],
+            }
     except (ValueError, TypeError, KeyError, ArithmeticError, RecursionError) as e:
         raise ValueError(f"{path}: {e}") from e
     return chain

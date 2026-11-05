@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import replace
 
 import strategy
+import v3pool
 
 # ------------------------------------
 # What every entry strategy would have done on the recorded prices, with the settings in force now
@@ -11,10 +12,12 @@ import strategy
 # numbers. Pure: prices in, numbers out. It reads no chain and sends nothing, so the dashboard can
 # show it without an RPC call.
 #
-# It is a paper replay: fills happen at the recorded price, minus the costs of each leg (the
-# pool's 0.3% fee plus an allowance for our own price impact, see strategy.POOL_FEE_PCT). Gas is
-# paid in Sepolia ETH and not counted. It is judged on the same prices the settings were tuned
-# on, so it ranks ideas; it does not forecast.
+# It is a paper replay: fills happen at the recorded price, minus the costs of each leg. With the
+# pool's liquidity layout (`depth`, see v3pool) those are exact for the trade's size: the pool's
+# 0.3% fee plus the price impact, which grows with the size. Without it, a fixed allowance stands
+# in (strategy.POOL_FEE_PCT + IMPACT_PCT per leg, measured on trades of about 1000). Gas is paid in
+# Sepolia ETH and not counted. It is judged on the same prices the settings were tuned on, so it
+# ranks ideas; it does not forecast.
 # ------------------------------------
 
 MIN_STEPS = (
@@ -34,17 +37,37 @@ def percentile(values, share):
     return ordered[min(len(ordered) - 1, int(share * len(ordered)))]
 
 
-def replay(points, cfg, start_ts, cooldown, size):
+def replay(points, cfg, start_ts, cooldown, size, depth=None):
     # points: [(unix time, price)], oldest first. Prices before `start_ts` only warm the history
     # up (as the bot's own history is warm); trades start from `start_ts`.
     fee, impact = strategy.POOL_FEE_PCT / 100, strategy.IMPACT_PCT / 100
-    cost = fee + impact  # per leg
+    cost = fee + impact  # per leg, when there is no `depth`
     prices = deque(maxlen=strategy.HISTORY)
     entry = opened = last_trade = None
     trades, holds_won, holds = [], [], []
     equity = gross = fees = impacts = peak = worst = 0.0
     size = float(size)
     before = None
+
+    def settle(entry_price, exit_price):
+        # what a round trip nets, what both legs cost, and how much of that cost is the pool fee
+        ratio = exit_price / entry_price
+        moved = size * (ratio - 1)
+        if depth is not None:
+            try:
+                back = v3pool.round_trip(depth, entry_price, exit_price, size)
+            except ValueError:
+                back = None  # the pool cannot take this size: the fixed cost stands in
+            if back is not None:
+                net = back - size
+                paid = moved - net
+                # the fee is 0.3% of what each leg trades (the sell's is taken in base: valued in
+                # quote here)
+                fee_paid = size * v3pool.FEE + back / (1 - v3pool.FEE) * v3pool.FEE
+                return net, paid, min(paid, fee_paid)
+        net = size * (ratio * (1 - cost) ** 2 - 1)
+        paid = moved - net
+        return net, paid, paid * fee / cost
 
     def mark(value):
         nonlocal peak, worst
@@ -72,16 +95,11 @@ def replay(points, cfg, start_ts, cooldown, size):
             entry, opened, last_trade = price, ts, ts
         elif decision == "sell":
             reason = strategy.exit_reason(price, entry, cfg, held)
-            ratio = price / entry
-            net = size * (ratio * (1 - cost) ** 2 - 1)
-            moved = size * (ratio - 1)
-            paid = (
-                moved - net
-            )  # what both legs cost, split between the fee and the impact
+            net, paid, fee_paid = settle(entry, price)
             equity += net
-            gross += moved
-            fees += paid * fee / cost
-            impacts += paid * impact / cost
+            gross += size * (price / entry - 1)
+            fees += fee_paid
+            impacts += paid - fee_paid  # what both legs cost, less the pool's fee
             holds.append(held)
             if net > 0:
                 holds_won.append(held)
@@ -102,7 +120,7 @@ def replay(points, cfg, start_ts, cooldown, size):
     open_now = 0.0
     if entry is not None:
         # still holding: valued at the last price, with the exit's cost taken off
-        open_now = size * (points[-1][1] / entry * (1 - cost) ** 2 - 1)
+        open_now = settle(entry, points[-1][1])[0]
     mark(equity + open_now)
     return {
         "trades": len(trades),
@@ -146,12 +164,13 @@ def step_stats(points):
     }
 
 
-def advice(cfg, result, stats):
+def advice(cfg, result, stats, friction=None):
     # ------------------------------------
     # Warnings for one strategy's settings. `result` is that strategy's replay under `cfg`;
-    # `stats` is step_stats() (or None). Each is {"level": "warn" | "info", "text"}. Plain rules
-    # of arithmetic and of what the recorded prices did: they say where the settings fight the
-    # costs or the pool, not that a different number would win.
+    # `stats` is step_stats() (or None); `friction` is what a round trip costs, in percent (the
+    # fixed strategy.FRICTION_PCT when not given). Each is {"level": "warn" | "info", "text"}.
+    # Plain rules of arithmetic and of what the recorded prices did: they say where the settings
+    # fight the costs or the pool, not that a different number would win.
     # ------------------------------------
 
     out = []
@@ -159,7 +178,9 @@ def advice(cfg, result, stats):
     def add(level, text):
         out.append({"level": level, "text": text})
 
-    friction = strategy.FRICTION_PCT
+    if friction is None:
+        friction = strategy.FRICTION_PCT
+    impact_rt = round(max(0.0, friction - 2 * strategy.POOL_FEE_PCT), 2)
     tp, sl = cfg.take_profit_pct, cfg.stop_loss_pct
     if (
         tp <= friction
@@ -173,7 +194,7 @@ def advice(cfg, result, stats):
     breakeven = net_loss / (net_win + net_loss) * 100
     text = (
         f"After the pool fee ({strategy.POOL_FEE_PCT:g}% each way) and about "
-        f"{2 * strategy.IMPACT_PCT:g}% price impact, a take profit nets about "
+        f"{impact_rt:g}% price impact, a take profit nets about "
         f"+{net_win:.2f}% and a stop loss about -{net_loss:.2f}%: it has to win "
         f"{breakeven:.0f}% of its trades to break even."
     )
@@ -283,18 +304,31 @@ def advice(cfg, result, stats):
     return out
 
 
-def compare(points, cfg, start_ts, cooldown, size, stats=None):
+def friction_pct(depth, points, size):
+    # What a round trip of `size` costs at the latest price, in percent of it: both pool fees and
+    # the price impact of both legs. The fixed strategy.FRICTION_PCT without a `depth`.
+    if depth is None or not points or float(size) <= 0:
+        return strategy.FRICTION_PCT
+    try:
+        loss = v3pool.loss_at_stop(depth, points[-1][1], 0, float(size))
+    except ValueError:
+        return strategy.FRICTION_PCT
+    return loss / float(size) * 100
+
+
+def compare(points, cfg, start_ts, cooldown, size, stats=None, depth=None):
     # one row per strategy, in the order the strategies are declared, with its warnings
+    friction = friction_pct(depth, points, size)
     rows = []
     for name, strat in strategy.STRATEGIES.items():
         own = replace(cfg, strategy=name)
-        result = replay(points, own, start_ts, cooldown, size)
+        result = replay(points, own, start_ts, cooldown, size, depth)
         rows.append(
             {
                 "strategy": name,
                 "label": strat.label,
                 **result,
-                "warnings": advice(own, result, stats),
+                "warnings": advice(own, result, stats, friction),
             }
         )
     return rows

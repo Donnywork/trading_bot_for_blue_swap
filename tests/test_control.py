@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import control
@@ -15,6 +17,48 @@ def test_save_then_load_round_trips(tmp_path):
     control.save(path, config)
     assert control.load(path) == config
     assert not list(path.parent.glob("*.tmp"))
+
+
+def test_the_buttons_are_saved_beside_the_settings_but_not_in_the_form_view(tmp_path):
+    path = tmp_path / "control.json"
+    config = strategy.parse_config({"paused": True, "scan_request": 1_700_000_123})
+    control.save(path, config)
+    on_disk = json.loads(path.read_text())
+    assert on_disk["paused"] is True and on_disk["scan_request"] == 1_700_000_123
+    loaded = control.load(path)
+    assert loaded.paused and loaded.scan_request == 1_700_000_123
+    # the settings form never sees them (it would post them back and could undo a click)
+    assert "paused" not in strategy.to_dict(config)
+    assert "scan_request" not in strategy.to_dict(config)
+
+
+def test_a_file_from_before_the_buttons_existed_means_not_paused_and_no_request(
+    tmp_path,
+):
+    path = tmp_path / "control.json"
+    path.write_text(json.dumps(strategy.to_dict(strategy.DEFAULT)))
+    loaded = control.load(path)
+    assert loaded.paused is False and loaded.scan_request == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"paused": "yes"}',
+        '{"paused": 1}',
+        '{"paused": null}',
+        '{"scan_request": -1}',
+        '{"scan_request": 1.5}',
+        '{"scan_request": "5"}',
+        '{"scan_request": true}',
+        '{"scan_request": 1e12}',
+    ],
+)
+def test_a_button_value_that_makes_no_sense_is_an_invalid_file(tmp_path, text):
+    path = tmp_path / "control.json"
+    path.write_text(text)
+    with pytest.raises(ValueError, match="control.json"):
+        control.load(path)
 
 
 @pytest.mark.parametrize("text", ["", "{nope", "[]", '{"strategy": "yolo"}'])

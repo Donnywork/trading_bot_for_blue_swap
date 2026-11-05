@@ -60,6 +60,7 @@
     border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 13px;
   }
   .pill.live { border-color: var(--bad); }
+  .pill[hidden] { display: none; }
   .icon { font-size: 12px; line-height: 1; }
   .ok { color: var(--good); } .stale { color: var(--warn-text); } .halted, .bad { color: var(--bad); } .unknown { color: var(--ink-3); }
   .banner {
@@ -175,6 +176,7 @@
     <h1>Trading bot</h1>
     <span class="pill" id="mode"></span>
     <span class="pill" id="health"></span>
+    <span class="pill" id="paused" hidden></span>
     <span class="spacer"></span>
     <span class="muted" id="updated">loading…</span>
   </header>
@@ -191,6 +193,12 @@
     <div class="card" id="guard-card"></div>
     <div class="card" id="pnl-card"></div>
     <div class="card" id="vault-card"></div>
+  </section>
+
+  <section class="card spaced" aria-label="Controls">
+    <h2>Controls</h2>
+    <div class="actions" id="controls-bar"></div>
+    <div id="controls-note" role="status" aria-live="polite"></div>
   </section>
 
   <section class="card spaced" aria-label="Price chart">
@@ -317,6 +325,11 @@ function renderHeader(s) {
     el("span", { class: "icon " + (h.kind === "running" ? "ok" : h.kind) }, icons[h.kind] || "?"),
     document.createTextNode(names[h.kind] + ": " + h.text));
 
+  const paused = $("paused");
+  paused.hidden = !s.control.paused;
+  paused.replaceChildren(el("span", { class: "icon stale" }, "❚❚"),
+    document.createTextNode("New buys paused (sales still run)"));
+
   const lines = s.problems.map((p) => "⚠ " + p);
   if (h.kind === "halted") {
     lines.unshift("■ The bot stopped itself and will not restart on its own. Read the reason above, fix the cause, " +
@@ -326,6 +339,60 @@ function renderHeader(s) {
   box.hidden = lines.length === 0;
   box.replaceChildren(...lines.map((p) => el("p", {}, p)));
   $("updated").textContent = "updated " + new Date(s.now * 1000).toLocaleTimeString();
+}
+
+// ---------- controls: pause new buys, scan the pool's liquidity ----------
+// Both only ask the bot (through the settings file): this page makes no call to the chain itself.
+let commanding = false, controlsMessage = "";
+function scanText(c) {
+  const sc = c.scan;
+  if (c.scan_request > (sc ? sc.done : 0)) {
+    return "Scan asked for. The bot starts it on its next tick and it takes 30 to 40 seconds (about 120 read-only calls to the node).";
+  }
+  if (sc && sc.error) return "The last scan failed: " + sc.error;
+  if (!c.pool) return "";
+  const depth = Math.round(c.pool.scale * 100) + "% as deep as when it was read.";
+  if (c.pool.scanned) {
+    return "Pool layout scanned at block " + c.pool.block + (sc && sc.at ? " (" + ago(Date.now() / 1000 - sc.at) + " ago)" : "") + ", " + depth;
+  }
+  return "Pool layout saved with the code (the pool as of 2026-11-04, block " + c.pool.block + "), " + depth +
+    " Scan to measure the pool as it is now; trade sizes and the estimates use it.";
+}
+function renderControls(s) { keepFocus(() => drawControls(s)); }
+function drawControls(s) {
+  const c = s.control;
+  const waiting = c.scan_request > (c.scan ? c.scan.done : 0);
+  const pause = el("button", { type: "button", id: "pause", class: c.paused ? "primary" : "", "data-focus": "pause" },
+    c.paused ? "Resume buying" : "Pause new buys");
+  const scan = el("button", { type: "button", id: "scan", "data-focus": "scan" }, waiting ? "Scan asked for…" : "Scan pool liquidity");
+  pause.disabled = commanding;
+  scan.disabled = commanding || waiting;
+  pause.addEventListener("click", () => sendCommand(c.paused ? "resume" : "pause"));
+  scan.addEventListener("click", () => sendCommand("scan"));
+  $("controls-bar").replaceChildren(pause, scan);
+  const lines = [controlsMessage, scanText(c)].filter(Boolean);
+  $("controls-note").replaceChildren(...lines.map((t) => el("p", { class: "note tight" }, t)));
+}
+const COMMAND_DONE = {
+  pause: "New buys are paused. A position that is open still sells at its take profit or stop loss.",
+  resume: "Buying is on again from the bot's next tick.",
+  scan: "Asked. The bot starts the scan on its next tick.",
+};
+async function sendCommand(name) {
+  if (commanding) return;
+  commanding = true; controlsMessage = "Sending…"; renderControls(snap);
+  try {
+    const res = await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: name }), signal: AbortSignal.timeout(15000) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    epoch++;                                   // a status request still in flight is older than this click
+    snap.control = { ...snap.control, ...body.control };
+    controlsMessage = COMMAND_DONE[name];
+  } catch (err) {
+    controlsMessage = "Not done: " + err.message;
+  } finally {
+    commanding = false; renderHeader(snap); renderControls(snap);
+  }
 }
 
 // ---------- cards ----------
@@ -1099,7 +1166,7 @@ async function refresh() {
     snap = next; lastOk = new Date();
     document.body.classList.remove("offline");
     rememberTokens(snap);
-    renderHeader(snap); renderCards(snap); drawChart(); syncForm();
+    renderHeader(snap); renderControls(snap); renderCards(snap); drawChart(); syncForm();
     // each of these asks for its own data and shows its own error: none marks the whole page offline
     loadChart(); loadTrades(); loadCompare();
     if (Date.now() - preview.at > 60000) schedulePreview();   // new prices change the estimate too

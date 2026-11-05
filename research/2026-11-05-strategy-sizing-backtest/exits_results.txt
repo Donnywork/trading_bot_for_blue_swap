@@ -1,0 +1,41 @@
+live entries (44), alternative exits, 1000 f564 per leg through exact V3 maths
+current TP3 SL5 TS60               win  93% avg +3.04% sum +133.7% worst  -6.1%  compounded x 3.68 maxDD  6.1%  exits {'tp': 38, 'ts': 4, 'sl': 2}  medhold  6.1m
+TP2 SL3 TS60                       win  89% avg +2.65% sum +116.8% worst  -4.6%  compounded x 3.12 maxDD  7.8%  exits {'tp': 39, 'sl': 5}  medhold  4.3m
+TP2 SL4 TS60                       win  95% avg +2.99% sum +131.5% worst  -6.1%  compounded x 3.62 maxDD  6.1%  exits {'tp': 42, 'sl': 2}  medhold  6.1m
+TP2 SL5 TS60                       win  95% avg +2.96% sum +130.4% worst  -6.1%  compounded x 3.58 maxDD  6.1%  exits {'tp': 42, 'sl': 2}  medhold  6.1m
+TP2 SL7 TS60                       win  95% avg +3.02% sum +133.1% worst  -5.4%  compounded x 3.68 maxDD  5.4%  exits {'tp': 42, 'ts': 2}  medhold  6.1m
+TP2.5 SL3 TS60                     win  86% avg +2.51% sum +110.6% worst  -4.6%  compounded x 2.93 maxDD  7.8%  exits {'tp': 37, 'sl': 6, 'ts': 1}  medhold  4.7m
+TP2.5 SL4 TS60                     win  95% avg +3.15% sum +138.5% worst  -6.1%  compounded x 3.87 maxDD  6.1%  exits {'tp': 40, 'ts': 2, 'sl': 2}  medhold  6.1m
+TP2.5 SL5 TS60                     win  95% avg +3.12% sum +137.5% worst  -6.1%  compounded x 3.83 maxDD  6.1%  exits {'tp': 40, 'ts': 2, 'sl': 2}  medhold  6.1m
+TP2.5 SL7 TS60                     win  95% avg +3.18% sum +140.1% worst  -5.4%  compounded x 3.94 maxDD  5.4%  exits {'tp': 40, 'ts': 4}  medhold  6.1m
+TP3 SL3 TS60                       win  84% avg +2.39% sum +105.2% worst  -4.8%  compounded x 2.77 maxDD  7.8%  exits {'tp': 36, 'sl': 7, 'ts': 1}  medhold  5.5m
+TP3 SL4 TS60                       win  91% avg +2.92% sum +128.5% worst  -6.1%  compounded x 3.50 maxDD  6.1%  exits {'tp': 38, 'ts': 3, 'sl': 3}  medhold  6.1m
+TP3 SL5 TS60                       win  93% avg +3.04% sum +133.7% worst  -6.1%  compounded x 3.68 maxDD  6.1%  exits {'tp': 38, 'ts': 4, 'sl': 2}  medhold  6.1m
+TP3 SL7 TS60                       win  93% avg +3.10% sum +136.4% worst  -5.4%  compounded x 3.79 maxDD  5.4%  exits {'tp': 38, 'ts': 6}  medhold  6.1m
+TP3.5 SL3 TS60                     win  82% avg +2.51% sum +110.5% worst  -4.8%  compounded x 2.92 maxDD  7.8%  exits {'tp': 35, 'sl': 7, 'ts': 1, 'open': 1}  medhold  6.1m
+TP3.5 SL4 TS60                     win  89% avg +3.04% sum +133.8% worst  -6.1%  compounded x 3.68 maxDD  6.1%  exits {'tp': 37, 'ts': 3, 'sl': 3, 'open': 1}  medhold  7.2m
+TP3.5 SL5 TS60                     win  91% avg +3.16% sum +139.0% worst  -6.1%  compounded x 3.87 maxDD  6.1%  exits {'tp': 37, 'ts': 4, 'sl': 2, 'open': 1}  medhold  7.2m
+TP3.5 SL7 TS60                     win  91% avg +3.22% sum +141.7% worst  -5.4%  compounded x 3.98 maxDD  5.4%  exits {'tp': 37, 'ts': 6, 'open': 1}  medhold  7.2m
+TP4 SL3 TS60                       win  80% avg +2.68% sum +118.0% worst  -4.8%  compounded x 3.13 maxDD  7.8%  exits {'tp': 34, 'sl': 7, 'ts': 2, 'open': 1}  medhold  7.8m
+TP4 SL4 TS60                       win  86% avg +3.21% sum +141.4% worst  -6.1%  compounded x 3.95 maxDD  6.1%  exits {'tp': 36, 'ts': 4, 'sl': 3, 'open': 1}  medhold  8.7m
+TP4 SL5 TS60                       win  89% avg +3.33% sum +146.6% worst  -6.1%  compounded x 4.16 maxDD  6.1%  exits {'tp': 36, 'ts': 5, 'sl': 2, 'open': 1}  medhold  9.0m
+TP4 SL7 TS60                       win  89% avg +3.39% sum +149.2% worst  -5.4%  compounded x 4.28 maxDD  5.4%  exits {'tp': 36, 'ts': 7, 'open': 1}  medhold  9.0m
+
+TP3 SL5 TS10                       win  84% avg +2.55% sum +112.0% worst  -4.6%  compounded x 2.99 maxDD  4.6%  exits {'tp': 32, 'ts': 12}  medhold  6.1m
+TP3 SL5 TS15                       win  82% avg +2.49% sum +109.6% worst  -6.1%  compounded x 2.91 maxDD  6.1%  exits {'tp': 33, 'ts': 10, 'sl': 1}  medhold  6.1m
+TP3 SL5 TS20                       win  84% avg +2.58% sum +113.5% worst  -6.1%  compounded x 3.02 maxDD  6.1%  exits {'tp': 35, 'ts': 8, 'sl': 1}  medhold  6.1m
+TP3 SL5 TS30                       win  91% avg +2.73% sum +120.2% worst  -6.1%  compounded x 3.23 maxDD  6.1%  exits {'tp': 36, 'ts': 6, 'sl': 2}  medhold  6.1m
+TP3 SL5 TS45                       win  93% avg +2.97% sum +130.8% worst  -6.1%  compounded x 3.58 maxDD  6.1%  exits {'tp': 37, 'ts': 5, 'sl': 2}  medhold  6.1m
+TP3 SL5 TS60                       win  93% avg +3.04% sum +133.7% worst  -6.1%  compounded x 3.68 maxDD  6.1%  exits {'tp': 38, 'ts': 4, 'sl': 2}  medhold  6.1m
+TP3 SL5 TS90                       win  91% avg +2.96% sum +130.2% worst  -6.1%  compounded x 3.55 maxDD  6.1%  exits {'tp': 39, 'ts': 3, 'sl': 2}  medhold  6.1m
+TP3 SL5 TSNone                     win  93% avg +3.07% sum +135.2% worst  -7.0%  compounded x 3.73 maxDD  7.0%  exits {'tp': 41, 'sl': 3}  medhold  6.1m
+
+TP2.5 SL4 TS30                     win  93% avg +2.83% sum +124.6% worst  -6.1%  compounded x 3.38 maxDD  6.1%  exits {'tp': 37, 'ts': 5, 'sl': 2}  medhold  6.1m
+TP2.5 SL5 TS30                     win  93% avg +2.81% sum +123.6% worst  -6.1%  compounded x 3.34 maxDD  6.1%  exits {'tp': 37, 'ts': 5, 'sl': 2}  medhold  6.1m
+TP3 SL4 TS30                       win  91% avg +2.71% sum +119.2% worst  -6.1%  compounded x 3.19 maxDD  6.1%  exits {'tp': 36, 'ts': 5, 'sl': 3}  medhold  6.1m
+TP3 SL5 TS20                       win  84% avg +2.58% sum +113.5% worst  -6.1%  compounded x 3.02 maxDD  6.1%  exits {'tp': 35, 'ts': 8, 'sl': 1}  medhold  6.1m
+TP2.5 SL4 TS20                     win  86% avg +2.57% sum +112.9% worst  -6.1%  compounded x 3.00 maxDD  6.1%  exits {'tp': 36, 'ts': 6, 'sl': 2}  medhold  6.1m
+
+TP3 SL5 TS30 + breakeven(+1.5->+0.3) win  82% avg +2.45% sum +108.0% worst  -6.1%  compounded x 2.86 maxDD  7.6%  exits {'tp': 35, 'be': 5, 'ts': 2, 'sl': 2}  medhold  6.1m
+TP3 SL5 TS30 + exit on -2% step if red win  75% avg +2.10% sum  +92.6% worst  -4.6%  compounded x 2.45 maxDD  7.0%  exits {'tp': 33, 'step': 11}  medhold  4.4m
+TP3 SL5 TS30 + exit on -3% step if red win  82% avg +2.39% sum +105.3% worst  -4.6%  compounded x 2.78 maxDD  7.0%  exits {'tp': 35, 'step': 8, 'ts': 1}  medhold  4.4m
