@@ -402,8 +402,8 @@ def test_a_swap_is_sent_with_the_swap_gas_headroom_not_the_small_one(env, monkey
 def test_a_swap_is_sent_with_a_gas_limit_that_leaves_headroom_over_what_it_used(
     env,
 ):
-    # the real chain: send the swap with exactly the estimate (no headroom) and with the swap
-    # headroom; both fit here, and the limit actually sent is the estimate times the buffer
+    # the real chain: send a swap with the swap headroom; it fits, and the limit actually sent is
+    # well above what it used (the spy test above pins the buffer itself)
     bot_wallet = Funded(env).account
     caps = {env.a.address: 2 * A, env.b.address: 2 * A}
     address, abi, _ = bot_contract.deploy_bot(

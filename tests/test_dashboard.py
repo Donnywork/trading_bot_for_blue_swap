@@ -798,6 +798,17 @@ def test_saving_the_settings_form_cannot_undo_a_pause_or_a_scan_request(app, ser
     assert saved.paused is True and saved.scan_request == asked
 
 
+def test_repairing_a_damaged_settings_file_with_the_form_does_not_lift_a_pause(
+    app, server
+):
+    # the bot keeps running on its last good settings, which may be paused: fixing the file must
+    # not resume buying without anyone pressing Resume
+    app.control_file.write_text("{not json")
+    res, _ = post_config(server, strategy.to_dict(strategy.DEFAULT))
+    assert res.status == 200
+    assert control.load(app.control_file).paused is True
+
+
 def test_a_pause_alone_is_not_a_change_in_the_settings_preview(app):
     control.save(app.control_file, strategy.parse_config({"paused": True}))
     write_prices(app, pattern_prices(), spacing=30, age=0)

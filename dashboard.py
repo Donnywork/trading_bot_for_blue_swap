@@ -482,10 +482,16 @@ class Dashboard:
         )  # ValueError if anything is off: nothing saved
         with self.write_lock:
             # saving the form must not undo a click on a button made since it was loaded
-            current = self.saved_config()
-            config = replace(
-                config, paused=current.paused, scan_request=current.scan_request
-            )
+            try:
+                current = control.load(self.control_file)
+                paused, scan_request = current.paused, current.scan_request
+            except ValueError:
+                # A damaged file: the bot is still running on its last good settings, which may be
+                # paused. Fixing the file with the form must not lift that unseen, so it fails
+                # closed (paused; the button resumes). The scan number needs no care: a click
+                # always asks above whatever the bot served.
+                paused, scan_request = True, 0
+            config = replace(config, paused=paused, scan_request=scan_request)
             control.save(self.control_file, config)
         return strategy.to_dict(config)
 

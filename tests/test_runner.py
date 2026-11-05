@@ -5,8 +5,14 @@ import time
 from decimal import Decimal
 
 import pytest
-from web3.exceptions import ContractLogicError, TimeExhausted, Web3RPCError
+from web3.exceptions import (
+    BadFunctionCallOutput,
+    ContractLogicError,
+    TimeExhausted,
+    Web3RPCError,
+)
 
+import config
 import control
 import history
 import ledger
@@ -112,8 +118,9 @@ class FakeIO:
     def position(self):
         return self._position
 
-    def read_depth(self):
+    def read_depth(self, stop=None):
         self.depth_reads += 1
+        self.depth_stop = stop
         if self.depth_error:
             raise self.depth_error
         return self.depth_scan
@@ -1595,6 +1602,48 @@ def test_the_dashboard_still_gets_the_answer_to_its_scan_after_a_restart(
     assert io2.depth_reads == 0
 
 
+def test_a_newer_saved_layout_beats_an_older_answer_in_the_state_file(make, tmp_path):
+    # scan 5 answered; scan 6 saved its layout, then the bot stopped before the state file was
+    # written: the restarted bot must not keep saying 5 (the button would wait for ever)
+    state.save(
+        tmp_path / "logs" / "state.json",
+        time.time(),
+        {
+            "base": "fETH",
+            "quote": "f564",
+            "price": 100.0,
+            "vault_base": Decimal(0),
+            "vault_quote": Decimal(1),
+            "operator_eth": Decimal(1),
+            "scan": {"done": 5, "block": 1, "at": 1.0, "error": None},
+        },
+    )
+    newer = {**scan_result(777), "request": 6}
+    runner = make(FakeIO([100.0]), depth=newer)
+    assert runner.scan_info["done"] == 6 and runner.scan_info["block"] == 777
+    assert runner.scan_done == 6
+
+
+def test_a_scan_is_told_to_the_state_file_in_the_same_tick(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(777)
+    runner = make(io, depth_file=tmp_path / "logs" / "pool_profile.json")
+    control_with(tmp_path, scan_request=5)
+    runner.step()  # no second tick: a stop right here must not lose the answer
+    answer = state.load(tmp_path / "logs" / "state.json")["scan"]
+    assert (answer["done"], answer["block"]) == (5, 777)
+
+
+def test_a_state_file_that_cannot_be_read_does_not_stop_the_bot_starting(
+    make, tmp_path
+):
+    (tmp_path / "logs").mkdir(exist_ok=True)
+    (tmp_path / "logs" / "state.json").write_text("{not json")
+    assert make(FakeIO([100.0])).scan_info is None
+    damaged = {**scan_result(1), "request": "five"}  # no number: no answer from it
+    assert make(FakeIO([100.0]), depth=damaged).scan_info is None
+
+
 def test_the_answer_comes_from_the_saved_layout_when_there_is_no_state_file(
     make, tmp_path
 ):
@@ -1631,6 +1680,87 @@ def test_a_scan_that_fails_in_an_unexpected_way_never_takes_the_bot_down(
     runner.step()
     runner.step()
     assert "ticks" in state.load(tmp_path / "logs" / "state.json")["scan"]["error"]
+
+
+class ScanPool:
+    # a pool that answers the scan's calls and remembers the block each was made at
+    def __init__(self):
+        self.blocks, self.calls = [], 0
+        self.functions = self
+
+    def _fn(self, value):
+        pool = self
+
+        class Call:
+            def call(self, block_identifier="latest"):
+                pool.calls += 1
+                pool.blocks.append(block_identifier)
+                return value
+
+        return Call()
+
+    def tickSpacing(self):
+        return self._fn(60)
+
+    def slot0(self):
+        return self._fn((2**96, 0, 0, 0, 0, 0, True))
+
+    def liquidity(self):
+        return self._fn(0)
+
+    def tickBitmap(self, word):
+        return self._fn(0)
+
+    def fee(self):
+        return self._fn(3000)
+
+
+def test_every_call_of_a_scan_is_made_at_the_same_block():
+    pool = ScanPool()
+    layout = config.read_depth(pool, 18, 18, 12345)
+    assert layout["block"] == 12345 and pool.calls > 100
+    assert set(pool.blocks) == {12345}
+
+
+def test_a_scan_gives_up_at_a_stop_signal_instead_of_finishing():
+    pool = ScanPool()
+    with pytest.raises(InterruptedError):
+        config.read_depth(pool, 18, 18, 1, stop=lambda: True)
+    assert pool.calls == 0
+    stops = iter([False, False, True])
+    with pytest.raises(InterruptedError):
+        config.read_depth(pool, 18, 18, 1, stop=lambda: next(stops))
+    assert pool.calls == 2
+
+
+def test_the_runner_hands_its_stop_signal_to_the_scan(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_scan = scan_result(2)
+    runner = make(io, depth_file=tmp_path / "logs" / "pool_profile.json")
+    control_with(tmp_path, scan_request=1)
+    runner.step()
+    assert io.depth_stop == runner.stop.is_set
+
+
+def test_a_scan_stopped_midway_is_reported_not_retried(make, tmp_path):
+    io = FakeIO([100.0])
+    io.depth_error = InterruptedError("stopped while reading the pool's layout")
+    runner = make(io, depth_file=tmp_path / "logs" / "pool_profile.json")
+    control_with(tmp_path, scan_request=1)
+    runner.step()
+    answer = state.load(tmp_path / "logs" / "state.json")["scan"]
+    assert answer["done"] == 1 and "stopped" in answer["error"]
+    runner.step()
+    assert io.depth_reads == 1
+
+
+def test_a_call_that_returns_nothing_is_a_read_error_not_a_crash(make, caplog):
+    io = FakeIO([100.0])
+    io.read_error = BadFunctionCallOutput("Could not transact with/call contract")
+    runner = make(io)
+    with caplog.at_level(logging.WARNING):
+        runner.step()  # backs off and retries like any read error
+    assert "read failed" in caplog.text
 
 
 def test_a_scan_does_not_hold_up_the_sale_decided_in_the_same_tick(make, tmp_path):

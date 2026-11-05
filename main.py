@@ -13,7 +13,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from web3 import Web3
-from web3.exceptions import ContractLogicError, TimeExhausted, Web3RPCError
+from web3.exceptions import (
+    BadFunctionCallOutput,
+    ContractLogicError,
+    TimeExhausted,
+    Web3RPCError,
+)
 
 import bot_contract
 import config
@@ -50,7 +55,8 @@ log = logging.getLogger("bot")
 
 # transient read problems: RPC down, rate limited, timeouts. Anything else is a bug: let it crash
 # so the supervisor restarts the process and the traceback is in the log.
-READ_ERRORS = (OSError, Web3RPCError, ContractLogicError)
+# (BadFunctionCallOutput: a call that returned nothing, "0x", e.g. from a node that is behind)
+READ_ERRORS = (OSError, Web3RPCError, ContractLogicError, BadFunctionCallOutput)
 # a swap that was refused or reverted: counted toward the kill switch
 TRADE_ERRORS = (ContractLogicError, Web3RPCError, RuntimeError, ValueError)
 
@@ -167,14 +173,16 @@ class ChainIO:
         decimals0, decimals1 = self.base[1], self.quote[1]
         return (sqrt_price_x96 / 2**96) ** 2 * 10 ** (decimals0 - decimals1)
 
-    def read_depth(self):
-        # the pool's whole liquidity layout (about 120 read-only calls, a pause between them)
+    def read_depth(self, stop=None):
+        # the pool's whole liquidity layout (about 120 read-only calls, a pause between them);
+        # `stop` is asked before each call, so a stop signal does not wait for the whole scan
         return config.read_depth(
             self.pool,
             self.base[1],
             self.quote[1],
             self.w3.eth.block_number,
             DEPTH_CALL_PAUSE,
+            stop,
         )
 
     def read_liquidity(self):
@@ -276,9 +284,7 @@ class Runner:
         self.state_file = state_file
         # the last answer to the scan button, for the dashboard (the state file); kept over a restart
         self.scan_info = self.restored_scan()
-        self.scan_done = max(
-            (depth or {}).get("request", 0), (self.scan_info or {}).get("done", 0)
-        )
+        self.scan_done = (self.scan_info or {}).get("done", 0)
         self.eth, self.eth_at = None, None
         self.cfg = strategy.DEFAULT
         self.control_stamp = None
@@ -340,35 +346,37 @@ class Runner:
 
     def restored_scan(self):
         # What the last run answered to the scan button. The state file has it, a failed scan
-        # included (so a restart does not retry one by itself); without it, the saved layout
-        # still knows the request it answered. Without either the button is simply unanswered.
+        # included (so a restart does not retry one by itself); the saved layout knows the request
+        # it answered too, and wins when it is newer. Without either the button is unanswered.
         try:
             saved = state.load(self.state_file) if self.state_file else None
-        except ValueError:
+        except (ValueError, OSError):
             saved = None
-        if saved and saved["scan"]:
-            return saved["scan"]
+        answer = saved["scan"] if saved else None
         request = (self.depth or {}).get("request", 0)
-        if request:
+        if type(request) is not int:
+            request = 0  # (a damaged file: no answer from it)
+        if request and (answer is None or request > answer["done"]):
             return {
                 "done": request,
                 "block": self.depth.get("block"),
                 "at": None,
                 "error": None,
             }
-        return None
+        return answer
 
     def serve_scan_request(self):
         # ------------------------------------
         # The dashboard's "scan the pool's liquidity" button: read the pool's whole layout (about
         # 120 read-only calls, 30 to 40 s) and keep it from now on. Done at the end of a tick, so a
         # sale decided in this tick is not held up by it. A failed scan is reported to the dashboard
-        # and not retried by itself (the button asks again); it never halts: it is a read.
+        # and not retried by itself (the button asks again); it never halts: it is a read. True
+        # when it asked for one, so the caller can tell the state file at once.
         # ------------------------------------
 
         request = self.cfg.scan_request
         if request <= self.scan_done:
-            return
+            return False
         self.scan_done = request
         log.info(
             "scanning the pool's liquidity (asked on the dashboard): about 120 reads"
@@ -376,7 +384,9 @@ class Runner:
         try:
             if self.depth_file is None:
                 raise ValueError("nowhere to save the layout")
-            profile = v3pool.check_profile(self.io.read_depth(), "the scanned pool")
+            profile = v3pool.check_profile(
+                self.io.read_depth(self.stop.is_set), "the scanned pool"
+            )
             profile = {**profile, "request": request}
             v3pool.save_profile(self.depth_file, profile)
         except Exception as e:  # noqa: BLE001
@@ -384,7 +394,7 @@ class Runner:
             # error from a failed request can carry the RPC URL and its key)
             self.scan_info = {"done": request, "error": redact(str(e))[:300]}
             log.warning("the pool scan failed: %s", redact(str(e)))
-            return
+            return True
         self.depth = profile
         self.scale, self.scale_at = (
             1.0,
@@ -401,6 +411,7 @@ class Runner:
             profile["block"],
             len(profile["ticks"]),
         )
+        return True
 
     def pool_now(self, price):
         # ------------------------------------
@@ -478,7 +489,10 @@ class Runner:
                 else None
             )
             self.trade(decision, position, price, reason)
-        self.serve_scan_request()
+        if self.serve_scan_request():
+            # the answer goes to the state file now, not a tick later: a restart in between would
+            # leave the dashboard's button waiting for ever (or retry a failed scan)
+            self.write_state(price, position)
 
     def write_state(self, price, position):
         # Only for the dashboard: a failure here is a warning, never a reason to skip the tick.

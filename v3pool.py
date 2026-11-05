@@ -1,5 +1,6 @@
 import bisect
 import json
+import logging
 import math
 from functools import cache
 from pathlib import Path
@@ -25,7 +26,9 @@ PROFILE_FILE = Path(__file__).parent / "pool_profile.json"
 # it takes the place of the shipped file wherever there is one (see current_profile)
 LIVE_PROFILE_FILE = Path(__file__).parent / "logs" / "pool_profile.json"
 TICK_BASE = 1.0001
+MAX_TICK = 887272
 FEE = 0.003
+log = logging.getLogger("bot")
 
 
 def check_profile(profile, where):
@@ -37,19 +40,30 @@ def check_profile(profile, where):
         raise ValueError(
             f"{where}: the pool profile does not match the maths (equal decimals, 0.3% fee)"
         )
-    # (a damaged file with the right keys must be refused here, not crash a trade later)
+    # (a damaged file with the right keys must be refused here, not crash a trade later: a tick
+    # out of range or a huge net overflows the maths with an OverflowError, which nothing catches)
     ticks = profile["ticks"]
+    request = profile.get("request", 0)
     if (
         type(profile["d0"]) is not int
+        or not 0 <= profile["d0"] <= 36
+        or type(profile.get("block")) is not int
+        or type(request) is not int
+        or request < 0
         or not isinstance(ticks, list)
+        or not ticks
         or not all(
             isinstance(t, dict)
             and type(t.get("tick")) is int
+            and abs(t["tick"]) <= MAX_TICK
             and type(t.get("net")) is int
+            and abs(t["net"]) < 2**127  # (liquidity is a uint128)
             for t in ticks
         )
     ):
-        raise ValueError(f"{where}: the pool profile's decimals or ticks are malformed")
+        raise ValueError(
+            f"{where}: the pool profile's block, decimals or ticks are malformed"
+        )
     return profile
 
 
@@ -59,21 +73,32 @@ def load_profile(path=PROFILE_FILE):
     return check_profile(json.loads(Path(path).read_text()), path)
 
 
-_live = {}  # path -> ((mtime, size), profile): read again only when the file changed
+_live = {}  # path -> (file stamp, profile): read again only when the file changed
+_warned = set()  # (path, file stamp) of damaged files already reported
 
 
 def current_profile(live_file=LIVE_PROFILE_FILE):
     # The layout the bot scanned last, if there is a usable one; else the one that ships with the
-    # code (the scanned file does not exist until the first scan, and a damaged one is ignored).
+    # code (the scanned file does not exist until the first scan; a damaged one is ignored, with
+    # a warning once, since the dashboard would otherwise show a layout nobody scanned).
     try:
         stat = Path(live_file).stat()
-        stamp = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return load_profile()
+    # (a scan replaces the file, so the inode changes with every save)
+    stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    try:
         cached = _live.get(live_file)
         if cached is None or cached[0] != stamp:
             profile = check_profile(json.loads(Path(live_file).read_text()), live_file)
             cached = _live[live_file] = (stamp, profile)
         return cached[1]
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        if (live_file, stamp) not in _warned:
+            _warned.add((live_file, stamp))
+            log.warning(
+                "ignoring the scanned pool layout, using the shipped one: %s", e
+            )
         return load_profile()
 
 

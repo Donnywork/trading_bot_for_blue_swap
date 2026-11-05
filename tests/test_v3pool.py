@@ -36,10 +36,16 @@ def test_a_layout_for_another_fee_tier_is_refused(tmp_path):
     [
         None,
         "x",
+        [],
         [1],
         [{"tick": 1}],
         [{"tick": "1", "net": 5}],
         [{"tick": 1, "net": 0.5}],
+        [
+            {"tick": 10**9, "net": 1}
+        ],  # outside the pool's ticks: OverflowError in the maths
+        [{"tick": 60, "net": 10**400}],  # not a uint128: OverflowError in the maths
+        [{"tick": True, "net": 1}],
     ],
 )
 def test_a_layout_with_damaged_ticks_is_refused_not_left_to_crash_a_trade(
@@ -51,6 +57,38 @@ def test_a_layout_with_damaged_ticks_is_refused_not_left_to_crash_a_trade(
         v3pool.load_profile(damaged)
     # the scanned file with the right keys but damaged ticks is ignored for the shipped layout
     assert v3pool.current_profile(damaged) == PROFILE
+
+
+@pytest.mark.parametrize(
+    "damage", [{"block": None}, {"block": "5"}, {"request": -1}, {"request": "5"}]
+)
+def test_a_layout_without_a_block_or_with_a_bad_request_is_refused(tmp_path, damage):
+    damaged = tmp_path / "damaged.json"
+    damaged.write_text(json.dumps({**PROFILE, **damage}))
+    with pytest.raises(ValueError, match="malformed"):
+        v3pool.load_profile(damaged)
+
+
+def test_a_damaged_scanned_layout_is_ignored_with_one_warning(tmp_path, caplog):
+    damaged = tmp_path / "damaged.json"
+    damaged.write_text(json.dumps({**PROFILE, "ticks": []}))
+    with caplog.at_level("WARNING", logger="bot"):
+        assert v3pool.current_profile(damaged) == PROFILE
+        assert v3pool.current_profile(damaged) == PROFILE
+    assert caplog.text.count("ignoring the scanned pool layout") == 1
+    # a missing one is the normal case before the first scan: no warning
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="bot"):
+        assert v3pool.current_profile(tmp_path / "none.json") == PROFILE
+    assert "ignoring" not in caplog.text
+
+
+def test_a_rewritten_scanned_layout_is_read_again(tmp_path):
+    live = tmp_path / "live.json"
+    v3pool.save_profile(live, {**PROFILE, "block": 1})
+    assert v3pool.current_profile(live)["block"] == 1
+    v3pool.save_profile(live, {**PROFILE, "block": 2})  # same size, replaced file
+    assert v3pool.current_profile(live)["block"] == 2
 
 
 def test_a_missing_layout_is_an_error_not_a_default(tmp_path):

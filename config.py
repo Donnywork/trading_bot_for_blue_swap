@@ -94,7 +94,7 @@ MIN_TICK, MAX_TICK = -887272, 887272
 DEPTH_TOLERANCE = 0.01
 
 
-def read_depth(pool, decimals0, decimals1, block, pause=0.0):
+def read_depth(pool, decimals0, decimals1, block, pause=0.0, stop=None):
     # ------------------------------------
     # The pool's whole liquidity layout: every initialised tick and its net liquidity (the input of
     # v3pool). Read-only eth_calls, about 120 of them (one per 256 ticks, one per initialised
@@ -105,6 +105,10 @@ def read_depth(pool, decimals0, decimals1, block, pause=0.0):
     # ------------------------------------
 
     def ask(call):
+        if (
+            stop is not None and stop()
+        ):  # a stop signal: give up, the scan is only a read
+            raise InterruptedError("stopped while reading the pool's layout")
         time.sleep(pause)
         return call.call(block_identifier=block)
 
