@@ -43,6 +43,15 @@ def check_trade(trade, keys, where):
         raise ValueError(f"{where} has a number that cannot be read") from e
     if not math.isfinite(price) or price <= 0:
         raise ValueError(f"{where} has an invalid entry price")
+    # the time stop reads the age of the position from `opened` on every tick
+    for name in ("opened", "closed"):
+        stamp = trade.get(name, 0)
+        if (
+            isinstance(stamp, bool)
+            or not isinstance(stamp, int | float)
+            or not math.isfinite(stamp)
+        ):
+            raise ValueError(f"{where} has an invalid {name} time")
 
 
 def check(data):
@@ -133,6 +142,7 @@ def summarize(data):
         "losses": sum(1 for t in closed if profit(t) <= 0),
         "take_profit": sum(1 for t in closed if t["reason"] == "take_profit"),
         "stop_loss": sum(1 for t in closed if t["reason"] == "stop_loss"),
+        "time_stop": sum(1 for t in closed if t["reason"] == "time_stop"),
         "spent": spent,
         "profit": total,
         "profit_pct": float(total / spent * 100) if spent else 0.0,

@@ -109,6 +109,11 @@ def render(data, chain, health, dry_run, now, cfg=strategy.DEFAULT):
         lines.append(
             f"           take profit at {take:.6f} (+{cfg.take_profit_pct:g}%), "
             f"stop loss at {stop:.6f} (-{cfg.stop_loss_pct:g}%)"
+            + (
+                f", time stop after {cfg.time_stop_min:g} min"
+                if cfg.time_stop_on
+                else ""
+            )
         )
         if chain:
             change = (chain["price"] / entry - 1) * 100
@@ -125,7 +130,8 @@ def render(data, chain, health, dry_run, now, cfg=strategy.DEFAULT):
     else:
         lines.append(
             f"realized:  {s['trades']} closed trades: {s['wins']} won, {s['losses']} lost "
-            f"({s['take_profit']} take profit, {s['stop_loss']} stop loss)"
+            f"({s['take_profit']} take profit, {s['stop_loss']} stop loss"
+            f"{f', {s["time_stop"]} time stop' if s['time_stop'] else ''})"
         )
         lines.append(
             f"           P/L {money(s['profit'])} {quote} on {s['spent']} {quote} spent "

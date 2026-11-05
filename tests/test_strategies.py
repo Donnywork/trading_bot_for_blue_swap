@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 
 import strategy
@@ -380,3 +382,83 @@ def test_the_guard_survives_zero_and_not_a_number_prices():
 def test_a_step_of_exactly_the_limit_counts_whatever_the_float_rounding():
     for a, b in ((100.0, 102.0), (0.1, 0.102), (1e-9, 1.02e-9), (3.3, 3.366)):
         assert strategy.big_steps([a, b]) == [1], (a, b)
+
+
+# ---------------------------------------------------------------- time stop
+
+
+def test_the_time_stop_is_off_unless_it_is_ticked():
+    held = Position(base=1.0, quote=1.0, entry_price=100.0, held_seconds=99 * 3600)
+    assert decide([100.0], held, Config()) == "hold"
+    on = Config(time_stop_on=True, time_stop_min=15)
+    assert decide([100.0], held, on) == "sell"
+
+
+def test_the_time_stop_waits_for_its_minutes():
+    on = Config(time_stop_on=True, time_stop_min=15)
+    assert strategy.exit_reason(100.0, 100.0, on, 14 * 60 + 59) is None
+    assert strategy.exit_reason(100.0, 100.0, on, 15 * 60) == "time_stop"
+    # an age that is not known cannot trigger it
+    assert strategy.exit_reason(100.0, 100.0, on, None) is None
+
+
+def test_a_price_target_is_the_reason_even_when_the_time_is_up_too():
+    on = Config(time_stop_on=True, time_stop_min=15)
+    assert strategy.exit_reason(104.0, 100.0, on, 3600) == "take_profit"
+    assert strategy.exit_reason(90.0, 100.0, on, 3600) == "stop_loss"
+
+
+def test_time_stop_settings_are_validated_and_round_trip():
+    config = parse_config({"time_stop_on": True, "time_stop_min": 20})
+    assert (config.time_stop_on, config.time_stop_min) == (True, 20.0)
+    assert parse_config(strategy.to_dict(config)) == config
+    assert strategy.DEFAULT.time_stop_on is False
+    assert strategy.schema()["time_stop_min"]["default"] == strategy.TIME_STOP_MIN
+    for bad in (
+        {"time_stop_on": "yes"},
+        {"time_stop_on": 1},
+        {"time_stop_min": 0},
+        {"time_stop_min": 10_000},
+        {"time_stop_min": "15"},
+    ):
+        with pytest.raises(ConfigError):
+            parse_config(bad)
+
+
+# ---------------------------------------------------------------- trade size
+
+
+def test_trade_size_is_the_ceiling_when_risk_sizing_is_off():
+    ceiling = Decimal(1000)
+    assert strategy.trade_size(Decimal(5000), ceiling, Decimal(0), 4.0) == ceiling
+    assert strategy.trade_size(Decimal(10), ceiling, Decimal(0), 4.0) == ceiling
+
+
+def test_trade_size_risks_a_share_of_the_vault_on_the_stop_loss():
+    # 2% of 1386 = 27.72; a 4% stop plus 0.75% costs = 4.75% per unit -> 583.578...
+    size = strategy.trade_size(Decimal(1386), Decimal(1000), Decimal(2), 4.0)
+    assert size == Decimal("583.578947")
+    assert size * Decimal("0.0475") <= Decimal(1386) * Decimal("0.02")
+
+
+def test_trade_size_never_goes_over_the_ceiling_or_the_vault():
+    assert strategy.trade_size(
+        Decimal(1386), Decimal(1000), Decimal(5), 4.0
+    ) == Decimal(1000)
+    # a high risk share on a small vault would otherwise ask for more than the vault holds
+    assert strategy.trade_size(Decimal(50), Decimal(1000), Decimal(20), 4.0) == Decimal(
+        "50.000000"
+    )
+
+
+def test_a_tighter_stop_loss_allows_a_bigger_trade():
+    wide = strategy.trade_size(Decimal(1000), Decimal(5000), Decimal(1), 8.0)
+    tight = strategy.trade_size(Decimal(1000), Decimal(5000), Decimal(1), 2.0)
+    assert tight > wide
+
+
+def test_the_guard_reports_the_step_pattern_it_judged():
+    steps = [1, -1, 1, -1, 1, 1, -1, 1]
+    status = strategy.guard_status(stepped(steps), GUARDED)
+    assert status["sequence"] == steps
+    assert (status["alternating"], status["pairs"]) == (6, 7)

@@ -32,6 +32,7 @@ What you get:
 |---|---|
 | `main.py` | the bot loop (`Runner`), logging with secret redaction, kill switch |
 | `strategy.py` | the six entry strategies, the shared take profit / stop loss, settings validation: pure functions |
+| `compare.py` | paper replay of every strategy on the recorded prices (the dashboard's comparison table); pure |
 | `ledger.py` | the bot's open position and closed trades (`logs/ledger.json`), with the profit maths |
 | `control.py`, `history.py`, `state.py` | the runtime settings file the dashboard writes, the price history for the chart, and the price and balances the bot last read (`logs/state.json`, what the dashboard shows) |
 | `dashboard.py`, `dashboard.html` | the web dashboard (loopback only, standard library, no extra dependencies) |
@@ -41,6 +42,7 @@ What you get:
 | `pool_monitor.py` | read-only pool status: price, swap count, who is trading, new actors (no key needed) |
 | `config.py` | pool and quoter reads, price and quote helpers (also a read-only CLI) |
 | `contracts/TradingBot.sol` | the bot contract (`mocks/` is test-only) |
+| `drafts/` | local scratch space for throwaway scripts and notes; gitignored, so it only exists on your machine (empty it when you are done) |
 | `abis/` | ABIs; `trading_bot.json` is written by `deploy` |
 | `deploy/*.service` | systemd units for Ubuntu 24.04 (the bot, and the optional dashboard) |
 | `docs/GETTING_STARTED.md` | **start here**: install, first run, dashboard, strategies, going live |
@@ -91,10 +93,11 @@ See `.env.example` for all variables. The important ones:
 | `OWNER_ADDRESS` | enrolled wallet that owns the contract (checksummed) |
 | `BOT_CONTRACT_ADDRESS` | set after deploying |
 | `MAX_TRADE_AMOUNT` | size of one **buy** (in f564, the quote token); a sell closes exactly what the buy delivered. Also the on-chain per-swap cap set at deploy |
+| `RISK_PER_TRADE_PCT` | optional, `0` = off (every buy is `MAX_TRADE_AMOUNT`). Above 0, a buy is sized so that a stop loss costs about this share of the f564 in the vault, fees included, and never exceeds `MAX_TRADE_AMOUNT` |
 | `DRY_RUN` | only the word `false` (any capitalisation) sends real transactions; anything else simulates only |
 | `POLL_SECONDS`, `COOLDOWN_SECONDS`, `MIN_OPERATOR_ETH`, `MAX_TRADE_FAILURES` | loop pacing and kill switch |
 
-The strategy, take profit, stop loss, the pattern-guard limits and the strategy's own numbers are **not** in `.env`: change them on the dashboard (they are saved to `logs/control.json`, and the bot picks them up on its next tick).
+The strategy, take profit, stop loss, the optional time stop, the pattern-guard limits and the strategy's own numbers are **not** in `.env`: change them on the dashboard (they are saved to `logs/control.json`, and the bot picks them up on its next tick).
 
 ## Safety model
 

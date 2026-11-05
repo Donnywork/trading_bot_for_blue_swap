@@ -4,3 +4,5 @@
 logs/
 __pycache__/
 build/
+.DS_Store
+drafts/

@@ -3,6 +3,7 @@ import math
 import statistics
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from decimal import ROUND_DOWN, Decimal
 
 # PLACEHOLDER strategies. Every one is an ENTRY rule ("when do I buy?"); the exit is shared: sell
 # at a take profit or a stop loss from the entry price. They exist so the bot loop can run end to
@@ -17,6 +18,19 @@ STOP_LOSS_PCT = 4.0  # sell when the price is this far below the entry price
 TAKE_PROFIT_RANGE = (1.0, 100.0)  # below ~1% the round-trip fees eat the profit
 STOP_LOSS_RANGE = (0.5, 50.0)
 MIN_DIP_PCT = 1.0  # a dip smaller than this is noise next to fees: never a buy signal
+# An extra exit people can tick on: sell whatever is held after this long, at the market. Off by
+# default. The default length comes from the live trades of 2026-11-04: winners were held 2 to 13
+# minutes, the two losers 11 and 28, so 15 minutes would only have cut the 28-minute one.
+TIME_STOP_MIN = 15.0
+TIME_STOP_RANGE = (1.0, 240.0)  # minutes
+# What one leg (a buy or a sell) costs, in percent of what it trades: the pool's fee tier (3000 =
+# 0.3%) plus an allowance for the price impact of our own swap. A round trip is twice that:
+# 0.75%. Measured on the 15 live trades of 2026-11-04: 0.64 to 0.78, mean 0.73, of which the fee
+# is 0.60 and the impact 0.04 to 0.18. Gas is paid in Sepolia ETH and is not counted. Used to
+# size a trade by the loss it risks, and by the strategy comparison's replay.
+POOL_FEE_PCT = 0.3
+IMPACT_PCT = 0.075
+FRICTION_PCT = 2 * (POOL_FEE_PCT + IMPACT_PCT)
 HISTORY = 600  # price samples the runner keeps: more than the largest window below
 # The pattern guard. Every entry rule assumes the market behaves as it did; this pauses NEW buys
 # when it visibly stops doing so (exits are never paused). It reads the price series only.
@@ -46,6 +60,8 @@ class Position:
     # price at which the bot bought the base it still holds; None when it holds none of its own.
     # Base that was deposited rather than bought has no entry price and is never sold.
     entry_price: float | None = None
+    # how long that base has been held, in seconds (None: not known, so no time stop)
+    held_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -243,6 +259,8 @@ class Config:
     params: dict = field(default_factory=dict)
     guard_flip_pct: float = GUARD_FLIP_PCT
     guard_drift_pct: float = GUARD_DRIFT_PCT
+    time_stop_on: bool = False
+    time_stop_min: float = TIME_STOP_MIN
 
     def __post_init__(self):
         full = {
@@ -294,6 +312,8 @@ def parse_config(raw):
         "params",
         "guard_flip_pct",
         "guard_drift_pct",
+        "time_stop_on",
+        "time_stop_min",
     }
     if unknown:
         raise ConfigError(f"unknown setting(s): {sorted(unknown)}")
@@ -319,6 +339,13 @@ def parse_config(raw):
         "pattern guard: price slide (%)",
         raw.get("guard_drift_pct", GUARD_DRIFT_PCT),
         *GUARD_DRIFT_RANGE,
+    )
+
+    time_stop_on = raw.get("time_stop_on", False)
+    if not isinstance(time_stop_on, bool):
+        raise ConfigError("time stop on/off must be true or false")
+    time_stop_min = number(
+        "time stop (minutes)", raw.get("time_stop_min", TIME_STOP_MIN), *TIME_STOP_RANGE
     )
 
     given = raw.get("params", {})
@@ -347,7 +374,16 @@ def parse_config(raw):
             for key, value in values.items()
         }
 
-    config = Config(name, take_profit, stop_loss, params, guard_flip, guard_drift)
+    config = Config(
+        name,
+        take_profit,
+        stop_loss,
+        params,
+        guard_flip,
+        guard_drift,
+        time_stop_on,
+        time_stop_min,
+    )
     for (
         strategy_name,
         strat,
@@ -366,6 +402,8 @@ def to_dict(config):
         "params": {name: config.values(name) for name in STRATEGIES},
         "guard_flip_pct": config.guard_flip_pct,
         "guard_drift_pct": config.guard_drift_pct,
+        "time_stop_on": config.time_stop_on,
+        "time_stop_min": config.time_stop_min,
     }
 
 
@@ -400,6 +438,13 @@ def schema():
             "low": GUARD_DRIFT_RANGE[0],
             "high": GUARD_DRIFT_RANGE[1],
         },
+        # neighbouring pairs among the big steps the guard judges, so a display can say "4 of 7"
+        "guard_pairs": GUARD_STEPS - 1,
+        "time_stop_min": {
+            "default": TIME_STOP_MIN,
+            "low": TIME_STOP_RANGE[0],
+            "high": TIME_STOP_RANGE[1],
+        },
     }
 
 
@@ -423,9 +468,10 @@ def guard_status(prices, config=DEFAULT):
 
     steps = big_steps(prices)
     flip_pct = None
+    pairs = list(itertools.pairwise(steps))
+    alternating = sum(a != b for a, b in pairs)
     if len(steps) >= 2:
-        pairs = list(itertools.pairwise(steps))
-        flip_pct = 100 * sum(a != b for a, b in pairs) / len(pairs)
+        flip_pct = 100 * alternating / len(pairs)
     drift_pct = None
     if len(prices) >= 2 * DRIFT_SAMPLES:
         recent = sum(prices[-DRIFT_SAMPLES:]) / DRIFT_SAMPLES
@@ -444,8 +490,9 @@ def guard_status(prices, config=DEFAULT):
         elif flip_pct < config.guard_flip_pct:
             kind = "flip"
             reason = (
-                f"the big price steps alternate up/down only {flip_pct:.0f}% of the time "
-                f"(needs {config.guard_flip_pct:g}%)"
+                f"the big price steps alternate up/down in only {alternating} of "
+                f"{len(pairs)} neighbouring pairs ({flip_pct:.0f}%, needs "
+                f"{config.guard_flip_pct:g}%)"
             )
     slide = config.guard_drift_pct > 0 and drift_pct is not None
     # "not >" rather than "<=": a NaN average pauses instead of slipping through
@@ -457,6 +504,11 @@ def guard_status(prices, config=DEFAULT):
         )
     return {
         "steps": len(steps),
+        # the latest big steps (+1 up, -1 down, oldest first) and how many neighbouring pairs of
+        # them alternate, so a display can show the pattern instead of only a percentage
+        "sequence": steps,
+        "alternating": alternating,
+        "pairs": len(pairs),
         "flip_pct": flip_pct,
         "drift_pct": drift_pct,
         "reason": reason,
@@ -464,13 +516,38 @@ def guard_status(prices, config=DEFAULT):
     }
 
 
-def exit_reason(price, entry_price, config=DEFAULT):
+def exit_reason(price, entry_price, config=DEFAULT, held_seconds=None):
     change_pct = (price - entry_price) / entry_price * 100
     if change_pct >= config.take_profit_pct:
         return "take_profit"
     if change_pct <= -config.stop_loss_pct:
         return "stop_loss"
+    # the time stop comes last: a price target that is hit at the same moment is the real reason
+    if (
+        config.time_stop_on
+        and held_seconds is not None
+        and held_seconds >= config.time_stop_min * 60
+    ):
+        return "time_stop"
     return None
+
+
+def trade_size(equity, ceiling, risk_pct, stop_loss_pct):
+    # ------------------------------------
+    # How much quote one buy spends. risk_pct is the share of `equity` (the quote in the vault)
+    # that a stop loss may cost, counting the round-trip fees: size = equity * risk / loss per
+    # unit. Never above `ceiling` (the owner's cap) or the equity itself. 0 turns it off: the
+    # ceiling is the size. All Decimal: this amount goes on chain. A price that jumps past the
+    # stop loss loses more than planned, as live trades have (-4.2% against a 4% stop).
+    # ------------------------------------
+
+    if risk_pct <= 0:
+        return ceiling
+    loss_per_unit = (Decimal(str(stop_loss_pct)) + Decimal(str(FRICTION_PCT))) / 100
+    size = min(ceiling, equity, equity * risk_pct / 100 / loss_per_unit)
+    if size >= ceiling:
+        return ceiling
+    return size.quantize(Decimal(1).scaleb(-6), rounding=ROUND_DOWN)
 
 
 def decide(prices, position, config=DEFAULT):
@@ -481,10 +558,15 @@ def decide(prices, position, config=DEFAULT):
     # ------------------------------------
 
     if position.entry_price is not None:
-        # holding: only the take profit / stop loss end it, whatever the strategy. Checked before
-        # any warm-up so a restart never leaves a stop loss waiting for fresh samples.
+        # holding: only the take profit / stop loss (or the time stop, if ticked) end it, whatever
+        # the strategy. Checked before any warm-up so a restart never leaves a stop loss waiting
+        # for fresh samples.
         return (
-            "sell" if exit_reason(prices[-1], position.entry_price, config) else "hold"
+            "sell"
+            if exit_reason(
+                prices[-1], position.entry_price, config, position.held_seconds
+            )
+            else "hold"
         )
 
     if position.quote <= 0:

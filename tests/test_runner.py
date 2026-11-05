@@ -1195,3 +1195,158 @@ def test_prices_are_restored_only_from_an_unbroken_recent_stretch(make, tmp_path
         history.append(path, ts, price)
     runner = make(FakeIO([100.0]))
     assert list(runner.prices) == [100.0, 101.0, 102.0, 103.0, 104.0]
+
+
+# ---------------------------------------------------------------- time stop and risk sizing
+
+
+def test_the_time_stop_sells_an_old_position_and_records_why(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    write_settings(runner, time_stop_on=True, time_stop_min=15)
+    io.prices = [90.5]  # inside the band: only the clock can end it
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy"]  # 0 minutes held: nothing yet
+    held = runner.ledger["open"]
+    runner.ledger = {**runner.ledger, "open": {**held, "opened": time.time() - 16 * 60}}
+    runner.step()
+    assert io.trades[-1] == ("sell", Decimal("0.0001"))
+    (trade,) = runner.ledger["closed"]
+    assert trade["reason"] == "time_stop"
+
+
+def test_the_time_stop_does_nothing_unless_it_is_ticked(make):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    held = runner.ledger["open"]
+    runner.ledger = {**runner.ledger, "open": {**held, "opened": time.time() - 3600}}
+    io.prices = [90.5]
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy"]
+
+
+def test_a_buy_is_sized_by_risk_when_asked(make):
+    # vault quote 1000, stop loss 4% (+0.75% costs), risking 1% = 10 -> 210.526315 quote
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(500), risk_pct=Decimal(1))
+    warm_up(runner, io)
+    io.prices = [90.0]
+    runner.step()
+    assert io.trades == [("buy", Decimal("210.526315"))]
+    assert runner.ledger["open"]["quote_spent"] == "210.526315"
+
+
+def test_the_buy_size_is_the_ceiling_when_risk_sizing_is_off(make):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(500))
+    warm_up(runner, io)
+    io.prices = [90.0]
+    runner.step()
+    assert io.trades == [("buy", Decimal(500))]
+
+
+def test_risk_sizing_never_spends_more_than_the_ceiling(make):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(100), risk_pct=Decimal(5))
+    warm_up(runner, io)
+    io.prices = [90.0]
+    runner.step()
+    assert io.trades == [("buy", Decimal(100))]
+
+
+def test_risk_pct_comes_from_the_environment_and_is_checked(monkeypatch):
+    monkeypatch.setenv("MAX_TRADE_AMOUNT", "1000")
+    monkeypatch.delenv("RISK_PER_TRADE_PCT", raising=False)
+    assert bot_main.Settings.from_env().risk_pct == 0
+    monkeypatch.setenv("RISK_PER_TRADE_PCT", "2.5")
+    assert bot_main.Settings.from_env().risk_pct == Decimal("2.5")
+    for bad in ("-1", "101", "nan", "inf", "abc", ""):
+        monkeypatch.setenv("RISK_PER_TRADE_PCT", bad)
+        with pytest.raises(SystemExit):
+            bot_main.Settings.from_env()
+
+
+def old_position_ledger(tmp_path, minutes):
+    # a position the bot bought `minutes` ago, as a restarted bot finds it in its ledger file
+    data = ledger.open_position(
+        ledger.empty(),
+        90.0,
+        Decimal("0.0001"),
+        Decimal("0.01"),
+        time.time() - minutes * 60,
+    )
+    ledger.save(tmp_path / "logs" / "ledger.json", data)
+
+
+def test_a_restarted_bot_still_knows_how_old_its_position_is(make, tmp_path):
+    old_position_ledger(tmp_path, 16)
+    control.save(
+        tmp_path / "logs" / "control.json",
+        strategy.parse_config(
+            {
+                "guard_flip_pct": 0,
+                "guard_drift_pct": 0,
+                "time_stop_on": True,
+                "time_stop_min": 15,
+            }
+        ),
+    )
+    io = FakeIO([90.5])  # inside the band: only the clock can end it
+    runner = make(io, guard=True)
+    runner.step()
+    assert io.trades == [("sell", Decimal("0.0001"))]
+    assert runner.ledger["closed"][0]["reason"] == "time_stop"
+
+
+def test_an_old_position_is_left_alone_when_the_time_stop_is_off(make, tmp_path):
+    old_position_ledger(tmp_path, 600)
+    io = FakeIO([90.5])
+    runner = make(io)  # the guard is off and the time stop is not ticked
+    runner.step()
+    assert io.trades == []
+
+
+def test_the_reason_of_a_sale_is_the_one_the_decision_was_made_for(make):
+    # a sale decided by the time stop keeps that reason even if, by the time the swap is recorded,
+    # the age worked out again no longer reaches the limit (a clock that moved back)
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    runner.record("sell", 90.5, Decimal("0.0001"), Decimal("0.0100"), "time_stop")
+    assert runner.ledger["closed"][0]["reason"] == "time_stop"
+
+
+def test_a_risk_sized_buy_is_closed_by_selling_exactly_what_it_brought(make):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(500), risk_pct=Decimal(1))
+    warm_up(runner, io)
+    io.prices = [90.0]
+    runner.step()
+    held = runner.ledger["open"]
+    # what the vault holds after the buy: the base it brought, and the rest of the quote
+    io._position = Position(base=float(held["base"]), quote=789.0)
+    io.prices = [95.0]  # +5.6%: take profit
+    runner.step()
+    assert io.trades[0] == ("buy", Decimal("210.526315"))
+    assert io.trades[1] == ("sell", Decimal(held["base"]))
+
+
+def test_a_risk_sized_buy_too_small_to_matter_is_skipped_and_says_why(make, caplog):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=0.01))
+    runner = make(io, max_trade=Decimal(500), risk_pct=Decimal(1))
+    warm_up(runner, io)
+    io.prices = [90.0]
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    assert io.trades == []
+    assert "below 1.00% of MAX_TRADE_AMOUNT" in caplog.text
+
+
+def test_a_ledger_with_an_unreadable_opened_time_is_refused(tmp_path):
+    for opened in ("yesterday", None, float("nan"), True):
+        data = ledger.open_position(ledger.empty(), 90.0, "0.1", "10", 1)
+        data["open"]["opened"] = opened
+        with pytest.raises(ValueError, match="invalid opened time"):
+            ledger.check(data)

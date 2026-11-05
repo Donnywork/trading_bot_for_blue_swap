@@ -1,6 +1,7 @@
 import http.client
 import json
 import threading
+import urllib.parse
 from decimal import Decimal
 
 import pytest
@@ -428,7 +429,16 @@ def test_the_dashboard_and_status_read_the_ledger_that_matches_dry_run(
 def test_snapshot_reports_the_pattern_guard(app):
     guard = app.snapshot()["guard"]
     assert guard["reason"]  # no price history yet: it fails closed
-    assert set(guard) == {"steps", "flip_pct", "drift_pct", "reason", "kind"}
+    assert set(guard) == {
+        "steps",
+        "sequence",
+        "alternating",
+        "pairs",
+        "flip_pct",
+        "drift_pct",
+        "reason",
+        "kind",
+    }
     control.save(
         app.control_file,
         strategy.parse_config({"guard_flip_pct": 0, "guard_drift_pct": 0}),
@@ -512,3 +522,373 @@ def test_a_settings_file_from_before_the_guard_loads_with_the_default_limits(app
     config = app.snapshot()["config"]
     assert config["strategy"] == "rsi"
     assert (config["guard_flip_pct"], config["guard_drift_pct"]) == (80, 5)
+
+
+# ---------------------------------------------------------------- chart, trades and comparison views
+
+
+def get_json(server, path):
+    response, data = request(server, "GET", path)
+    return response.status, json.loads(data)
+
+
+def test_downsample_keeps_the_highs_and_lows_and_the_ends():
+    points = [
+        (i, 100.0 + (50 if i == 500 else 0) - (30 if i == 777 else 0))
+        for i in range(2000)
+    ]
+    thin = dashboard.downsample(points, 100)
+    assert len(thin) <= 110
+    assert thin[0] == points[0] and thin[-1] == points[-1]
+    assert (500, 150.0) in thin and (777, 70.0) in thin  # the jumps survive
+    assert [p[0] for p in thin] == sorted(p[0] for p in thin)
+    assert dashboard.downsample(points[:50], 100) == points[:50]
+
+
+def test_prices_view_cuts_a_window_back_from_now(app):
+    write_prices(app, [1000.0 + i for i in range(100)], spacing=30, age=0)
+    view = app.prices_view({"range": ["600"]})
+    assert view["samples"] == 21 and view["points"][-1] == (NOW, 1099.0)
+    assert app.prices_view({"range": ["all"]})["samples"] == 100
+
+
+def test_prices_view_can_zoom_to_an_exact_window(app):
+    write_prices(app, [1000.0 + i for i in range(100)], spacing=30, age=0)
+    lo, hi = NOW - 900, NOW - 300
+    view = app.prices_view({"from": [str(lo)], "to": [str(hi)]})
+    assert view["points"][0][0] >= lo and view["points"][-1][0] <= hi
+    assert view["samples"] == 21
+
+
+def test_prices_view_thins_a_long_window_and_lists_the_trades_inside_it(app):
+    write_prices(app, [1000.0 + (i % 7) for i in range(2000)], spacing=30, age=0)
+    data = ledger.open_position(
+        ledger.empty(), 1000.0, Decimal("0.01"), Decimal(10), NOW - 600
+    )
+    data = ledger.close_position(
+        data, 1010.0, Decimal("10.1"), "take_profit", NOW - 300
+    )
+    data = ledger.open_position(data, 1000.0, Decimal("0.01"), Decimal(10), NOW - 10**6)
+    data = ledger.close_position(
+        data, 1010.0, Decimal("10.1"), "take_profit", NOW - 10**6 + 60
+    )
+    ledger.save(app.ledger_file, data)
+    view = app.prices_view({"range": ["3600"], "max": ["100"]})
+    assert len(view["points"]) <= 110 and view["samples"] == 121
+    assert [t["closed"] for t in view["trades"]] == [
+        NOW - 300
+    ]  # the old one is outside
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"max": ["10"]},
+        {"max": ["x"]},
+        {"range": ["5"]},
+        {"from": ["100"], "to": ["50"]},
+        {"from": ["nan"]},
+    ],
+)
+def test_prices_view_refuses_a_bad_query(app, query):
+    with pytest.raises(dashboard.QueryError):
+        app.prices_view(query)
+
+
+def closed_trades(app, reasons, base=100):
+    data = ledger.empty()
+    for i, reason in enumerate(reasons):
+        data = ledger.open_position(
+            data, 1000.0, Decimal("0.01"), Decimal(10), base + i
+        )
+        received = "10.5" if reason == "take_profit" else "9.5"
+        data = ledger.close_position(
+            data, 1000.0, Decimal(received), reason, base + 100 + i
+        )
+    ledger.save(app.ledger_file, data)
+
+
+def test_trades_view_pages_newest_first_and_adds_up_the_filtered_rows(app):
+    closed_trades(app, ["take_profit", "stop_loss", "take_profit", "time_stop"])
+    everything = app.trades_view({})
+    assert everything["total"] == 4 and Decimal(everything["profit"]) == 0
+    assert everything["items"][0]["reason"] == "time_stop"
+    page = app.trades_view({"limit": ["2"], "offset": ["2"]})
+    assert [t["reason"] for t in page["items"]] == ["stop_loss", "take_profit"]
+    wins = app.trades_view({"reason": ["take_profit"]})
+    assert wins["total"] == 2 and Decimal(wins["profit"]) == Decimal("1.0")
+    assert wins["profit_pct"] == pytest.approx(5.0)
+
+
+def test_trades_view_refuses_an_unknown_reason_and_a_huge_page(app):
+    with pytest.raises(dashboard.QueryError):
+        app.trades_view({"reason": ["luck"]})
+    with pytest.raises(dashboard.QueryError):
+        app.trades_view({"limit": ["100000"]})
+
+
+def test_compare_view_replays_every_strategy_and_shows_what_really_happened(app):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    closed_trades(app, ["take_profit"], base=NOW - 100)
+    view = app.compare_view({"hours": ["all"]})
+    assert [r["strategy"] for r in view["rows"]] == list(strategy.STRATEGIES)
+    assert view["active"] == "mean_reversion"
+    assert view["actual"]["trades"] == 1
+    json.dumps(view)
+
+
+def test_compare_view_is_cached_until_the_prices_or_settings_change(app, monkeypatch):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    calls = []
+    real = dashboard.compare.compare
+    monkeypatch.setattr(
+        dashboard.compare, "compare", lambda *a: calls.append(1) or real(*a)
+    )
+    first = app.compare_view({})
+    assert app.compare_view({}) is first and len(calls) == 1
+    control.save(app.control_file, strategy.parse_config({"take_profit_pct": 6}))
+    app.compare_view({})
+    assert len(calls) == 2
+    history.append(app.history_file, NOW + 1, 1000.0)
+    app.compare_view({})
+    assert len(calls) == 3
+
+
+def test_the_views_work_over_http_and_a_bad_query_is_a_400(server):
+    assert get_json(server, "/api/prices?range=3600")[0] == 200
+    assert get_json(server, "/api/trades?reason=all&limit=5")[0] == 200
+    assert get_json(server, "/api/compare?hours=6")[0] == 200
+    status, body = get_json(server, "/api/prices?max=1")
+    assert status == 400 and "max" in body["error"]
+
+
+def test_the_views_keep_the_host_check(server):
+    response, _ = request(
+        server, "GET", "/api/prices", headers={"Host": "evil.example"}
+    )
+    assert response.status == 403
+
+
+def test_the_time_stop_setting_is_saved_and_shown(app):
+    app.update_config({"time_stop_on": True, "time_stop_min": 20})
+    config = app.snapshot()["config"]
+    assert (config["time_stop_on"], config["time_stop_min"]) == (True, 20.0)
+    assert app.snapshot()["schema"]["time_stop_min"]["low"] == 1.0
+
+
+# ---------------------------------------------------------------- what-if preview
+
+
+def draft_query(**changes):
+    # the saved defaults with some settings changed, as the form would send them
+    raw = strategy.to_dict(strategy.DEFAULT) | changes
+    return {"cfg": [json.dumps(raw)], "hours": ["all"]}
+
+
+def test_preview_with_unchanged_settings_shows_no_change(app):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    view = app.preview_view(draft_query())
+    assert view["changed"] is False
+    assert [r["strategy"] for r in view["rows"]] == list(strategy.STRATEGIES)
+    assert all(r["change"] == 0 for r in view["rows"])
+    json.dumps(view)
+
+
+def test_preview_estimates_what_an_edit_would_change_for_every_strategy(app):
+    write_prices(app, pattern_prices() * 4, spacing=30, age=0)
+    wide = app.preview_view(draft_query(take_profit_pct=100.0))  # never takes profit
+    assert wide["changed"] is True
+    row = next(r for r in wide["rows"] if r["strategy"] == "mean_reversion")
+    was = row["saved"]["profit"] + row["saved"]["open"]
+    now = row["draft"]["profit"] + row["draft"]["open"]
+    assert row["change"] == pytest.approx(now - was)
+    # a take profit of 100% is never reached, so every trade the saved settings made is gone
+    assert row["saved"]["trades"] > 0 and row["draft"]["trades"] == 0
+    assert row["change"] != 0
+    assert any(
+        "above 9 in 10" in w["text"] or "rarely be reached" in w["text"]
+        for w in row["draft"]["warnings"]
+    ) or row["draft"]["warnings"][0]["text"].startswith("After the pool fee")
+
+
+def test_preview_compares_against_the_saved_settings_not_the_defaults(app):
+    write_prices(app, pattern_prices() * 4, spacing=30, age=0)
+    control.save(app.control_file, strategy.parse_config({"take_profit_pct": 100}))
+    saved = json.dumps(strategy.to_dict(app.saved_config()))
+    assert app.preview_view({"cfg": [saved], "hours": ["all"]})["changed"] is False
+
+
+def test_preview_never_saves_anything(app):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    app.preview_view(draft_query(take_profit_pct=9.0))
+    assert not app.control_file.exists()
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {},
+        {"cfg": ["not json"]},
+        {"cfg": ["[]"]},
+        {"cfg": ['{"take_profit_pct": 0.1}']},
+        {"cfg": ['{"stop_loss_pct": "4"}']},
+        {"cfg": ['{"nonsense": 1}']},
+        {"cfg": ['{"time_stop_on": "yes"}']},
+        {"cfg": ["x" * 20_000]},
+    ],
+)
+def test_preview_refuses_settings_a_save_would_refuse(app, query):
+    with pytest.raises(dashboard.QueryError):
+        app.preview_view(query)
+
+
+def test_preview_works_over_http_and_a_bad_draft_is_a_400(server):
+    cfg = json.dumps(strategy.to_dict(strategy.DEFAULT))
+    status, body = get_json(
+        server, "/api/preview?hours=6&cfg=" + urllib.parse.quote(cfg)
+    )
+    assert status == 200 and body["rows"] == []  # no prices recorded yet
+    status, body = get_json(server, "/api/preview?cfg=%7B%22take_profit_pct%22%3A0%7D")
+    assert status == 400 and "take profit" in body["error"]
+
+
+def test_preview_is_cached_for_the_same_draft(app, monkeypatch):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    calls = []
+    real = dashboard.compare.compare
+    monkeypatch.setattr(
+        dashboard.compare, "compare", lambda *a: calls.append(1) or real(*a)
+    )
+    app.preview_view(draft_query(take_profit_pct=6.0))
+    first = len(calls)
+    app.preview_view(draft_query(take_profit_pct=6.0))
+    assert len(calls) == first
+    app.preview_view(draft_query(take_profit_pct=7.0))
+    assert (
+        len(calls) == first + 1
+    )  # only the new draft; the saved side was already known
+
+
+# ---------------------------------------------------------------- what the review found
+
+
+def test_downsample_keeps_a_spike_in_the_first_and_the_last_bucket():
+    points = [(i, 100.0) for i in range(2000)]
+    points[3] = (3, 40.0)  # a low spike right at the start
+    points[1995] = (1995, 500.0)  # and a high one right at the end
+    thin = dashboard.downsample(points, 100)
+    assert len(thin) <= 100
+    assert thin[0] == points[0] and thin[-1] == points[-1]
+    assert (3, 40.0) in thin and (1995, 500.0) in thin
+    assert thin == sorted(thin)
+
+
+def test_the_cache_keeps_to_its_limit_and_forgets_the_oldest(app):
+    for n in range(dashboard.CACHE_ENTRIES + 5):
+        app.remembered(("k", n), lambda n=n: n)
+    assert len(app.cache) == dashboard.CACHE_ENTRIES
+    assert ("k", 0) not in app.cache and ("k", dashboard.CACHE_ENTRIES + 4) in app.cache
+
+
+def test_the_cache_survives_requests_from_many_threads(app):
+    errors = []
+
+    def hammer(offset):
+        try:
+            for n in range(200):
+                assert (
+                    app.remembered(("t", (n + offset) % 60), lambda n=n: n) is not None
+                )
+        except Exception as e:  # noqa: BLE001 - collected and asserted below
+            errors.append(e)
+
+    threads = [threading.Thread(target=hammer, args=(i * 7,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and len(app.cache) <= dashboard.CACHE_ENTRIES
+
+
+def test_the_same_answer_is_only_worked_out_once_even_when_asked_together(app):
+    made = []
+
+    def slow():
+        made.append(1)
+        threading.Event().wait(0.05)
+        return "ok"
+
+    threads = [
+        threading.Thread(target=lambda: app.remembered("same", slow)) for _ in range(6)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(made) == 1
+
+
+def test_the_comparison_notices_a_trade_that_closed_without_a_new_price(app):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    assert app.compare_view({"hours": ["all"]})["actual"]["trades"] == 0
+    closed_trades(app, ["take_profit"], base=NOW - 100)
+    assert app.compare_view({"hours": ["all"]})["actual"]["trades"] == 1
+
+
+def test_the_comparison_window_moves_with_the_clock_even_with_no_new_price(app):
+    write_prices(app, pattern_prices(), spacing=30, age=0)
+    first = app.compare_view({"hours": ["1"]})["from"]
+    app.clock = lambda: NOW + 1800
+    assert app.compare_view({"hours": ["1"]})["from"] == first + 1800
+
+
+def test_prices_out_of_order_in_the_file_still_give_the_right_window(app):
+    write_prices(app, [1000.0 + i for i in range(100)], spacing=30, age=0)
+    history.append(app.history_file, NOW - 9000, 5.0)  # a clock that stepped back
+    view = app.prices_view({"range": ["600"]})
+    assert view["samples"] == 21 and all(p[0] >= NOW - 600 for p in view["points"])
+
+
+@pytest.mark.parametrize("path", sorted(dashboard.Handler.VIEWS) + ["/api/status"])
+def test_every_api_get_refuses_a_bad_host_and_a_cross_site_page(server, path):
+    assert (
+        request(server, "GET", path, headers={"Host": "evil.example"})[0].status == 403
+    )
+    cross = request(server, "GET", path, headers={"Sec-Fetch-Site": "cross-site"})[0]
+    assert cross.status == 403
+    foreign = request(server, "GET", path, headers={"Origin": "https://evil.example"})[
+        0
+    ]
+    assert foreign.status == 403
+    # a page of the dashboard itself, and a command-line client, are fine
+    assert (
+        request(server, "GET", path, headers={"Sec-Fetch-Site": "same-origin"})[
+            0
+        ].status
+        != 403
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/trades?limit=0",
+        "/api/trades?reason=luck",
+        "/api/compare?hours=0",
+        "/api/compare?hours=x",
+        "/api/compare?hours=999999",
+        "/api/preview",
+        "/api/prices?range=inf",
+    ],
+)
+def test_a_bad_query_is_a_400_with_the_reason(server, path):
+    status, body = get_json(server, path)
+    assert status == 400 and body["error"]
+
+
+def test_an_unknown_api_path_is_a_404_and_a_post_to_a_view_is_refused(server):
+    assert get_json(server, "/api/nothing")[0] == 404
+    response, _ = request(
+        server, "POST", "/api/compare", "{}", {"Content-Type": "application/json"}
+    )
+    assert response.status == 404
