@@ -1,0 +1,16 @@
+covered hours: all 43.3, 1st 21.6, 2nd 21.6 (grid samples * 10 s)
+--- what the settings in force do now (TP4 SL5 TS40, cooldown 300, size 3200) at different fill delays
+now, delay 0s                                 +54.5% dd  2.2% n= 55 w= 85%     +39.0% dd  2.2% n= 39 w= 85%     +14.0% dd  1.5% n= 15 w= 87%   
+now, delay 10s                                +39.9% dd  2.2% n= 52 w= 77%     +31.9% dd  2.2% n= 37 w= 81%      +6.8% dd  2.3% n= 14 w= 64%   
+now, delay 20s                                +29.2% dd  2.2% n= 49 w= 69%     +25.2% dd  2.2% n= 35 w= 77%      +3.2% dd  2.0% n= 13 w= 46%   
+now, delay 30s                                +25.3% dd  2.2% n= 49 w= 69%     +22.1% dd  2.2% n= 35 w= 77%      +2.4% dd  2.0% n= 13 w= 46%   
+--- proposed (TP2.5 SL5 TS30, cooldown 60)
+proposed, delay 0s                            +84.5% dd  1.5% n= 86 w= 98%     +64.4% dd  1.5% n= 64 w= 98%     +18.6% dd  0.3% n= 21 w= 95%   
+proposed, delay 10s                           +74.5% dd  1.4% n= 86 w= 99%     +59.5% dd  1.4% n= 64 w=100%     +13.8% dd  0.7% n= 21 w= 95%   
+proposed, delay 20s                           +59.0% dd  1.4% n= 86 w= 94%     +48.5% dd  1.4% n= 64 w= 95%      +9.6% dd  1.1% n= 21 w= 90%   
+proposed, delay 30s                           +48.3% dd  1.4% n= 82 w= 91%     +42.6% dd  1.4% n= 64 w= 95%      +4.8% dd  1.9% n= 17 w= 76%   
+--- proposed at delay 20 with larger buys
+proposed size 3200                            +59.0% dd  1.4% n= 86 w= 94%     +48.5% dd  1.4% n= 64 w= 95%      +9.6% dd  1.1% n= 21 w= 90%   
+proposed size 5000                            +82.1% dd  2.0% n= 86 w= 92%     +68.4% dd  2.0% n= 64 w= 94%     +12.4% dd  1.9% n= 21 w= 86%   
+proposed size 7000                            +99.3% dd  2.7% n= 86 w= 91%     +84.2% dd  2.7% n= 64 w= 94%     +13.4% dd  2.8% n= 21 w= 81%   
+proposed size 9000                           +107.7% dd  3.4% n= 86 w= 90%     +93.5% dd  3.4% n= 64 w= 94%     +12.1% dd  3.9% n= 21 w= 76%   

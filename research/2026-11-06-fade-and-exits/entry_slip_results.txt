@@ -1,0 +1,31 @@
+trades matched 56 of 56
+buy fill vs trough print: median +0.65%  mean +0.99%  (the cost of being late + fee + impact)
+lag from the down-step to our buy (s): quantiles [7, 10, 16]
+ lag    0-30  s n=45 fill vs trough median +0.60%
+ lag   30-60  s n= 2 fill vs trough median +0.72%
+ lag   60-120 s n= 6 fill vs trough median +0.42%
+ lag  400-2000s n= 3 fill vs trough median +5.61%
+TP sells: fill vs peak print median -0.70%
+pool price read at decision vs trough: median +0.00%, max +5.51%
+
+last 20 live trades (pool read vs trough, lag, size, reason, pnl)
+11-05 03:41:01 trough 1038 read 1038 fill 1052 lag 17s size 8339 take_profit +303.8
+11-05 03:56:01 trough 1045 read 1045 fill 1060 lag 8s size 8643 time_stop -73.7
+11-05 05:30:12 trough 1036 read 1036 fill 1044 lag 32s size 8569 take_profit +359.9
+11-05 07:03:48 trough 1026 read 1026 fill 1032 lag 11s size 8929 take_profit +139.7
+11-05 07:31:37 trough 1026 read 1074 fill 1083 lag 1679s size 9069 time_stop -372.7
+11-05 08:46:13 trough 1019 read 1019 fill 1025 lag 6s size 8696 take_profit +178.0
+11-05 09:24:01 trough 1020 read 1020 fill 1032 lag 10s size 8874 take_profit +260.6
+11-05 09:33:02 trough 1018 read 1024 fill 1031 lag 79s size 9135 take_profit +90.1
+11-05 10:34:49 trough 1029 read 1029 fill 1037 lag 6s size 3209 take_profit +106.1
+11-05 12:18:01 trough 1055 read 1055 fill 1060 lag 8s size 3246 time_stop -31.2
+11-05 21:16:48 trough 1041 read 1041 fill 1053 lag 10s size 3207 take_profit +88.2
+11-05 21:52:49 trough 1064 read 1064 fill 1077 lag 7s size 3241 take_profit +62.6
+11-05 22:40:48 trough 1048 read 1048 fill 1063 lag 7s size 3249 take_profit +47.8
+11-05 23:00:48 trough 1071 read 1071 fill 1084 lag 7s size 3280 time_stop +6.2
+11-05 23:57:50 trough 1060 read 1060 fill 1072 lag 9s size 3278 time_stop +1.4
+11-06 00:56:00 trough 1049 read 1049 fill 1061 lag 14s size 3268 take_profit +99.9
+11-06 01:12:00 trough 1061 read 1061 fill 1073 lag 3s size 3313 take_profit +75.3
+11-06 01:41:01 trough 1045 read 1045 fill 1059 lag 22s size 3334 time_stop +65.0
+11-06 03:15:48 trough 1048 read 1048 fill 1060 lag 7s size 3347 time_stop -20.0
+11-06 06:35:48 trough 1056 read 1056 fill 1068 lag 12s size 3353 time_stop +18.1

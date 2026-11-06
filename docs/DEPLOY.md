@@ -44,7 +44,7 @@ Order of work: Infura key and MetaMask → prepare the server → bot wallet and
 
 1. Sign in at <https://app.infura.io>, create an API key, and make sure the **Sepolia** network is enabled for it (menu names may change; you want the HTTPS endpoint).
 2. The URL looks like `https://sepolia.infura.io/v3/<your-key>`. **The key is part of the URL, so the URL is a secret.** It goes in `.env` as `RPC_URL`, never in git, chat or screenshots. The bot also redacts it from its logs and from `logs/HALTED`.
-3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). With `RISK_PER_TRADE_PCT` above 0 a buy being sized adds one `liquidity()` read, at most every 5 minutes. The dashboard's **Scan pool liquidity** button makes the bot make about 120 more read-only calls, 0.2 s apart: that tick takes 30 to 40 s longer (a stop signal ends the scan early; it is reported as failed and the button asks again). `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself.
+3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. `FAST_POLL_SECONDS` (default 0 = off) polls that often during seconds 30 to 56 of every minute: with `POLL_SECONDS=10` and `FAST_POLL_SECONDS=3` that is about 12 ticks a minute instead of 6, so about double the requests (roughly 52,000 a day); try it in a dry run first. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). With `RISK_PER_TRADE_PCT` above 0 a buy being sized adds one `liquidity()` read, at most every 5 minutes. The dashboard's **Scan pool liquidity** button makes the bot make about 120 more read-only calls, 0.2 s apart: that tick takes 30 to 40 s longer (a stop signal ends the scan early; it is reported as failed and the button asks again). `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself.
 
 ### 1.2 MetaMask (your own computer)
 
@@ -355,9 +355,9 @@ Then do the one-hour dry run in section 3, and section 4.
 
 ### 3.1 What `main.py` does
 
-Every `POLL_SECONDS` (default 30): reload `logs/control.json` if it changed → read the pool price and the vault's balances → ask `strategy.decide()` for `buy`, `sell` or `hold` → on a signal, check the cooldown, the vault balance, the operator's gas and the price impact, then swap through the contract → record the position in `logs/ledger.json`.
+Every `POLL_SECONDS` (default 30, or `FAST_POLL_SECONDS` during seconds 30 to 56 of each minute if set): reload `logs/control.json` if it changed → read the pool price and the vault's balances → ask `strategy.decide()` for `buy`, `sell` or `hold` → on a signal, check the cooldown, the vault balance, the operator's gas and the price impact, then swap through the contract → record the position in `logs/ledger.json`.
 
-While the bot holds nothing, the chosen **strategy** decides when to buy. Once it holds something it bought, only the **take profit** and **stop loss** (and the **time stop**, if ticked on the dashboard) decide when to sell it, and it sells exactly what it bought. Both are set on the dashboard (see [GETTING_STARTED.md](GETTING_STARTED.md)); a dry run keeps its own paper ledger (`logs/ledger_dryrun.json`).
+While the bot holds nothing, the chosen **strategy** decides when to buy. Once it holds something it bought, only the **take profit** and **stop loss** (and the **time stop**, if ticked on the dashboard, or the dashboard's **Sell everything** button) decide when to sell it, and it sells exactly what it bought. Both are set on the dashboard (see [GETTING_STARTED.md](GETTING_STARTED.md)); a dry run keeps its own paper ledger (`logs/ledger_dryrun.json`).
 
 | Situation | What the bot does |
 |---|---|
@@ -387,8 +387,8 @@ Healthy output:
 
 ```
 INFO Started. contract=0x… operator=0x… dry_run=True
-INFO poll=30s cooldown=300s trade size=0.01 min ETH=0.01
-INFO strategy=mean_reversion take profit +3% stop loss -4% (change it on the dashboard or in control.json)
+INFO poll=30s cooldown=60s trade size=0.01 min ETH=0.01
+INFO strategy=mean_reversion take profit +2.5% stop loss -4% (change it on the dashboard or in control.json)
 WARNING new buys are paused: seen only 0 of the 8 big price steps needed to judge the pattern
 INFO strategy=mean_reversion price=1054.267260 decision=hold base=0.500000 quote=100.000000 samples=1
 ```

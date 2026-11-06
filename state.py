@@ -64,6 +64,18 @@ def load(path):
                 if scan.get("error") is None
                 else str(scan["error"])[:300],
             }
+        # the bot's last answer to the "sell everything" button: which request it served ("done"),
+        # when ("at"), and what it found ("note": sold, or nothing to sell)
+        liquidate = raw.get("liquidate")
+        chain["liquidate"] = None
+        if liquidate is not None:
+            chain["liquidate"] = {
+                "done": int(liquidate["done"]),
+                "at": None if liquidate.get("at") is None else float(liquidate["at"]),
+                "note": None
+                if liquidate.get("note") is None
+                else str(liquidate["note"])[:300],
+            }
     except (ValueError, TypeError, KeyError, ArithmeticError, RecursionError) as e:
         raise ValueError(f"{path}: {e}") from e
     return chain

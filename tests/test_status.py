@@ -40,7 +40,7 @@ def test_no_position_and_no_history():
 def test_open_position_shows_targets_and_unrealized_profit():
     out = text(held(), CHAIN, RUNNING, False, NOW)
     assert "OPEN for 10m" in out
-    assert "take profit at 1030.000000 (+3%)" in out
+    assert "take profit at 1025.000000 (+2.5%)" in out
     assert "stop loss at 960.000000 (-4%)" in out
     assert "(+5.00% from entry)" in out
     # 0.00001 fETH at 1050 is worth 0.0105 f564 for a cost of 0.01

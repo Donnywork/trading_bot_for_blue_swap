@@ -1,0 +1,23 @@
+start value 9700 f564 (base valued at the first price); final = everything sold back to f564 (the liquidate button)
+                                                                               all                1st half                2nd half
+--- fill delay 10s
+long-only (proposed settings), all-in 9000, from quote                +152.1% n=86            +124.7% n=64             +24.5% n=21
+two-sided rotation 100%/100%, start all quote                         +94.1% n=193            +97.4% n=147             +22.7% n=45
+two-sided rotation 100%/100%, start 50% base                          +93.8% n=193            +97.0% n=147             +24.0% n=46
+two-sided rotation 100%/100%, start all base                          +93.5% n=192            +96.3% n=146             +25.0% n=46
+two-sided rotation + 30 min time stop, start all quote                +86.0% n=193            +97.4% n=147             +17.5% n=45
+two-sided rotation + 30 min time stop, start 50% base                 +85.8% n=193            +97.0% n=147             +18.8% n=46
+baseline: just hold 50% base, no trading                                     -0.1%                   -2.6%                   +2.5%
+baseline: just hold 100% base, no trading                                    -0.4%                   -5.4%                   +4.6%
+--- fill delay 20s
+long-only (proposed settings), all-in 9000, from quote                +106.6% n=86             +93.5% n=64             +11.0% n=21
+two-sided rotation 100%/100%, start all quote                         +42.8% n=193            +56.5% n=147              +3.0% n=45
+two-sided rotation 100%/100%, start 50% base                          +42.5% n=193            +56.1% n=147              +3.9% n=46
+two-sided rotation 100%/100%, start all base                          +42.2% n=192            +55.6% n=146              +4.5% n=46
+two-sided rotation + 30 min time stop, start all quote                +39.0% n=193            +56.5% n=147              +0.2% n=45
+two-sided rotation + 30 min time stop, start 50% base                 +38.8% n=193            +56.1% n=147              +1.1% n=46
+baseline: just hold 50% base, no trading                                     -0.1%                   -2.6%                   +2.5%
+baseline: just hold 100% base, no trading                                    -0.4%                   -5.4%                   +4.6%
+--- upper bound: two-sided rotation, fill at the signal price (delay 0)
+two-sided rotation, start all quote                                  +143.0% n=193           +131.2% n=147             +44.0% n=45
+two-sided rotation, start 50% base                                   +142.7% n=193           +130.7% n=147             +46.0% n=46

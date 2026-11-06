@@ -12,16 +12,16 @@ from decimal import ROUND_DOWN, Decimal
 # strategy loses money when "right". None of these has a proven edge: judge them on data.
 WINDOW = 20  # price samples in the default moving average
 THRESHOLD_PCT = 2.0  # default dip below the average before buying
-TAKE_PROFIT_PCT = 3.0  # sell when the price is this far above the entry price
+TAKE_PROFIT_PCT = 2.5  # sell when the price is this far above the entry price
 STOP_LOSS_PCT = 4.0  # sell when the price is this far below the entry price
 # limits for the settings people can edit at runtime (the dashboard, logs/control.json)
 TAKE_PROFIT_RANGE = (1.0, 100.0)  # below ~1% the round-trip fees eat the profit
 STOP_LOSS_RANGE = (0.5, 50.0)
 MIN_DIP_PCT = 1.0  # a dip smaller than this is noise next to fees: never a buy signal
 # An extra exit people can tick on: sell whatever is held after this long, at the market. Off by
-# default. The default length comes from the live trades of 2026-11-04: winners were held 2 to 13
-# minutes, the two losers 11 and 28, so 15 minutes would only have cut the 28-minute one.
-TIME_STOP_MIN = 15.0
+# default. The default length comes from the backtest of 2026-11-06 (research/2026-11-06-fade-and-
+# exits): of 15 to 60 minutes, 30 earned most; the live winners of 2026-11-04 were held 2 to 13.
+TIME_STOP_MIN = 30.0
 TIME_STOP_RANGE = (1.0, 240.0)  # minutes
 SCAN_REQUEST_MAX = 10**11  # a unix time in seconds is about 1.8e9
 # What one leg (a buy or a sell) costs, in percent of what it trades: the pool's fee tier (3000 =
@@ -269,6 +269,10 @@ class Config:
     # new request from one it has already served.
     paused: bool = False
     scan_request: int = 0
+    # the "sell everything back to the quote token" button: counted like scan_request. Asking sets
+    # `paused` too (the dashboard does both in one write); the bot sells the open position at the
+    # market once per number.
+    liquidate_request: int = 0
 
     def __post_init__(self):
         full = {
@@ -324,6 +328,7 @@ def parse_config(raw):
         "time_stop_min",
         "paused",
         "scan_request",
+        "liquidate_request",
     }
     if unknown:
         raise ConfigError(f"unknown setting(s): {sorted(unknown)}")
@@ -364,6 +369,9 @@ def parse_config(raw):
     scan_request = number(
         "scan request", raw.get("scan_request", 0), 0, SCAN_REQUEST_MAX, True
     )
+    liquidate_request = number(
+        "liquidate request", raw.get("liquidate_request", 0), 0, SCAN_REQUEST_MAX, True
+    )
 
     given = raw.get("params", {})
     if not isinstance(given, dict):
@@ -402,6 +410,7 @@ def parse_config(raw):
         time_stop_min,
         paused,
         scan_request,
+        liquidate_request,
     )
     for (
         strategy_name,

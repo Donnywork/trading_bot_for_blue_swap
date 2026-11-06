@@ -732,6 +732,49 @@ def test_every_scan_request_is_a_higher_number_than_the_last(app, server):
     assert first >= NOW and second == first + 1
 
 
+def test_sell_everything_pauses_buys_and_raises_its_own_request_number(app, server):
+    state_before = app.state_file.read_text()
+    res, data = post_command(server, "liquidate")
+    assert res.status == 200
+    saved = control.load(app.control_file)
+    assert saved.paused is True and saved.liquidate_request >= NOW
+    assert saved.scan_request == 0  # the scan button is its own
+    assert json.loads(data)["control"]["liquidate_request"] == saved.liquidate_request
+    post_command(server, "liquidate")  # the clock has not moved: still higher
+    assert (
+        control.load(app.control_file).liquidate_request == saved.liquidate_request + 1
+    )
+    # nothing but logs/control.json was written
+    assert sorted(p.name for p in app.tmp.iterdir()) == ["control.json", "state.json"]
+    assert app.state_file.read_text() == state_before
+
+
+def test_saving_the_form_cannot_undo_a_sell_everything_request(app, server):
+    post_command(server, "liquidate")
+    asked = control.load(app.control_file).liquidate_request
+    form = {**strategy.to_dict(strategy.DEFAULT), "liquidate_request": 0}
+    res, _ = post_config(server, form)
+    assert res.status == 200
+    saved = control.load(app.control_file)
+    assert saved.liquidate_request == asked and saved.paused is True
+
+
+def test_the_snapshot_tells_the_page_the_answer_to_sell_everything(app):
+    control.save(app.control_file, strategy.parse_config({"liquidate_request": 9}))
+    view = app.snapshot()["control"]
+    assert view["liquidate_request"] == 9 and view["liquidate"] is None
+    answer = {"done": 9, "at": NOW - 5.0, "note": "sold the open position"}
+    state.save(app.state_file, NOW - 10, {**CHAIN, "liquidate": answer})
+    assert app.snapshot()["control"]["liquidate"] == answer
+
+
+def test_trades_can_be_filtered_by_the_sell_everything_reason(app):
+    closed_trades(app, ["take_profit", "liquidate", "time_stop", "liquidate"])
+    sold = app.trades_view({"reason": ["liquidate"]})
+    assert sold["total"] == 2
+    assert {t["reason"] for t in sold["items"]} == {"liquidate"}
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -835,7 +878,13 @@ def test_the_snapshot_tells_the_page_what_the_buttons_show(app):
 
 def test_the_page_has_the_buttons(app):
     page = dashboard.PAGE.read_text()
-    for needle in ('id="controls-bar"', "/api/command", '"pause"', '"scan"'):
+    for needle in (
+        'id="controls-bar"',
+        "/api/command",
+        '"pause"',
+        '"scan"',
+        '"liquidate"',
+    ):
         assert needle in page
 
 

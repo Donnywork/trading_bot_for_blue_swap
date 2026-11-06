@@ -143,6 +143,7 @@ def summarize(data):
         "take_profit": sum(1 for t in closed if t["reason"] == "take_profit"),
         "stop_loss": sum(1 for t in closed if t["reason"] == "stop_loss"),
         "time_stop": sum(1 for t in closed if t["reason"] == "time_stop"),
+        "liquidate": sum(1 for t in closed if t["reason"] == "liquidate"),
         "spent": spent,
         "profit": total,
         "profit_pct": float(total / spent * 100) if spent else 0.0,
