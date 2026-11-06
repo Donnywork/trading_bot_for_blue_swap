@@ -96,9 +96,9 @@ See `.env.example` for all variables. The important ones:
 | `MAX_TRADE_AMOUNT` | size of one **buy** (in f564, the quote token); a sell closes exactly what the buy delivered. Also the on-chain per-swap cap set at deploy |
 | `RISK_PER_TRADE_PCT` | optional, `0` = off (every buy is `MAX_TRADE_AMOUNT`). Above 0, a buy is sized so that a stop loss costs about this share of the f564 in the vault, pool fee and price impact included (worked out on the liquidity saved in `pool_profile.json`, so a bigger buy pays more impact), and never exceeds `MAX_TRADE_AMOUNT` |
 | `DRY_RUN` | only the word `false` (any capitalisation) sends real transactions; anything else simulates only |
-| `POLL_SECONDS`, `COOLDOWN_SECONDS`, `MIN_OPERATOR_ETH`, `MAX_TRADE_FAILURES` | loop pacing and kill switch |
+| `POLL_SECONDS`, `FAST_POLL_SECONDS`, `COOLDOWN_SECONDS`, `MIN_OPERATOR_ETH`, `MAX_TRADE_FAILURES` | loop pacing (`FAST_POLL_SECONDS`, default 0 = off, polls faster during seconds 30 to 56 of every minute, when the pool's big trader swaps; `COOLDOWN_SECONDS` defaults to 60) and kill switch |
 
-The strategy, take profit, stop loss, the optional time stop, the pattern-guard limits and the strategy's own numbers are **not** in `.env`: change them on the dashboard (they are saved to `logs/control.json`, and the bot picks them up on its next tick).
+The dashboard also has a **Sell everything** button: it pauses new buys and the bot sells its open position back to the quote token at the market (it sells only what it bought). The strategy, take profit, stop loss, the optional time stop, the pattern-guard limits and the strategy's own numbers are **not** in `.env`: change them on the dashboard (they are saved to `logs/control.json`, and the bot picks them up on its next tick).
 
 ## Safety model
 

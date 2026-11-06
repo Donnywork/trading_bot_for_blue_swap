@@ -148,8 +148,8 @@ uv run python main.py               # the real loop, in the foreground. Ctrl+C s
 
 ```
 INFO Started. contract=0x… operator=0x… dry_run=True
-INFO poll=30s cooldown=300s trade size=0.01 min ETH=0.01
-INFO strategy=mean_reversion take profit +3% stop loss -4% (change it on the dashboard or in control.json)
+INFO poll=30s cooldown=60s trade size=0.01 min ETH=0.01
+INFO strategy=mean_reversion take profit +2.5% stop loss -4% (change it on the dashboard or in control.json)
 WARNING new buys are paused: seen only 0 of the 8 big price steps needed to judge the pattern
 INFO strategy=mean_reversion price=1054.267260 decision=hold base=0.500000 quote=100.000000 samples=1
 ```
@@ -191,7 +191,7 @@ On the dashboard, in **Strategy and exit rules**:
 
 1. Pick a **strategy** (when to buy). They are described [below](#the-strategies); start with *Mean reversion*.
 2. Adjust its **settings** if you like (each field shows its allowed range).
-3. Set **take profit** and **stop loss** (when to sell). Defaults: +3% and −4%. Optionally tick the **time stop** (sell what has been held too long, 15 minutes by default; it also applies to a position that is already open). Below them, the **pattern guard** limits (see [The pattern guard](#the-pattern-guard)).
+3. Set **take profit** and **stop loss** (when to sell). Defaults: +2.5% and −4%. Optionally tick the **time stop** (sell what has been held too long, 30 minutes by default; it also applies to a position that is already open). Below them, the **pattern guard** limits (see [The pattern guard](#the-pattern-guard)).
 4. Look at the **Estimated effect** box above the Save button: it replays every strategy on the recorded prices with the numbers you typed, and shows the estimated gain or loss against the saved settings, after the pool fee and the price impact, with warnings. It is a paper replay at `MAX_TRADE_AMOUNT` per trade (not the risk-sized amount, if you use `RISK_PER_TRADE_PCT`: a smaller trade pays less price impact, so both the amounts and the percentages differ). Each trade is charged what its size costs on the pool's liquidity layout, scaled by how deep the bot last found the pool (`depth_scale` in `logs/state.json`; as saved until it has sized a buy), so use it to see which way a change pushes.
 5. Press **Save** (it stays greyed out until you change something; **Discard changes** goes back to what is saved). The message says "Saved … The bot applies it on its next tick".
 
@@ -246,7 +246,7 @@ Live and dry-run keep **separate records** (`logs/ledger.json` vs `logs/ledger_d
 
 ## How the bot decides
 
-Every `POLL_SECONDS` (30 s) it takes one **tick**:
+Every `POLL_SECONDS` (30 s; with `FAST_POLL_SECONDS` set, that often during seconds 30 to 56 of every minute instead) it takes one **tick**:
 
 ```
 read price + vault balances → reload settings → ask the strategy → (maybe) trade → save position
@@ -265,7 +265,7 @@ The bot is always in one of two states:
 
 - **Entry** is decided by whichever strategy you picked. **Exit is the same for all of them.**
 - Only **one position at a time**. While holding, there are no more buys.
-- A **cooldown** (`COOLDOWN_SECONDS`, 5 min) after any trade stops it re-entering straight away. An exit right after a *successful* buy is **not** delayed (a stop loss must not wait), but after a *failed* attempt it waits the cooldown like any trade.
+- A **cooldown** (`COOLDOWN_SECONDS`, 60 s by default) after any trade stops it re-entering straight away. An exit right after a *successful* buy is **not** delayed (a stop loss must not wait), but after a *failed* attempt it waits the cooldown like any trade.
 - The bot only ever sells **what it bought itself**. Tokens you deposited by hand are never sold.
 - Nothing is sent unless `DRY_RUN=false`. In a dry run everything else is the same, using the quoted amounts as the "fill" (so a dry-run position, and its profit and loss, are estimates, not vault amounts).
 
@@ -287,10 +287,11 @@ The price-impact limit (2%) is far away: a buy of about 1,000 f564 (about 1 fETH
 
 **Sizing by risk (optional).** Set `RISK_PER_TRADE_PCT` in `.env` (default `0` = off). The bot then looks for the biggest buy whose stop loss costs at most `vault f564 × risk%`, never above `MAX_TRADE_AMOUNT` or the vault balance. What a stop loss costs is worked out exactly on the pool's liquidity saved in `pool_profile.json` (a snapshot; the maths is `v3pool.py`): the price falling by the stop loss, both 0.3% pool fees and the price impact of the buy and of the sell. The impact grows with the size: a round trip costs about 0.73% at 1,000 f564, 1.25% at 5,000 and 2.3% at 14,000. So with a small vault the result is close to `vault × risk% ÷ (stop loss% + 0.75%)` (1,386 f564, 2% risk, 4% stop loss: about 583 f564 per buy), and with a big one it is clearly smaller than that formula says (40,000 f564, 2% risk, 5% stop loss: the formula asks for 13,913, the bot buys less, because a buy that big pays a lot more than 0.75%). As the vault grows, buys grow with it, up to the ceiling. The bot refuses to start with `RISK_PER_TRADE_PCT` above 0 if `pool_profile.json` is missing. Each time a buy is sized the bot also reads the pool's current liquidity (one read-only call, at most every 5 minutes) and scales the saved layout to it, so a pool that has got deeper or thinner since the snapshot is followed; if that read fails the buy is skipped (`buy skipped: could not read the pool's liquidity`). It does not see liquidity moving to *other price ranges*: for that, press **Scan pool liquidity** on the dashboard (see "Pause and scan buttons" below). Note that it limits the *loss*, not the *cost*: at big sizes the round trip can eat most of a 3% take profit, so keep `MAX_TRADE_AMOUNT` as a ceiling you are comfortable with. A price that jumps past the stop loss loses more than planned (live stops filled at -4.2%), so the "risk" is a plan, not a guarantee. `RISK_PER_TRADE_PCT` cannot be changed from the dashboard, on purpose.
 
-**Pause and scan buttons.** The **Controls** card on the dashboard has two buttons. Neither talks to the chain from the page: they write a flag in `logs/control.json` and the bot acts on its next tick.
+**Pause, scan and sell-everything buttons.** The **Controls** card on the dashboard has three buttons. None talks to the chain from the page: they write a flag in `logs/control.json` and the bot acts on its next tick.
 
 - **Pause new buys** / **Resume buying**: while paused the bot makes no new buy. A position that is open is **still sold** at its take profit, stop loss or time stop, so pausing never leaves you without an exit. The header shows "New buys paused". Use it before you change the vault by hand, or when the pool looks odd.
 - **Scan pool liquidity**: the bot reads the pool's whole liquidity layout (about 120 read-only calls to the node, spaced out so a rate-limited RPC does not refuse them, 30 to 40 seconds). It does this at the end of the tick, so a sale due in that tick is not held up. The result is kept in `logs/pool_profile.json` and replaces the layout that ships with the code: from then on trade sizes and the dashboard's estimates use it, also after a restart. Press it after liquidity providers have clearly changed the pool, not on a schedule. If it fails (for example the node says "too many requests"), the card says why and the old layout stays; press again later; a restart does not retry it by itself, and the card still shows the last answer after one.
+- **Sell everything to f564**: asks you to confirm, then pauses new buys and makes the bot sell its open position at the market on its next tick (`closed position (liquidate)` in the log, "Sold everything" in the trades table), whatever the price is; if a take profit or stop loss applies in that same tick it is the recorded reason. With no open position it just says so. Buying stays paused afterwards until you press **Resume buying**. It sells only what the bot bought: base token you put into the vault by hand is left alone (the log says how much). A swap that fails is retried only after the usual cooldown and, after `MAX_TRADE_FAILURES` failures in a row, halts the bot like any other. Use it at the end of a run so everything is back in f564.
 
 **Taking the starting fETH out of the vault.** The bot only ever sells what it bought, so fETH you deposited stays untouched. To withdraw it, **stop the bot, or make sure `status.py` shows no open position, before you send the withdrawal** (a buy could land between printing the calldata and mining it). If a position is open, withdraw no more than the vault's fETH minus that position's fETH, and never `all`: the bot sells exactly what it recorded, and with less in the vault it logs `sell skipped: vault balance … < trade size` and its take profit and stop loss can no longer fire. `uv run python bot_contract.py withdraw-calldata fETH 0.9999` prints the calldata, sent from the owner wallet as above.
 
@@ -323,9 +324,9 @@ The **entry price** is the pool price at the moment the bot decided to buy. Then
 
 - price ≥ entry × (1 + take profit%) → **sell** (take profit)
 - price ≤ entry × (1 − stop loss%) → **sell** (stop loss)
-- optional, if you tick **time stop**: held for at least that many minutes and neither of the above has happened → **sell** at the market price (`time stop`). It is **off by default**. The default length, 15 minutes, comes from the first live day, when winners closed within 13 minutes and the two stop losses took 11 and 28; that is 15 trades, so treat it as a starting point
+- optional, if you tick **time stop**: held for at least that many minutes and neither of the above has happened → **sell** at the market price (`time stop`). It is **off by default**. The default length, 30 minutes, comes from a backtest on 43 hours of recorded prices (`research/2026-11-06-fade-and-exits/`): of 15 to 60 minutes, 30 earned most. It is in-sample, so treat it as a starting point
 
-Worked example: entry 1000, take profit 3%, stop loss 4% → sells at ≥ 1030 or ≤ 960.
+Worked example: entry 1000, take profit 2.5%, stop loss 4% → sells at ≥ 1025 or ≤ 960.
 
 Things to know:
 
@@ -407,7 +408,7 @@ Everything lives in `logs/` (git-ignored). None of it contains a secret.
 | `state.json` | the price, vault balances and bot-wallet gas the bot read on its last tick; the dashboard shows these instead of calling the chain (no key or URL in it) | yes, the bot rewrites it on the next tick |
 | `HALTED` | exists only after the kill switch fired; holds the reason | only after you fixed the cause (the bot refuses to start while it exists) |
 | `ledger.json` / `ledger_dryrun.json` | the open position and closed trades, live / paper (the dashboard and `status.py` read the one matching `DRY_RUN`) | **not while the bot holds a position** (see below); otherwise deleting just forgets the history |
-| `control.json` | the strategy, take profit, stop loss and strategy settings (what the dashboard writes). Hand-editable: the same eight keys as the form (`strategy`, `take_profit_pct`, `stop_loss_pct`, `params`, `guard_flip_pct`, `guard_drift_pct`, `time_stop_on`, `time_stop_min`), missing keys keep their defaults, unknown keys are an error | yes, but a **running** bot keeps its current settings until you save again from the dashboard or restart it |
+| `control.json` | the strategy, take profit, stop loss and strategy settings (what the dashboard writes). Hand-editable: the same eight keys as the form (`strategy`, `take_profit_pct`, `stop_loss_pct`, `params`, `guard_flip_pct`, `guard_drift_pct`, `time_stop_on`, `time_stop_min`) plus the buttons' numbers (`paused`, `scan_request`, `liquidate_request`: leave those to the dashboard), missing keys keep their defaults, unknown keys are an error | yes, but a **running** bot keeps its current settings until you save again from the dashboard or restart it |
 | `prices.csv` | one price per tick, for the chart | yes |
 | `monitor_seen.json` | addresses `pool_monitor.py` has already seen | yes |
 
@@ -461,6 +462,7 @@ On a server, use the venv's Python instead of `uv run`: `source .venv/bin/activa
 | `buy skipped: could not read the pool's liquidity` | That one read failed (RPC error): the buy is skipped and the next signal tries again. If it repeats, check the RPC |
 | `buy skipped: the risk-sized buy X is below 1.00% of MAX_TRADE_AMOUNT` | The vault holds so little f564 that a risk-sized buy would not be worth its gas. Fund it |
 | `closed position (time_stop) at …` | The time stop sold a position that had been held for its limit. Untick it on the dashboard if you do not want it |
+| `sell everything (asked on the dashboard): …` / `closed position (liquidate) at …` | The **Sell everything** button was served: it says what was sold, or that there was nothing to sell. Press **Resume buying** to trade again |
 | `sell skipped: vault balance …` | The vault holds less fETH than the position needs. See "Resetting a stuck position" above |
 | `buy skipped: price impact too large` | The trade would move the pool price more than 2%. Lower `MAX_TRADE_AMOUNT` |
 | `ignoring the settings file` in the log | `control.json` is invalid (the message says why). A running bot keeps its previous settings; a bot that *starts* while the file is invalid uses the defaults until it is fixed. Save again from the dashboard to repair it |

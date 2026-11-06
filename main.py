@@ -50,6 +50,12 @@ DEPTH_MAX_AGE = 300
 # A whole scan of the pool (the dashboard's button) is about 120 reads: this many seconds apart, as
 # the research's own scan did, so a rate-limited RPC (HTTP 429) is not hit with a burst
 DEPTH_CALL_PAUSE = 0.2
+# The pool's one big trader swaps at seconds 35 to 50 of a minute (research/2026-11-06-fade-and-
+# exits: 84% of the gaps between its swaps are multiples of 2 minutes), and the price starts to
+# bounce back within 10 to 20 s, so a late look costs about 10 points of return per 10 s. With
+# FAST_POLL_SECONDS set, the bot looks that often during these seconds of every minute (the window
+# starts a little early for a poll that lands on it) and every POLL_SECONDS otherwise.
+FAST_POLL_WINDOW = (30, 56)
 
 log = logging.getLogger("bot")
 
@@ -86,6 +92,22 @@ class RedactingFormatter(logging.Formatter):
         return redact(super().format(record))
 
 
+def poll_delay(poll_seconds, fast_seconds, wall):
+    # ------------------------------------
+    # Seconds to wait before the next tick. `wall` is the unix time now. Outside the fast window the
+    # normal pace, but never so long that the window is slept through: the tick lands at its start.
+    # ------------------------------------
+
+    if fast_seconds <= 0 or fast_seconds >= poll_seconds:
+        return poll_seconds
+    start, end = FAST_POLL_WINDOW
+    second = wall % 60
+    if start <= second < end:
+        return fast_seconds
+    until_window = (start - second) % 60
+    return max(1, min(poll_seconds, until_window))
+
+
 class Halt(Exception):
     """Unrecoverable: stop trading until a human looks (writes logs/HALTED)."""
 
@@ -104,6 +126,8 @@ class Settings:
     dry_run: bool
     # share of the vault's quote one stop loss may cost; 0 = every buy is `max_trade`
     risk_pct: Decimal = Decimal(0)
+    # poll this often during FAST_POLL_WINDOW of every minute; 0 = always POLL_SECONDS
+    fast_poll_seconds: int = 0
 
     @classmethod
     def from_env(cls):
@@ -115,14 +139,18 @@ class Settings:
             raise SystemExit(
                 "RISK_PER_TRADE_PCT must be between 0 and 100 (0 = every buy is MAX_TRADE_AMOUNT)"
             )
+        fast_poll = int(os.environ.get("FAST_POLL_SECONDS", "0"))
+        if not 0 <= fast_poll <= 60:
+            raise SystemExit("FAST_POLL_SECONDS must be between 0 (off) and 60")
         return cls(
             poll_seconds=int(os.environ.get("POLL_SECONDS", "30")),
-            cooldown_seconds=int(os.environ.get("COOLDOWN_SECONDS", "300")),
+            cooldown_seconds=int(os.environ.get("COOLDOWN_SECONDS", "60")),
             min_operator_eth=Decimal(os.environ.get("MIN_OPERATOR_ETH", "0.01")),
             max_trade_failures=int(os.environ.get("MAX_TRADE_FAILURES", "3")),
             max_trade=Decimal(os.environ["MAX_TRADE_AMOUNT"]),
             dry_run=os.environ.get("DRY_RUN", "true").lower() != "false",
             risk_pct=risk_pct,
+            fast_poll_seconds=fast_poll,
         )
 
 
@@ -285,10 +313,15 @@ class Runner:
         # the last answer to the scan button, for the dashboard (the state file); kept over a restart
         self.scan_info = self.restored_scan()
         self.scan_done = (self.scan_info or {}).get("done", 0)
+        # the same for the "sell everything" button: a restart must not sell a later position
+        # because of a request it already served
+        self.liquidate_info = self.restored_liquidate()
+        self.liquidate_done = (self.liquidate_info or {}).get("done", 0)
         self.eth, self.eth_at = None, None
         self.cfg = strategy.DEFAULT
         self.control_stamp = None
         self.reload_config(starting=True)
+        self.drop_stale_liquidate_request()
         self.preload_prices()
         self.last_trade = None
         self.read_failures = 0
@@ -364,6 +397,40 @@ class Runner:
                 "error": None,
             }
         return answer
+
+    def restored_liquidate(self):
+        # the state file has the last answer to the "sell everything" button (None: never answered)
+        try:
+            saved = state.load(self.state_file) if self.state_file else None
+        except (ValueError, OSError):
+            saved = None
+        return saved["liquidate"] if saved else None
+
+    def drop_stale_liquidate_request(self):
+        # The answer to the button lives in the state file. If that file is missing, damaged or
+        # older than the last answer, a request that was already served would look new, and the
+        # position bought since would be sold at once. Request numbers are clock times, so one
+        # made before the open position was bought cannot have been meant for it: treat it as
+        # served. (A request made after it, for example while the bot was down, still is served.)
+        held = self.ledger["open"]
+        request = self.cfg.liquidate_request
+        if held and self.liquidate_done < request < held["opened"]:
+            log.warning(
+                "ignoring a sell-everything request older than the open position (the state "
+                "file did not say it was served)"
+            )
+            self.liquidate_done = request
+
+    def answer_liquidate(self, note):
+        # the request in force is served: remember it (the state file tells the dashboard and a
+        # restart) and say so
+        self.liquidate_done = self.cfg.liquidate_request
+        self.liquidate_info = {
+            "done": self.liquidate_done,
+            "at": time.time(),
+            "note": note,
+        }
+        log.info("sell everything (asked on the dashboard): %s", note)
 
     def serve_scan_request(self):
         # ------------------------------------
@@ -465,6 +532,17 @@ class Runner:
         decision = strategy.decide(prices, position, self.cfg)
         if decision == "buy" and self.cfg.paused:
             decision = "hold"  # paused on the dashboard: only a new buy waits, a sale never does
+        # "sell everything" (the dashboard): the open position is sold now whatever the price is,
+        # and nothing is bought until it is done. With no position it is answered at once.
+        liquidating = self.cfg.liquidate_request > self.liquidate_done
+        answered = False
+        if liquidating:
+            if held:
+                decision = "sell"
+            else:
+                decision = "hold"
+                self.answer_liquidate("nothing to sell: the bot holds no position")
+                answered = True
         self.note_guard(prices, position)
         log.info(
             "strategy=%s price=%.6f decision=%s base=%.6f quote=%.6f samples=%d%s",
@@ -488,10 +566,24 @@ class Runner:
                 if decision == "sell"
                 else None
             )
+            if liquidating and reason is None:
+                reason = "liquidate"  # (a price target hit at the same moment is the real reason)
+            sold_base = Decimal(held["base"]) if held else None
             self.trade(decision, position, price, reason)
-        if self.serve_scan_request():
+            if liquidating and self.ledger["open"] is None:
+                note = f"sold the open position at {price:.6f}"
+                left = Decimal(str(position.base)) - sold_base
+                if left > sold_base / 10_000:
+                    note += (
+                        f"; {left:.6f} {self.io.symbols[0]} in the vault was not bought by the "
+                        "bot and is left alone"
+                    )
+                self.answer_liquidate(note)
+                answered = True
+        if self.serve_scan_request() or answered:
             # the answer goes to the state file now, not a tick later: a restart in between would
-            # leave the dashboard's button waiting for ever (or retry a failed scan)
+            # leave the dashboard's button waiting for ever (or retry a failed scan, or sell a
+            # later position because of a request that was already served)
             self.write_state(price, position)
 
     def write_state(self, price, position):
@@ -516,6 +608,8 @@ class Runner:
                 chain["depth_scale"] = self.scale
             if self.scan_info is not None:
                 chain["scan"] = self.scan_info
+            if self.liquidate_info is not None:
+                chain["liquidate"] = self.liquidate_info
             state.save(self.state_file, time.time(), chain)
         except (*READ_ERRORS, OSError) as e:
             log.warning("could not update the dashboard's state file: %s", e)
@@ -568,7 +662,9 @@ class Runner:
             # close exactly what the buy brought in, not the (much larger) base-token trade size
             amount, balance = Decimal(self.ledger["open"]["base"]), position.base
         if Decimal(str(balance)) < amount * BALANCE_TOLERANCE:
-            log.info(
+            # (a sale that keeps being skipped is a position that cannot close: not a quiet line)
+            log.log(
+                logging.WARNING if decision == "sell" else logging.INFO,
                 "%s skipped: vault balance %s < trade size %s",
                 decision,
                 balance,
@@ -735,7 +831,11 @@ class Runner:
             if max_steps is not None and steps >= max_steps:
                 return
             # back off while the RPC is failing, otherwise poll at the normal pace
-            delay = self.settings.poll_seconds
+            delay = poll_delay(
+                self.settings.poll_seconds,
+                self.settings.fast_poll_seconds,
+                time.time(),
+            )
             if self.read_failures:
                 delay = min(delay * 2**self.read_failures, MAX_BACKOFF_SECONDS)
             self.stop.wait(delay)
@@ -782,8 +882,11 @@ def main(ticks=None):
         settings.dry_run,
     )
     log.info(
-        "poll=%ss cooldown=%ss trade size=%s min ETH=%s",
+        "poll=%ss%s cooldown=%ss trade size=%s min ETH=%s",
         settings.poll_seconds,
+        f" (every {settings.fast_poll_seconds}s at seconds {FAST_POLL_WINDOW[0]}-{FAST_POLL_WINDOW[1]} of a minute)"
+        if 0 < settings.fast_poll_seconds < settings.poll_seconds
+        else "",
         settings.cooldown_seconds,
         settings.max_trade,
         settings.min_operator_eth,

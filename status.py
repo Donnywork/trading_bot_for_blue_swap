@@ -131,7 +131,8 @@ def render(data, chain, health, dry_run, now, cfg=strategy.DEFAULT):
         lines.append(
             f"realized:  {s['trades']} closed trades: {s['wins']} won, {s['losses']} lost "
             f"({s['take_profit']} take profit, {s['stop_loss']} stop loss"
-            f"{f', {s["time_stop"]} time stop' if s['time_stop'] else ''})"
+            f"{f', {s["time_stop"]} time stop' if s['time_stop'] else ''}"
+            f"{f', {s["liquidate"]} sold by the button' if s['liquidate'] else ''})"
         )
         lines.append(
             f"           P/L {money(s['profit'])} {quote} on {s['spent']} {quote} spent "

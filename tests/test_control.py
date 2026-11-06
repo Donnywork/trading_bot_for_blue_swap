@@ -32,6 +32,20 @@ def test_the_buttons_are_saved_beside_the_settings_but_not_in_the_form_view(tmp_
     assert "scan_request" not in strategy.to_dict(config)
 
 
+def test_the_sell_everything_request_is_saved_and_checked_like_the_scan_request(
+    tmp_path,
+):
+    path = tmp_path / "control.json"
+    control.save(path, strategy.parse_config({"liquidate_request": 1_700_000_456}))
+    assert json.loads(path.read_text())["liquidate_request"] == 1_700_000_456
+    assert control.load(path).liquidate_request == 1_700_000_456
+    assert "liquidate_request" not in strategy.to_dict(control.load(path))
+    for bad in ("-1", "1.5", '"5"', "true", "1e12"):
+        path.write_text(f'{{"liquidate_request": {bad}}}')
+        with pytest.raises(ValueError, match="control.json"):
+            control.load(path)
+
+
 def test_a_file_from_before_the_buttons_existed_means_not_paused_and_no_request(
     tmp_path,
 ):

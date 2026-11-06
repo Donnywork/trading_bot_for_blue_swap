@@ -42,7 +42,7 @@ CHART_MAX_POINTS = (50, 3000)  # what one chart request may ask for
 CHART_DEFAULT_POINTS = 900
 TRADES_PAGE_MAX = 100
 COMPARE_MAX_HOURS = 24 * 30
-COMPARE_REASONS = ("take_profit", "stop_loss", "time_stop")
+COMPARE_REASONS = ("take_profit", "stop_loss", "time_stop", "liquidate")
 CACHE_ENTRIES = 24
 # only these host names may be used to reach the page (any port, as a tunnel may remap it): a
 # web page on another site can point a name of its own at 127.0.0.1 ("DNS rebinding")
@@ -425,7 +425,12 @@ class Dashboard:
         saved = self.saved_config()
         # the buttons are not part of the form: a draft is the saved pause and scan state, so a
         # pause alone never shows up as a change
-        draft = replace(draft, paused=saved.paused, scan_request=saved.scan_request)
+        draft = replace(
+            draft,
+            paused=saved.paused,
+            scan_request=saved.scan_request,
+            liquidate_request=saved.liquidate_request,
+        )
         points, start, signature = self.replay_window(query)
         before = self.replayed(points, start, signature, saved)
         after = (
@@ -485,24 +490,32 @@ class Dashboard:
             try:
                 current = control.load(self.control_file)
                 paused, scan_request = current.paused, current.scan_request
+                liquidate_request = current.liquidate_request
             except ValueError:
                 # A damaged file: the bot is still running on its last good settings, which may be
                 # paused. Fixing the file with the form must not lift that unseen, so it fails
-                # closed (paused; the button resumes). The scan number needs no care: a click
+                # closed (paused; the button resumes). The request numbers need no care: a click
                 # always asks above whatever the bot served.
-                paused, scan_request = True, 0
-            config = replace(config, paused=paused, scan_request=scan_request)
+                paused, scan_request, liquidate_request = True, 0, 0
+            config = replace(
+                config,
+                paused=paused,
+                scan_request=scan_request,
+                liquidate_request=liquidate_request,
+            )
             control.save(self.control_file, config)
         return strategy.to_dict(config)
 
-    COMMANDS: ClassVar[tuple] = ("pause", "resume", "scan")
+    COMMANDS: ClassVar[tuple] = ("pause", "resume", "scan", "liquidate")
 
     def command(self, raw):
         # ------------------------------------
         # The buttons. All they do is write logs/control.json, like the settings form: "pause" and
         # "resume" hold back or allow NEW buys (a sale is never held back), "scan" raises the
         # request number the bot compares with the last one it served, and the bot then reads the
-        # pool's layout itself on its next tick. This page makes no RPC call. ValueError if the
+        # pool's layout itself on its next tick. "liquidate" does the same with its own number and
+        # pauses new buys in the same write: the bot sells the position it bought, at the market,
+        # on its next tick. This page makes no RPC call. ValueError if the
         # request is not one of these or the settings file is damaged (it is not overwritten: the
         # settings form is how it gets fixed).
         # ------------------------------------
@@ -522,10 +535,17 @@ class Dashboard:
                 # always above the last request (and so above what the bot served)
                 request = max(int(self.clock()), current.scan_request + 1)
                 changed = replace(current, scan_request=request)
+            elif name == "liquidate":
+                request = max(int(self.clock()), current.liquidate_request + 1)
+                changed = replace(current, liquidate_request=request, paused=True)
             else:
                 changed = replace(current, paused=name == "pause")
             control.save(self.control_file, changed)
-        return {"paused": changed.paused, "scan_request": changed.scan_request}
+        return {
+            "paused": changed.paused,
+            "scan_request": changed.scan_request,
+            "liquidate_request": changed.liquidate_request,
+        }
 
     def control_view(self, cfg):
         # what the buttons show: the saved pause and scan request, how deep the bot last found the
@@ -539,6 +559,8 @@ class Dashboard:
             "paused": cfg.paused,
             "scan_request": cfg.scan_request,
             "scan": chain["scan"] if chain else None,
+            "liquidate_request": cfg.liquidate_request,
+            "liquidate": chain["liquidate"] if chain else None,
             "pool": None
             if depth is None
             else {

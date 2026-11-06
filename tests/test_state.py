@@ -24,6 +24,23 @@ def test_a_saved_state_loads_back(tmp_path):
         "updated": 1_700_000_000.0,
         "depth_scale": 1.0,
         "scan": None,
+        "liquidate": None,
+    }
+
+
+def test_the_answer_to_the_sell_everything_button_loads_back(tmp_path):
+    done = {
+        "done": 1_700_000_200,
+        "at": 1_700_000_230.5,
+        "note": "sold the open position",
+    }
+    state.save(tmp_path / "state.json", 1, {**CHAIN, "liquidate": done})
+    assert state.load(tmp_path / "state.json")["liquidate"] == done
+    state.save(tmp_path / "state.json", 1, {**CHAIN, "liquidate": {"done": 3}})
+    assert state.load(tmp_path / "state.json")["liquidate"] == {
+        "done": 3,
+        "at": None,
+        "note": None,
     }
 
 

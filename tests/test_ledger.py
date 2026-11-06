@@ -161,3 +161,11 @@ def test_summary_counts_time_stops_apart():
         data = ledger.close_position(data, 1000.0, Decimal(received), reason, 2)
     s = ledger.summarize(data)
     assert (s["take_profit"], s["stop_loss"], s["time_stop"]) == (1, 0, 1)
+    assert s["liquidate"] == 0
+
+
+def test_summary_counts_trades_sold_by_the_button_apart():
+    data = ledger.open_position(ledger.empty(), 1000.0, Decimal("0.1"), Decimal(10), 1)
+    data = ledger.close_position(data, 1000.0, Decimal("9.9"), "liquidate", 2)
+    s = ledger.summarize(data)
+    assert (s["trades"], s["liquidate"], s["time_stop"]) == (1, 1, 0)

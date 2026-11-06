@@ -60,8 +60,8 @@ HELD = Position(base=1.0, quote=1.0, entry_price=100.0)
 
 
 def test_strategy_takes_profit_and_stops_loss_from_the_entry_price():
-    assert strategy.decide([103.0], HELD) == "sell"
-    assert strategy.decide([102.9], HELD) == "hold"
+    assert strategy.decide([102.5], HELD) == "sell"
+    assert strategy.decide([102.4], HELD) == "hold"
     assert strategy.decide([96.0], HELD) == "sell"
     assert strategy.decide([96.1], HELD) == "hold"
 
@@ -1886,3 +1886,207 @@ def test_a_ledger_with_an_unreadable_opened_time_is_refused(tmp_path):
         data["open"]["opened"] = opened
         with pytest.raises(ValueError, match="invalid opened time"):
             ledger.check(data)
+
+
+# ---------------------------------------------------------------- the sell everything button
+
+
+def test_sell_everything_sells_the_position_at_any_price_and_answers_in_the_same_tick(
+    make, tmp_path
+):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io.prices = [91.0]  # +1.1%: no target is near
+    runner.step()
+    assert [t[0] for t in io.trades] == ["buy"]
+    control_with(tmp_path, liquidate_request=5, paused=True)
+    runner.step()  # no second tick: a stop right here must not lose the answer
+    assert [t[0] for t in io.trades] == ["buy", "sell"]
+    assert io.trades[1][1] == Decimal(
+        ledger.load(runner.ledger_file)["closed"][0]["base"]
+    )
+    closed = ledger.load(runner.ledger_file)["closed"][0]
+    assert closed["reason"] == "liquidate"
+    answer = state.load(tmp_path / "logs" / "state.json")["liquidate"]
+    assert answer["done"] == 5 and "sold the open position" in answer["note"]
+    runner.step()
+    assert len(io.trades) == 2  # served once
+
+
+def test_a_price_target_hit_at_the_same_moment_is_the_recorded_reason(make, tmp_path):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, liquidate_request=1)
+    io.prices = [95.0]  # +5.6%: take profit
+    runner.step()
+    assert ledger.load(runner.ledger_file)["closed"][0]["reason"] == "take_profit"
+    assert runner.liquidate_done == 1
+
+
+def test_sell_everything_with_no_position_is_answered_and_buys_nothing(
+    make, tmp_path, caplog
+):
+    io = FakeIO([100.0], position=Position(base=0.0, quote=1000.0))
+    runner = make(io, max_trade=Decimal(500))
+    warm_up(runner, io)
+    control_with(
+        tmp_path, liquidate_request=7
+    )  # not paused: the bot still buys nothing now
+    io.prices = [90.0]  # a dip
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    assert io.trades == []
+    answer = state.load(tmp_path / "logs" / "state.json")["liquidate"]
+    assert answer["done"] == 7 and "nothing to sell" in answer["note"]
+    runner.step()  # served: buying works again
+    assert [t[0] for t in io.trades] == ["buy"]
+
+
+def test_a_failed_sale_stays_asked_for_and_is_not_hammered(make, tmp_path):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, liquidate_request=2, paused=True)
+    io.trade_error = ValueError("reverted")
+    io.prices = [91.0]
+    runner.step()
+    assert runner.liquidate_done == 0 and runner.ledger["open"] is not None
+    attempts = io.attempts
+    runner.step()  # inside the cooldown after a failure
+    assert io.attempts == attempts
+    io.trade_error = None
+    runner.test_clock.now += 301
+    runner.step()
+    assert runner.liquidate_done == 2 and runner.ledger["open"] is None
+
+
+def test_a_served_sell_everything_request_is_not_served_again_after_a_restart(
+    make, tmp_path
+):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, liquidate_request=5, paused=True)
+    io.prices = [91.0]
+    runner.step()
+    assert runner.liquidate_done == 5
+    # restarted, resumed on the dashboard, and a new position is open: it must not be sold
+    io2 = FakeIO([100.0])
+    runner2 = make(io2, guard=True)  # (keeps the control file the test wrote)
+    control_with(tmp_path, liquidate_request=5)
+    assert runner2.liquidate_done == 5
+    open_a_position(runner2, io2, 90.0)
+    io2.prices = [91.0]
+    runner2.step()
+    assert [t[0] for t in io2.trades] == ["buy"] and runner2.ledger["open"] is not None
+
+
+def test_base_in_the_vault_that_the_bot_did_not_buy_is_left_alone_and_said(
+    make, tmp_path, caplog
+):
+    io = FakeIO([100.0])  # the fake vault holds 1.0 base, the position 0.0001
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    control_with(tmp_path, liquidate_request=1, paused=True)
+    io.prices = [91.0]
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    assert "was not bought by the bot and is left alone" in caplog.text
+    assert io.trades[1][1] == Decimal("0.0001")  # only the recorded base was sold
+
+
+def test_an_old_request_is_not_served_to_a_position_bought_after_it(
+    make, tmp_path, caplog
+):
+    # the state file is gone (or damaged), so the bot cannot know request 5 was served long ago
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    opened = runner.ledger["open"]["opened"]
+    (tmp_path / "logs" / "state.json").write_text("{not json")
+    control_with(tmp_path, liquidate_request=int(opened) - 1000)
+    with caplog.at_level(logging.INFO):
+        runner2 = make(FakeIO([91.0]), guard=True)
+    assert runner2.liquidate_done == int(opened) - 1000
+    assert "older than the open position" in caplog.text
+    runner2.step()
+    assert runner2.io.trades == [] and runner2.ledger["open"] is not None
+
+
+def test_a_request_made_after_the_position_was_bought_is_served_after_a_restart(
+    make, tmp_path
+):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    opened = runner.ledger["open"]["opened"]
+    (tmp_path / "logs" / "state.json").unlink()
+    control_with(tmp_path, liquidate_request=int(opened) + 1000, paused=True)
+    runner2 = make(FakeIO([91.0]), guard=True)
+    assert runner2.liquidate_done == 0
+    runner2.step()
+    assert [t[0] for t in runner2.io.trades] == ["sell"]
+
+
+def test_a_sale_skipped_for_a_low_vault_balance_is_a_warning(make, tmp_path, caplog):
+    io = FakeIO([100.0])
+    runner = make(io)
+    open_a_position(runner, io, 90.0)
+    io._position = Position(base=0.0, quote=1.0)  # the base is not in the vault
+    control_with(tmp_path, liquidate_request=1, paused=True)
+    with caplog.at_level(logging.INFO):
+        runner.step()
+    records = [r for r in caplog.records if "sell skipped: vault balance" in r.message]
+    assert records and records[-1].levelno == logging.WARNING
+    assert runner.ledger["open"] is not None and runner.liquidate_done == 0
+
+
+# ---------------------------------------------------------------- the fast poll window
+
+
+def test_poll_delay_is_the_normal_pace_when_the_fast_poll_is_off():
+    assert bot_main.poll_delay(10, 0, 1_700_000_040) == 10
+    assert bot_main.poll_delay(10, 10, 1_700_000_040) == 10  # not faster: off
+
+
+def test_poll_delay_speeds_up_inside_the_window_and_lands_on_its_start():
+    start, end = bot_main.FAST_POLL_WINDOW
+    minute = 1_700_000_040 - 1_700_000_040 % 60
+    assert bot_main.poll_delay(10, 3, minute + start) == 3
+    assert bot_main.poll_delay(10, 3, minute + end - 1) == 3
+    assert bot_main.poll_delay(10, 3, minute + end) == 10  # after the window
+    assert bot_main.poll_delay(10, 3, minute + start - 4) == 4  # wake at its start
+    assert bot_main.poll_delay(10, 3, minute + 5) == 10  # far from it
+    # just before the minute turns the next window is still 30+ s away: the normal pace
+    assert bot_main.poll_delay(10, 3, minute + 59) == 10
+
+
+def test_settings_read_the_fast_poll_and_the_shorter_cooldown_from_the_environment(
+    monkeypatch,
+):
+    monkeypatch.setenv("MAX_TRADE_AMOUNT", "1000")
+    monkeypatch.delenv("COOLDOWN_SECONDS", raising=False)
+    monkeypatch.delenv("FAST_POLL_SECONDS", raising=False)
+    s = bot_main.Settings.from_env()
+    assert s.cooldown_seconds == 60 and s.fast_poll_seconds == 0
+    monkeypatch.setenv("FAST_POLL_SECONDS", "3")
+    assert bot_main.Settings.from_env().fast_poll_seconds == 3
+    for bad in ("-1", "61"):
+        monkeypatch.setenv("FAST_POLL_SECONDS", bad)
+        with pytest.raises(SystemExit, match="FAST_POLL_SECONDS"):
+            bot_main.Settings.from_env()
+
+
+def test_the_run_loop_waits_by_the_fast_poll_window(make, monkeypatch):
+    io = FakeIO([100.0])
+    runner = make(io, poll_seconds=10, fast_poll_seconds=3)
+    waits = []
+    monkeypatch.setattr(runner.stop, "wait", lambda delay: waits.append(delay))
+    start, _ = bot_main.FAST_POLL_WINDOW
+    monkeypatch.setattr(
+        bot_main.time, "time", lambda: 1_700_000_040 - 1_700_000_040 % 60 + start
+    )
+    runner.run(max_steps=2)
+    assert waits == [3]
