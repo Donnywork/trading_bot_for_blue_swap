@@ -65,6 +65,15 @@ def test_fetch_swaps_halves_the_chunk_and_covers_every_block_once():
     assert len(logs) == len({e["blockNumber"] for e in logs})
 
 
+def test_fetch_swaps_settles_under_alchemy_free_tiers_10_block_cap():
+    # every request wider than 10 blocks is refused; halving must go down to 7 and finish
+    pool = FakePool(limit=10)
+    pool_monitor.fetch_swaps(pool, 0, 100)
+    covered = [b for lo, hi in pool.ranges for b in range(lo, hi + 1)]
+    assert covered == list(range(101))
+    assert all(hi - lo + 1 <= 10 for lo, hi in pool.ranges)
+
+
 def test_fetch_swaps_gives_up_at_the_smallest_chunk():
     with pytest.raises(Web3RPCError):
         pool_monitor.fetch_swaps(FakePool(limit=1), 0, 1000, chunk=200)

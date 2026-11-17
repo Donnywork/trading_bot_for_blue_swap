@@ -15,7 +15,9 @@ from main import LOG_DIR, READ_ERRORS, redact
 
 SEEN_FILE = LOG_DIR / "monitor_seen.json"
 BLOCK_SECONDS = 12  # Sepolia; only used to turn "hours back" into a start block
-MIN_CHUNK = 100  # smallest eth_getLogs range to try before giving up
+# smallest eth_getLogs range to try before giving up. Alchemy's free tier caps each eth_getLogs
+# at a 10-block range; halving from 2000 settles at 7 blocks, under it (Infura allows 10,000)
+MIN_CHUNK = 10
 # an actor is "scripted" when its gaps between swaps are this steady (stdev / mean)
 REGULAR_CV = 0.3
 REGULAR_MIN_GAPS = 4

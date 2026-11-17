@@ -33,7 +33,7 @@ Contents: [what you end up with](#what-you-end-up-with) · [before you start](#b
 | You need | Why | Where to get it |
 |---|---|---|
 | A computer with a terminal (macOS or Linux; on Windows use WSL), `git` and `make`, and [`uv`](https://docs.astral.sh/uv/) | runs everything (`uv` fetches Python 3.13 for you) | `curl -LsSf https://astral.sh/uv/install.sh \| sh`, then open a new terminal (or `source ~/.local/bin/env`) so `uv` is found |
-| An **Infura** account with a Sepolia URL | how the bot talks to the chain. The URL contains your API key, so it is a secret | [DEPLOY 1.1](DEPLOY.md#11-get-an-infura-sepolia-url) |
+| An **Infura** or **Alchemy** account with a Sepolia URL | how the bot talks to the chain. The URL contains your API key, so it is a secret | [DEPLOY 1.1](DEPLOY.md#11-get-an-infura-or-alchemy-sepolia-url) |
 | **MetaMask** with the wallet enrolled on the platform (the "owner") | owns the contract, can withdraw | [DEPLOY 1.2](DEPLOY.md#12-metamask-your-own-computer) |
 | A **new, separate bot wallet** with a little Sepolia ETH | signs the bot's swaps and pays gas. Never reuse the owner wallet | [DEPLOY 1.5-1.6](DEPLOY.md#15-create-the-bot-wallet-and-env-on-the-server) |
 | Some **f564 and fETH** in the owner wallet | the funds the bot will trade | the platform / your course faucet |
@@ -73,7 +73,7 @@ cp .env.example .env
 chmod 600 .env           # only you can read it
 ```
 
-Open `.env` in an editor. **Never commit it and never paste it anywhere**: it holds your Infura key and the bot wallet's private key.
+Open `.env` in an editor. **Never commit it and never paste it anywhere**: it holds your RPC provider key (Infura or Alchemy) and the bot wallet's private key.
 
 **Create the bot wallet first.** It is a brand-new key that only this bot uses. This writes it into `.env` and prints **only the address** (the key is never shown):
 
@@ -97,7 +97,7 @@ Then send about **0.05 Sepolia ETH** to that printed address (a faucet, or from 
 
 | Variable | Put here | Secret? |
 |---|---|---|
-| `RPC_URL` | your Infura Sepolia URL | **yes** (contains the key) |
+| `RPC_URL` | your Infura **or Alchemy** Sepolia URL (DEPLOY 1.1) | **yes** (contains the key) |
 | `PRIVATE_KEY` | already written by the script above. It is the **bot wallet's** key, not your MetaMask one | **yes** |
 | `OWNER_ADDRESS` | your enrolled MetaMask address (copy it from MetaMask to keep the capitalisation) | no |
 | `MAX_TRADE_AMOUNT` | size of one buy, in units of the token being spent (see [trade size](#trade-size)). Start with `0.01` | no |
@@ -182,7 +182,7 @@ ssh -L 8765:127.0.0.1:8765 youruser@your-server
 - Local port busy? Use another one: `ssh -L 9000:127.0.0.1:8765 …` and open `http://localhost:9000`.
 - The dashboard only listens on the server's loopback address and has no login. **Do not** open its port in the firewall or forward it to `0.0.0.0`; the tunnel is the security.
 - **Only run it on a server where you are the only user.** The loopback port has no password, so anyone with a login on that machine could open it and change your strategy settings (they still cannot send transactions or touch keys, `DRY_RUN` or the trade size). On a shared server, do not run it.
-- The dashboard never calls the chain itself: the price and vault balances it shows are what the bot last read (`logs/state.json`, written every tick), so an open tab costs no Infura requests. If the bot is not running, the page shows the last values with a warning that they are old.
+- The dashboard never calls the chain itself: the price and vault balances it shows are what the bot last read (`logs/state.json`, written every tick), so an open tab costs no RPC requests. If the bot is not running, the page shows the last values with a warning that they are old.
 - To keep it running after you log out, use the systemd unit in step 9, or `tmux`.
 
 ## Step 8. Choose a strategy and set the exit rules
@@ -442,12 +442,12 @@ On a server, use the venv's Python instead of `uv run`: `source .venv/bin/activa
 | Header says **status unknown** | No `logs/heartbeat`: the bot never ran here, or it runs elsewhere. Start it |
 | Header says **not ticking** | No tick for 5+ minutes: the process stopped, hung, or the RPC is down (while reads fail the bot backs off for longer and longer, up to 10 minutes between ticks). `systemctl status trading-bot` and `tail logs/bot.log` |
 | Header says **HALTED** | The kill switch fired. Read the reason, fix it, delete `logs/HALTED`, restart ([DEPLOY 4.5](DEPLOY.md#45-after-a-halt)) |
-| Yellow box: "could not read the chain" | RPC trouble (Infura down, wrong key, rate limited). The rest of the page still works from local files |
+| Yellow box: "could not read the chain" | RPC trouble (provider down, wrong key, rate limited). The rest of the page still works from local files |
 | Saved settings do not seem to apply | Look for `settings changed` in `logs/bot.log` (it only appears when a value really changed). If you see `ignoring the settings file`, the file is invalid (the message says why). If you see nothing at all and the values were different, the bot and dashboard use different project folders |
 | Nothing happens for a long time | Normal at first: strategies need 20 or more samples, then a trigger. Watch the `price=` log lines. A quiet pool may not move enough for hours; try a trend strategy or smaller thresholds, but not below the fee floor On a fresh start the pattern guard can also hold buying for about an hour: check the log for `new buys are paused`. |
 | The log says `new buys are paused: …` and nothing is bought | The pattern guard (see [The pattern guard](#the-pattern-guard)). The reason is in the log line and on the dashboard's **New buys** card. It resumes by itself when the pattern is back; to trade without it set both guard limits to 0 on the dashboard |
 | `ValueError … Unknown format ''` (or similar) right after starting any script | `BOT_CONTRACT_ADDRESS` is still empty: finish step 3 and paste the contract address into `.env` |
-| A connection error or `401` right after starting | `RPC_URL` still holds the placeholder `…YOUR_INFURA_API_KEY`: put your real Infura URL in `.env` (step 2) |
+| A connection error or `401` right after starting | `RPC_URL` still holds a placeholder (`…YOUR_INFURA_API_KEY` or `…YOUR_ALCHEMY_API_KEY`): put your real provider URL in `.env` (step 2) |
 | `PRIVATE_KEY is not the bot contract's operator` | The key in this `.env` is not the one that was set as the contract's operator. Use the same `.env` as the machine that deployed it (step 9) |
 | `Not starting: logs/HALTED exists` | The bot halted itself earlier. Read the reason in that file, fix the cause, delete `logs/HALTED`, restart ([DEPLOY 4.5](DEPLOY.md#45-after-a-halt)) |
 | `Address already in use` from `dashboard.py` | Another program has port 8765 on that machine. Use `python dashboard.py --port 8766` and tunnel `-L 8765:127.0.0.1:8766` |

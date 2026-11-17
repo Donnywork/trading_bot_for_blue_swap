@@ -1,12 +1,17 @@
 import json
+import logging
 import os
 import sys
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from dotenv import load_dotenv
 from web3 import Web3
+from web3.exceptions import Web3Exception
+from web3.providers import BaseProvider
+
+log = logging.getLogger("bot")
 
 ROOT = Path(__file__).parent
 
@@ -24,6 +29,130 @@ with open(ROOT / "abis/quoter.json", "r") as f:
 
 SLIPPAGE_BPS = 100  # 1%
 MAX_PRICE_IMPACT_PCT = Decimal(2)
+
+
+def rpc_rate():
+    # ------------------------------------
+    # MAX_RPC_PER_SECOND from the environment: the most JSON-RPC requests per second the bot
+    # may send, whatever the provider (Infura or Alchemy; Alchemy's free tier allows about
+    # 15 requests/s). 0 or unset means no cap; a value the parser rejects stops the program
+    # instead of silently running uncapped.
+    # ------------------------------------
+
+    try:
+        rate = Decimal(os.environ.get("MAX_RPC_PER_SECOND", "0"))
+    except InvalidOperation:
+        rate = Decimal("nan")
+    if not rate.is_finite() or rate < 0:
+        raise SystemExit(
+            "MAX_RPC_PER_SECOND must be a positive number of requests per second, or 0 (no cap)"
+        )
+    return rate or None
+
+
+def fallback_urls():
+    # ------------------------------------
+    # RPC_FALLBACK_URLS from the environment: optional comma-separated URLs used when the
+    # primary (RPC_URL) errors. Unset or empty means one provider, the old behavior.
+    # ------------------------------------
+
+    raw = os.environ.get("RPC_FALLBACK_URLS", "")
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+class ThrottledProvider(Web3.HTTPProvider):
+    # ------------------------------------
+    # HTTPProvider that spaces the bot's JSON-RPC calls so they never exceed
+    # MAX_RPC_PER_SECOND: without it a burst is possible (the depth scan fires about 120
+    # reads back to back, though already DEPTH_CALL_PAUSE apart). Every call comes from the
+    # one bot thread, so a next-free time is enough; `rate` None means no throttling.
+    # ------------------------------------
+
+    def __init__(self, url, rate=None, **kwargs):
+        super().__init__(url, **kwargs)
+        self._interval = float(1 / rate) if rate else 0.0
+        self._next_at = 0.0
+
+    def make_request(self, method, params):
+        wait = self._next_at - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        self._next_at = time.monotonic() + self._interval
+        return super().make_request(method, params)
+
+
+class FailoverProvider(BaseProvider):
+    # ------------------------------------
+    # One JSON-RPC entry point over several providers (RPC_URL first, then
+    # RPC_FALLBACK_URLS). Sticky on the provider that works; a transport or quota error
+    # (OSError, or a JSON-RPC error the node itself raised: HTTP 429, Alchemy's plan
+    # limits) cools that provider for `cooldown` seconds and retries the SAME request on
+    # the next one. A re-broadcast retries the identical signed bytes, so it can never
+    # produce a second transaction, and a transaction is never rebuilt for a retry. When
+    # every provider fails, the last error is raised unchanged, so the runner's halts
+    # and backoffs see exactly what they saw before. Contract reverts never reach this
+    # layer (they are raised from responses above it), so they cannot trigger a switch.
+    # The message logs no error text on purpose: an RPC error can carry the URL and its
+    # key, and not every caller has the redacting log handler set up.
+    # ------------------------------------
+
+    def __init__(self, providers, cooldown=60.0):
+        super().__init__()
+        self._providers = providers
+        self._cooldown = cooldown
+        self._active = 0
+        self._until = [0.0] * len(providers)
+
+    def __str__(self):
+        return f"failover over {len(self._providers)} RPC providers"
+
+    def _pick_next(self):
+        # the first provider after the failed one that is not cooling down, wrapping
+        # around; when all cool, the one that recovers first
+        now = time.monotonic()
+        n = len(self._providers)
+        order = [(self._active + 1 + step) % n for step in range(n)]
+        for i in order:
+            if self._until[i] <= now:
+                return i
+        return min(order, key=lambda i: self._until[i])
+
+    def make_request(self, method, params):
+        failures = 0
+        while True:
+            try:
+                return self._providers[self._active].make_request(method, params)
+            except (OSError, Web3Exception) as e:
+                if failures >= len(self._providers) - 1:
+                    raise  # every provider has refused: nothing left to try
+                failures += 1
+                log.warning(
+                    "rpc provider %d/%d failed on %s (%s); trying the next one",
+                    self._active + 1,
+                    len(self._providers),
+                    method,
+                    type(e).__name__,
+                )
+                self._until[self._active] = time.monotonic() + self._cooldown
+                self._active = self._pick_next()
+
+    def is_connected(self, show_traceback=False):
+        return any(p.is_connected() for p in self._providers)
+
+
+def rpc_provider(url):
+    # ------------------------------------
+    # The provider every connection goes through (load_market below and
+    # bot_contract.connect_read_only), so the cap and the failover cover the loop and
+    # every read-only script alike. Whatever the URLs hold, Infura or Alchemy: Sepolia
+    # either way, which the chain-id checks confirm. Each provider gets its own
+    # MAX_RPC_PER_SECOND cap, so each key is paced separately.
+    # ------------------------------------
+
+    providers = [ThrottledProvider(u, rpc_rate()) for u in [url] + fallback_urls()]
+    if len(providers) == 1:
+        return providers[0]
+    return FailoverProvider(providers)
 
 
 def read_token(w3, token_address):
@@ -173,7 +302,7 @@ def load_market():
     ROUTER_ADDRESS = os.environ["ROUTER_ADDRESS"]
     QUOTER_ADDRESS = os.environ["QUOTER_ADDRESS"]
 
-    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+    w3 = Web3(rpc_provider(RPC_URL))
 
     if not w3.is_connected():
         raise ConnectionError("Failed to connect to Ethereum RPC")

@@ -1,6 +1,6 @@
 # Deploying the bot contract, verifying it live, and running the bot 24/7 on Ubuntu 24.04
 
-Testnet (Sepolia) only. The RPC provider is Infura.
+Testnet (Sepolia) only. The RPC provider is Infura or Alchemy — either works, only `RPC_URL` differs.
 
 Contents: [0. The big picture](#0-the-big-picture) · [1. Prepare](#1-prepare) · [2. Deploy the contract](#2-deploy-the-contract) · [3. Dry-run the bot](#3-dry-run-the-bot) · [4. Run it 24/7](#4-run-it-247) · [5. Owner operations](#5-owner-operations) · [6. Troubleshooting](#6-troubleshooting)
 
@@ -34,17 +34,18 @@ The owner and the bot wallet must be **different** wallets (the deploy script re
 - **What does the contract do on its own?** Nothing. A contract only runs when called, and receiving tokens triggers no code. `main.py` decides when to trade; the contract is the vault and executor it calls.
 - **What runs where?** The server runs `main.py` under systemd. The owner acts only from MetaMask on your own computer. The owner key never touches the server.
 
-Order of work: Infura key and MetaMask → prepare the server → bot wallet and `.env` → deploy → check → (optional) Etherscan verify → link on the platform → fund → dry-run → go live → systemd.
+Order of work: RPC key (Infura or Alchemy) and MetaMask → prepare the server → bot wallet and `.env` → deploy → check → (optional) Etherscan verify → link on the platform → fund → dry-run → go live → systemd.
 
 ---
 
 ## 1. Prepare
 
-### 1.1 Get an Infura Sepolia URL
+### 1.1 Get an Infura or Alchemy Sepolia URL
 
-1. Sign in at <https://app.infura.io>, create an API key, and make sure the **Sepolia** network is enabled for it (menu names may change; you want the HTTPS endpoint).
-2. The URL looks like `https://sepolia.infura.io/v3/<your-key>`. **The key is part of the URL, so the URL is a secret.** It goes in `.env` as `RPC_URL`, never in git, chat or screenshots. The bot also redacts it from its logs and from `logs/HALTED`.
-3. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. `FAST_POLL_SECONDS` (default 0 = off) polls that often during seconds 30 to 56 of every minute: with `POLL_SECONDS=10` and `FAST_POLL_SECONDS=3` that is about 12 ticks a minute instead of 6, so about double the requests (roughly 52,000 a day); try it in a dry run first. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). With `RISK_PER_TRADE_PCT` above 0 a buy being sized adds one `liquidity()` read, at most every 5 minutes. The dashboard's **Scan pool liquidity** button makes the bot make about 120 more read-only calls, 0.2 s apart: that tick takes 30 to 40 s longer (a stop signal ends the scan early; it is reported as failed and the button asks again). `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself.
+1. **Infura**: sign in at <https://app.infura.io>, create an API key, and make sure the **Sepolia** network is enabled for it (menu names may change; you want the HTTPS endpoint). The URL looks like `https://sepolia.infura.io/v3/<your-key>`.
+2. Or **Alchemy**: sign in at <https://app.alchemy.com>, **Create app** with chain **Ethereum** and network **Sepolia**, and copy the HTTPS URL, which looks like `https://eth-sepolia.g.alchemy.com/v2/<your-key>`. Either provider works: only `RPC_URL` differs, and the bot checks the chain id (11155111) whichever you pick, so a wrong-network URL is refused.
+3. **The key is part of the URL, so the URL is a secret.** It goes in `.env` as `RPC_URL`, never in git, chat or screenshots. The bot also redacts it from its logs and from `logs/HALTED`.
+4. Check your plan's request quota. At the default 30 s poll the bot makes about 3 requests per idle tick, so roughly 8,600 requests a day (more when it trades). Raise `POLL_SECONDS` if that is too much for your plan. `FAST_POLL_SECONDS` (default 0 = off) polls that often during seconds 30 to 56 of every minute: with `POLL_SECONDS=10` and `FAST_POLL_SECONDS=3` that is about 12 ticks a minute instead of 6, so about double the requests (roughly 52,000 a day); try it in a dry run first. The **dashboard** adds none: it shows what the bot last wrote to `logs/state.json`, so an open tab costs no quota (the bot reads the bot wallet's gas for it once every 5 minutes and after a trade). With `RISK_PER_TRADE_PCT` above 0 a buy being sized adds one `liquidity()` read, at most every 5 minutes. The dashboard's **Scan pool liquidity** button makes the bot make about 120 more read-only calls, 0.2 s apart: that tick takes 30 to 40 s longer (a stop signal ends the scan early; it is reported as failed and the button asks again). `status.py` and `pool_monitor.py` scans do call the RPC. A `429 Too Many Requests` is the provider's limit: the bot backs off and retries by itself. To hard-cap the pace, set `MAX_RPC_PER_SECOND` in `.env` (default `0` = off): the bot then never sends more JSON-RPC requests per second than that, whichever provider you use (Alchemy's free tier allows about 15 requests/s; one `eth_getLogs` costs 75 of its 330 compute units/s). One more free-tier quirk: Alchemy caps each `eth_getLogs` at a **10-block range** (PAYG lifts it to 10,000; Infura allows 10,000). The trading loop never calls `eth_getLogs`, so only the pool monitor notices (it shrinks its chunks to fit). To ride out a capped or unreachable provider, set `RPC_FALLBACK_URLS` (comma-separated): the bot retries the same request on the next provider and skips a failed one for a minute. Infura first is the natural order (bigger `eth_getLogs` range); a re-broadcast retries the identical signed bytes, so it can never double-send.
 
 ### 1.2 MetaMask (your own computer)
 
@@ -150,7 +151,7 @@ Now edit `.env` (`nano .env`):
 
 | Variable | Value |
 |---|---|
-| `RPC_URL` | your Infura Sepolia URL from 1.1 |
+| `RPC_URL` | your Infura or Alchemy Sepolia URL from 1.1 |
 | `OWNER_ADDRESS` | your enrolled wallet, copied from MetaMask |
 | `RISK_PER_TRADE_PCT` | optional, default `0` (off). Above 0, a buy is sized so a stop loss costs about this share of the vault's f564 (pool fee and price impact included, from the pool's liquidity: `pool_profile.json` is in the repo (the pool's layout as of 2026-11-04), scaled by one read of the pool's `liquidity()` when a buy is sized; the dashboard's "Scan pool liquidity" button makes the bot read a fresh layout into `logs/pool_profile.json`; nothing to copy by hand), never above `MAX_TRADE_AMOUNT`. The bot refuses to start with it set if that file is missing. See GETTING_STARTED, "Trade size" |
 | `MAX_TRADE_AMOUNT` | size of one **buy** in human units of the token being spent (f564), e.g. `0.01`; a sell closes exactly what that buy delivered. It is also the **on-chain cap** per swap, in each token's own units |
@@ -161,7 +162,7 @@ Leave the rest as in `.env.example`. `OWNER_ADDRESS` must not be the bot wallet'
 
 ### 1.6 Fund the bot wallet with Sepolia ETH
 
-Send Sepolia ETH to the bot wallet address from a faucet or from MetaMask. About **0.05 ETH** covers the deploy and many swaps. Check it arrived (this also tests your Infura URL):
+Send Sepolia ETH to the bot wallet address from a faucet or from MetaMask. About **0.05 ETH** covers the deploy and many swaps. Check it arrived (this also tests your RPC URL):
 
 ```bash
 python - <<'PY'
@@ -315,7 +316,7 @@ Each asks the real Uniswap quoter for a price, then simulates the swap through y
 python main.py --ticks 3
 ```
 
-This runs the real bot loop three times against your real contract and exits by itself. Expect `Started. … dry_run=True`, three `price=… decision=hold …` lines, then `Stopped.`. It proves the Infura reads, the contract balances, the operator check and the logging all work. `decision=hold` is correct here: the strategy needs 20 samples. The bot wallet must show **no** new transactions on Etherscan.
+This runs the real bot loop three times against your real contract and exits by itself. Expect `Started. … dry_run=True`, three `price=… decision=hold …` lines, then `Stopped.`. It proves the RPC reads, the contract balances, the operator check and the logging all work. `decision=hold` is correct here: the strategy needs 20 samples. The bot wallet must show **no** new transactions on Etherscan.
 
 ### 2.11 Live swaps, both directions (tiny)
 
@@ -361,7 +362,7 @@ While the bot holds nothing, the chosen **strategy** decides when to buy. Once i
 
 | Situation | What the bot does |
 |---|---|
-| Infura unreachable or rate limited | logs a warning, waits longer each time (up to 10 min), keeps going |
+| RPC provider unreachable or rate limited | logs a warning, waits longer each time (up to 10 min), keeps going |
 | A swap fails 3 times in a row (`MAX_TRADE_FAILURES`) | **halts**: writes `logs/HALTED` and exits cleanly |
 | No receipt before the timeout, or the connection drops while sending | **halts** at once: the swap may still land, so it won't guess or resend |
 | Operator ETH below `MIN_OPERATOR_ETH` | skips trading and warns until you refill it |
@@ -499,7 +500,7 @@ python pool_monitor.py --hours 6           # a shorter window
 python pool_monitor.py --watch 300         # refresh every 5 minutes, announce new actors
 ```
 
-An "actor" is a swap recipient (the vault or wallet that receives the tokens). Each row shows its swaps, buys, sells, net base token, how often it trades and when it last did. `scripted?` marks an actor whose gaps between swaps are very regular, `YOU` marks `BOT_CONTRACT_ADDRESS`, and `NEW` marks an address not seen in an earlier run (the first run only records a baseline). Seen addresses are kept in `logs/monitor_seen.json`. It reads Swap logs in chunks, so a long window costs more RPC quota; with Infura prefer `--hours 24` or less.
+An "actor" is a swap recipient (the vault or wallet that receives the tokens). Each row shows its swaps, buys, sells, net base token, how often it trades and when it last did. `scripted?` marks an actor whose gaps between swaps are very regular, `YOU` marks `BOT_CONTRACT_ADDRESS`, and `NEW` marks an address not seen in an earlier run (the first run only records a baseline). Seen addresses are kept in `logs/monitor_seen.json`. It reads Swap logs in chunks, so a long window costs more RPC quota; with Infura prefer `--hours 24` or less. Alchemy's free tier caps each `eth_getLogs` at a 10-block range, so the monitor falls back to tiny chunks and a long window costs many more requests (about 1,000 for a day): there prefer `--hours 2` or less. With `RPC_FALLBACK_URLS` set the wide chunks fail over to the next provider instead (put Infura after Alchemy and the plan limit stops mattering), so no shrinking happens and the quota is spent on the fallback.
 
 ### 4.5 After a halt
 
@@ -547,7 +548,7 @@ The owner key is not in the bot, so these are done from your enrolled wallet. Tw
 
 Ownership transfer is two steps on purpose: nothing changes until the new address accepts, so a typo can't lock your funds.
 
-If the bot key leaks: disable or replace the operator, withdraw the funds, and create a new bot wallet (1.5). If the **Infura URL** leaks, create a new key in the Infura dashboard, update `RPC_URL`, and delete the old key.
+If the bot key leaks: disable or replace the operator, withdraw the funds, and create a new bot wallet (1.5). If the **RPC URL** leaks, create a new key in the provider's dashboard (Infura or Alchemy), update `RPC_URL`, and delete the old key.
 
 ---
 
@@ -559,9 +560,9 @@ If the bot key leaks: disable or replace the operator, withdraw the funds, and c
 | `OWNER_ADDRESS is the bot wallet` | The bot's address is in the owner field. Use your enrolled wallet |
 | `BOT_CONTRACT_ADDRESS is already set` | Deploy refuses to run twice. Clear the variable to deploy a new one |
 | `insufficient funds` on deploy or swap | The bot wallet needs more Sepolia ETH |
-| `chain id` is not 11155111 | `RPC_URL` points at the wrong network. Use the Infura **Sepolia** URL |
-| `401` / `403` from Infura | Wrong or disabled API key, or Sepolia not enabled for it |
-| `429` from Infura | Over your plan's quota. Raise `POLL_SECONDS` |
+| `chain id` is not 11155111 | `RPC_URL` points at the wrong network. Use your provider's **Sepolia** URL |
+| `401` / `403` from the provider | Wrong or disabled API key, or Sepolia not enabled for it |
+| `429` from the provider | Over your plan's quota. Raise `POLL_SECONDS`, set `MAX_RPC_PER_SECOND`, or list a second key in `RPC_FALLBACK_URLS` |
 | solc download fails on deploy | Likely an ARM server: deploy from an x86 machine (2.1) |
 | `No contract at 0x…` | Wrong `BOT_CONTRACT_ADDRESS`, wrong network, or the deploy didn't confirm |
 | `WARNING: PRIVATE_KEY is not the contract's operator` | `.env` holds a different key than the one that deployed. Fix `.env`, or have the owner call `setOperator` |
@@ -571,7 +572,7 @@ If the bot key leaks: disable or replace the operator, withdraw the funds, and c
 | Reverts `STF` | The contract doesn't hold enough of the input token. Fund it (2.7) |
 | Reverts `Too little received` | Price moved or the impact exceeded slippage (1%). Retry, or trade smaller |
 | `Amount too small: the minimum output rounds to 0` | Dust amount. Use a larger `MAX_TRADE_AMOUNT` |
-| Log shows `read failed` repeatedly | Infura unreachable or rate limited. The bot backs off by itself; check the Infura dashboard |
+| Log shows `read failed` repeatedly | RPC provider unreachable or rate limited. The bot backs off by itself; check the provider's dashboard |
 | `Not starting: logs/HALTED exists` | The kill switch fired. Read the reason, fix it, delete the file (4.5) |
 | Dry run halts after failed trades | The simulation reverts (see the reason above). A dry run needs the contract funded and the key to be the operator |
 | `systemctl status` shows `failed` | 5 crashes in 10 minutes. Read `journalctl -u trading-bot`, fix, then `sudo systemctl reset-failed trading-bot && sudo systemctl start trading-bot` |

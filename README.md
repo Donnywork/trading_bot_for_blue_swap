@@ -61,7 +61,7 @@ cp .env.example .env          # then fill it in (never commit .env)
 uv run pytest                 # tests; no network, no transactions
 ```
 
-Set in `.env`: `RPC_URL` (Infura Sepolia URL, which contains your API key, so it is a secret), `PRIVATE_KEY` (a **new** bot wallet, funded with Sepolia ETH; GETTING_STARTED step 2 has a script that creates it), `OWNER_ADDRESS` (your enrolled wallet), `MAX_TRADE_AMOUNT`. Keep `DRY_RUN=true` until you have watched a dry run.
+Set in `.env`: `RPC_URL` (an Infura **or** Alchemy Sepolia URL — either works; it contains your API key, so it is a secret), `PRIVATE_KEY` (a **new** bot wallet, funded with Sepolia ETH; GETTING_STARTED step 2 has a script that creates it), `OWNER_ADDRESS` (your enrolled wallet), `MAX_TRADE_AMOUNT`. Keep `DRY_RUN=true` until you have watched a dry run.
 
 ```bash
 uv run python bot_contract.py deploy      # deploy the contract, then put its address in .env
@@ -81,7 +81,7 @@ Fund the contract by sending f564 / fETH to its address from MetaMask. It needs 
 
 `live_check.py` tests the contract you deployed: roles, limits, that a stranger or a disallowed token is refused, and a simulated swap each way. It sends nothing. `docs/DEPLOY.md` part 2 (2.8 to 2.13) is the live-verification runbook.
 
-On the Ubuntu server use the venv's Python (`source .venv/bin/activate`, then `python …`) and the systemd unit. **See [docs/DEPLOY.md](docs/DEPLOY.md) for every step**, including Infura setup, server hardening, Etherscan verification, owner operations and troubleshooting.
+On the Ubuntu server use the venv's Python (`source .venv/bin/activate`, then `python …`) and the systemd unit. **See [docs/DEPLOY.md](docs/DEPLOY.md) for every step**, including RPC provider setup (Infura or Alchemy), server hardening, Etherscan verification, owner operations and troubleshooting.
 
 ## Configuration (`.env`)
 
@@ -89,7 +89,9 @@ See `.env.example` for all variables. The important ones:
 
 | Variable | Meaning |
 |---|---|
-| `RPC_URL` | Infura Sepolia URL (secret) |
+| `RPC_URL` | Infura **or** Alchemy Sepolia URL (secret) |
+| `MAX_RPC_PER_SECOND` | optional cap on JSON-RPC requests per second, any provider (`0` = off). It sits in the RPC layer, so it covers the loop and every read-only script |
+| `RPC_FALLBACK_URLS` | optional comma-separated fallback RPC URLs. On a rate limit or outage the same request is retried on the next provider (a swap re-broadcast sends the identical signed bytes, so it cannot double-send) and the failed one is skipped for a minute |
 | `PRIVATE_KEY` | bot wallet key (the contract's operator). Never the owner's key |
 | `OWNER_ADDRESS` | enrolled wallet that owns the contract (checksummed) |
 | `BOT_CONTRACT_ADDRESS` | set after deploying |

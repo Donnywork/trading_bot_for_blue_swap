@@ -238,7 +238,7 @@ def swap_via_contract(w3, account, bot, quote, fee, dry_run=True):
 def connect_read_only():
     # RPC only, no key: for scripts that just read the chain
     load_dotenv()
-    w3 = Web3(Web3.HTTPProvider(os.environ["RPC_URL"]))
+    w3 = Web3(config.rpc_provider(os.environ["RPC_URL"]))
     if not w3.is_connected():
         raise ConnectionError("Failed to connect to Ethereum RPC")
     if w3.eth.chain_id != SEPOLIA_CHAIN_ID:

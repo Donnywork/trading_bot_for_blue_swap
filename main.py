@@ -69,17 +69,20 @@ TRADE_ERRORS = (ContractLogicError, Web3RPCError, RuntimeError, ValueError)
 
 def redact(text):
     # ------------------------------------
-    # Errors from a failed request can contain the full RPC URL, and an Infura URL carries the
-    # API key. Keep secrets out of logs/bot.log, the journal and logs/HALTED.
+    # Errors from a failed request can contain the full RPC URL, and Infura and Alchemy
+    # URLs carry the API key. Keep secrets out of logs/bot.log, the journal and
+    # logs/HALTED.
     # ------------------------------------
 
     secrets = []
-    rpc_url = os.environ.get("RPC_URL", "")
-    if rpc_url:
-        secrets += [
-            rpc_url,
-            rpc_url.rstrip("/").rsplit("/", 1)[-1],
-        ]  # URL, then its key segment
+    for name in ("RPC_URL", "RPC_FALLBACK_URLS"):
+        for part in os.environ.get(name, "").split(","):
+            part = part.strip()
+            if part:
+                secrets += [
+                    part,
+                    part.rstrip("/").rsplit("/", 1)[-1],
+                ]  # URL, then its key segment
     secrets.append(os.environ.get("PRIVATE_KEY", ""))
     for secret in secrets:
         if len(secret) >= 8:
@@ -868,6 +871,15 @@ def main(ticks=None):
 
     settings = Settings.from_env()
     w3, account = bot_contract.connect()
+    rpc_cap = config.rpc_rate()
+    if rpc_cap is not None:
+        log.info("RPC requests capped at %s/s (MAX_RPC_PER_SECOND)", rpc_cap)
+    rpc_fallbacks = config.fallback_urls()
+    if rpc_fallbacks:
+        log.info(
+            "RPC failover: the primary provider plus %d fallback(s) (RPC_FALLBACK_URLS)",
+            len(rpc_fallbacks),
+        )
     bot = bot_contract.load_bot(w3, os.environ["BOT_CONTRACT_ADDRESS"])
     if bot.functions.operator().call() != account.address:
         raise SystemExit("PRIVATE_KEY is not the bot contract's operator")
