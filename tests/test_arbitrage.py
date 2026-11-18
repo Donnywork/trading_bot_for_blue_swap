@@ -6,6 +6,7 @@ from web3 import EthereumTesterProvider, Web3
 
 import arbitrage
 from event_execution import Executor
+from event_fees import FeeCache
 from event_settings import EventSettings
 from event_store import EventStore
 
@@ -93,8 +94,9 @@ def balances(arb):
     )
 
 
+@pytest.mark.parametrize("fee_policy", ["fixed", "competitive"])
 def test_event_executor_sends_atomic_cycle_with_durable_accounting(
-    arb, tmp_path, monkeypatch
+    arb, tmp_path, monkeypatch, fee_policy
 ):
     from dataclasses import replace
 
@@ -111,12 +113,13 @@ def test_event_executor_sends_atomic_cycle_with_durable_accounting(
 
     ex = Executor.__new__(Executor)
     ex.w3 = SimpleNamespace(eth=TestEth())
-    ex.settings = replace(EventSettings(), mode="live")
+    ex.settings = replace(EventSettings(), mode="live", fee_policy=fee_policy)
     ex.operator = arb.operator
     ex.account = eth.account.from_key(
         arb.w3.provider.ethereum_tester.backend.account_keys[1]
     )
     ex.clock = lambda: eth.get_block("latest")["timestamp"]
+    ex.fees = FeeCache(ex.w3, ex.settings, ex.clock)
     ex.store = EventStore(tmp_path, {}, "live", clock=ex.clock)
     ex.bot = arb.vault
     ex.entry_guard = lambda action: None

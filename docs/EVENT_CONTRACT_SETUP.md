@@ -192,6 +192,8 @@ If you prefer Etherscan to your wallet's token-send screen, open the **f564 toke
 
 Fund the **operator wallet** with native Sepolia ETH. With default `EVENT_MAX_GAS=1500000` and `EVENT_MAX_FEE_WEI=20000000000`, the service requires at least **0.03 ETH** before each trade attempt. Native ETH is distinct from the fETH ERC20. The contract itself does not need native ETH for trading.
 
+That is the default **fixed** fee policy. Opt-in `EVENT_FEE_POLICY=competitive` uses separate controls: a 20 gwei baseline, 1.25× network and 1.5× competitor multipliers, and 100/200 gwei priority/total ceilings. Live activation requires **0.3 ETH** at its default maximum; each attempt checks `EVENT_MAX_GAS * selected_max_fee`. Existing fixed bid fields are ignored for competitive selection. See [the exact opt-in block, formulas and fallback rules](EVENT_FEES.md). This is a runtime change; no owner call, contract modification or redeployment is needed. Higher tips cannot guarantee order, and uncertain transactions are never replaced or repriced.
+
 ## 5. Configure one address and enable the contract
 
 Edit your existing `.env` yourself; preserve RPC credentials and the bot/operator key. Replace all uppercase placeholders below. Copy the same three decimal amounts you chose for deployment into the corresponding `EVENT_` settings:

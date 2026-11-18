@@ -40,6 +40,14 @@ Recovery checks all retained mined execution blocks once before applying the 64-
 
 After restart, verify the two primary buttons show the acknowledged mode and applied entry state, both charts render, and Portfolio identifies the correct contract/block. New recordings accumulate without backfill. Start remains a separate fresh operator request after mode acknowledgement. Use the [dashboard guide](GETTING_STARTED.md#phase-2-dashboard-operation) for chart navigation, marker attribution, accounting coverage and decision pagination. To verify the UI offline in a development checkout: `uv sync`, `uv run playwright install chromium`, then `make test-browser`; it uses temporary synthetic controls and an isolated browser.
 
+## Phase 2 fee-policy upgrade
+
+Install the complete checkout, including `event_fees.py`, `event_submission.py`, execution/feed/settings changes and the dashboard page, using the handoff above. Preserve all logs, ledgers, controls and deployment/verification artifacts. No Solidity change or deployment is required. The operator restarts the bot and dashboard; implementation tests do not perform that handoff.
+
+`EVENT_FEE_POLICY=fixed` remains the default and keeps existing `EVENT_PRIORITY_FEE_WEI` / `EVENT_MAX_FEE_WEI` behavior. To opt in, privately apply the six-setting [competitive example](EVENT_FEES.md#configuration), review the 100/200 gwei technical ceilings and native ETH affordability, then use Simulation before a separate Live/Start request. The competitive Live activation check requires 0.3 ETH at the default gas limit/ceiling; each attempt checks the selected maximum. No fee controls are exposed through the dashboard.
+
+Competitive mode adds one non-overlapping background fee pass at most every 12 seconds: up to three logical reads (latest header, eight-block p90 fee history, canonical hash check), or one header read for an unchanged successful sample. Provider retries remain visible under **Fee evidence refresh** and share existing pacing. Feed competitor evidence adds no transaction/receipt lookups. Missing/stale samples fall back to baseline plus fresh base-fee validation; worker failures do not stop exit recovery. Installing the code does not prove live latency or ordering gains. Preserve `execution_attempt`, decision/intent fee fields and timing/inclusion diagnostics when investigating outcomes. Higher tips and provider acceptance cannot guarantee inclusion or order. [Full formulas, limits and diagnostics](EVENT_FEES.md)
+
 ## Legacy deployment and polling reference
 
 Everything below describes the original polling installation (now `legacy_main.py`). For existing legacy recovery run `legacy_main.py` explicitly. The shipped `trading-bot.service` starts Phase 2. When retaining a legacy unit, its `ExecStart` must use `legacy_main.py`, and the Phase 2 service must be stopped.

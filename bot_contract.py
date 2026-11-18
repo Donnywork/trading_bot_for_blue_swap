@@ -130,7 +130,7 @@ class Reverted(RuntimeError):
         self.receipt = receipt
 
 
-def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER):
+def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER, *, timing=None):
     # ------------------------------------
     # Fill nonce/gas/fees, sign, send, wait for the receipt. The gas limit is the estimate times
     # `gas_buffer`.
@@ -143,10 +143,12 @@ def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER):
     try:
         tx = {
             "from": account.address,
-            "nonce": w3.eth.get_transaction_count(account.address, "pending"),
-            "chainId": w3.eth.chain_id,
             **tx,
         }
+        if "nonce" not in tx:
+            tx["nonce"] = w3.eth.get_transaction_count(account.address, "pending")
+        if "chainId" not in tx:
+            tx["chainId"] = w3.eth.chain_id
         # build_transaction already estimates gas; add headroom in case state moves before mining
         gas = tx.get("gas") or w3.eth.estimate_gas(tx)
         tx["gas"] = int(gas * gas_buffer)
@@ -156,11 +158,15 @@ def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER):
             tx["maxPriorityFeePerGas"] = priority
             tx["maxFeePerGas"] = base * 2 + priority
         signed = account.sign_transaction(tx)
+        if timing is not None:
+            timing.mark("broadcast_start")
     except (OSError, Web3Exception, ValueError, TypeError) as e:
         raise NotSent(f"could not prepare the transaction: {e}") from e
 
     try:
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        if timing is not None:
+            timing.mark("broadcast_return")
     except Exception as e:
         # Even 'nonce too low' / 'already known' can mean these bytes landed elsewhere.
         raise SentUnknown(

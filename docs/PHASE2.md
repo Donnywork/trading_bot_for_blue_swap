@@ -6,6 +6,8 @@ Addresses were verified against the [live phase configuration](https://fin564.ve
 
 ## Update your existing `.env`
 
+For the current event service, fees remain `EVENT_FEE_POLICY=fixed` by default. [Competitive fees](EVENT_FEES.md) are a separate opt-in runtime policy shared by entries, cycles and exits: 20 gwei baseline, cached network/competitor adjustments and dynamic headroom under explicit ceilings. Existing `EVENT_PRIORITY_FEE_WEI` / `EVENT_MAX_FEE_WEI` retain their fixed-mode meanings. No contract migration is needed for the fee feature, and a higher bid cannot guarantee ordering. The operator applies configuration through the ordinary service handoff; the implementation does not change running controls.
+
 Stop the bot and dashboard before migrating. Edit your existing file; do not copy `.env.example` over a file holding your keys. Keep your operator key, owner address and vault address. Never put the owner's key here.
 
 ```dotenv

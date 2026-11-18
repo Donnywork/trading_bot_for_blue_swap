@@ -596,6 +596,15 @@
             or confirmed chart markers.
           </p>
           <p id="intent"></p>
+          <details>
+            <summary>Latest fee and submission evidence</summary>
+            <p id="fee-evidence" class="break"></p>
+            <p class="muted">
+              Higher tips cannot guarantee ordering. Provider acceptance is not
+              confirmed inclusion. Full inputs, ages and reference blocks are
+              retained in the public execution and decision records.
+            </p>
+          </details>
           <div class="scroll">
             <table>
               <thead>
@@ -1116,6 +1125,15 @@
         $("intent").textContent = e.intent_pending
           ? "Unresolved execution intent — reconcile before further execution."
           : "No unresolved execution intent reported.";
+        const attempt = e.execution_attempt || e.last_execution?.diagnostics || e.last_execution,
+          fee = attempt?.fee_decision,
+          timing = attempt?.timing,
+          included = attempt?.inclusion,
+          gwei = (n) => n == null ? "unavailable" : fmt(n / 1e9) + " gwei",
+          ms = (n) => n == null ? "unavailable" : fmt(n) + " ms";
+        $("fee-evidence").textContent = fee
+          ? `${fee.policy} · ${fee.action} · decided ${stamp(fee.decided_at)} at block ${fee.reference_block}. Desired tip ${gwei(fee.desired_priority_wei)}; selected tip ${gwei(fee.selected_priority_wei)}, max fee ${gwei(fee.selected_max_fee_wei)}. ${fee.allowed ? "Fee limits passed." : "Fee limits blocked submission."} Reasons: ${(fee.reasons || []).join(", ") || "none"}. Network: ${fee.network_status}; competitor: ${fee.competitor?.source || "unavailable"}. Validation ${ms(timing?.validation_ms)}; first seen to broadcast ${ms(timing?.first_seen_to_broadcast_ms)}; broadcast response ${ms(timing?.broadcast_ms)}. ${timing?.provider_accepted ? "Provider accepted." : "Provider acceptance unavailable."} ${included ? `Included in block ${included.block}, index ${included.transaction_index ?? "unavailable"}; effective tip ${gwei(included.effective_priority_wei)}.` : "Inclusion unavailable."}`
+          : `Policy: ${e.fee_policy || "unavailable"}. No fee decision recorded for the latest attempt.`;
         $("trades").replaceChildren(
           ...((e.trades || []).length
             ? e.trades

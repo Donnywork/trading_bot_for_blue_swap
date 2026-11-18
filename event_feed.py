@@ -68,8 +68,9 @@ class Feed:
             self.metrics.attempt(websocket=True)
         ws.send(message)
 
-    def put(self, event, received=None):
+    def put(self, event, received=None, received_mono=None):
         received = time.time() if received is None else received
+        received_mono = time.monotonic() if received_mono is None else received_mono
         with self.activity_lock:
             if event["kind"] in self.activity:
                 row = self.activity[event["kind"]]
@@ -80,6 +81,7 @@ class Feed:
                 event
                 | {
                     "received": received,
+                    "received_mono": received_mono,
                     "generation": self.generation,
                 }
             )
@@ -167,7 +169,7 @@ class Feed:
                             )
                             if reply.get("id") == ident:
                                 break
-                            deferred.append((reply, time.time()))
+                            deferred.append((reply, time.time(), time.monotonic()))
                             if len(deferred) > 512 or time.monotonic() >= deadline:
                                 raise TimeoutError("subscription backlog")
                         if not isinstance(reply.get("result"), str):
@@ -179,10 +181,11 @@ class Feed:
                     while not self.stop.is_set():
                         try:
                             if deferred:
-                                message, received = deferred.pop(0)
+                                message, received, received_mono = deferred.pop(0)
                             else:
                                 message = json.loads(ws.recv(timeout=1))
                                 received = time.time()
+                                received_mono = time.monotonic()
                         except TimeoutError:
                             if time.monotonic() - last_message > 60:
                                 raise ConnectionError(
@@ -205,7 +208,7 @@ class Feed:
                                 )
                                 if kind == "mined":
                                     event["removed"] = bool(result.get("removed"))
-                            self.put(event, received)
+                            self.put(event, received, received_mono)
             except Exception as exc:  # noqa: BLE001 — transport boundary suppresses provider bodies
                 self.last_error = error_summary(exc)
                 self.ready.clear()

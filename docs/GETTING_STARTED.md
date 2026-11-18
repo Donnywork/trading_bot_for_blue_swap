@@ -19,6 +19,8 @@
 | Decision pages | Expand **Recent decisions and watched actors**, scroll the table, then use Previous/Next |
 | Legacy polling recovery | `http://127.0.0.1:8765/legacy`; controls apply to `legacy_main.py` only |
 | Runtime ABI | `abis/phase2_trading_bot.json`, included in the checkout; no runtime build needed |
+| Competitive fee opt-in | Operator configuration: `EVENT_FEE_POLICY=competitive`; [units, controls and example](EVENT_FEES.md#configuration) |
+| Fee and submission evidence | Expand **My execution results → Latest fee and submission evidence**; full records remain in `logs/events/` |
 
 ### Phase 2 troubleshooting
 
@@ -45,12 +47,18 @@
 | Prices or entry references withheld after recovery | Invalidated prices stay excluded even after a higher-block scan succeeds. An open-entry reference requires verified execution and activity; its recorded position remains visible for reconciliation. |
 | Missing transaction markers | Coverage begins with recorded logs/receipts; signer/time enrichment is bounded. Unverified or reorganized markers are withheld. Inspect the transaction table, which also lists swaps without a known time. |
 | Portfolio return unavailable | No valid portfolio baseline exists. Do not use deposits, recent trades, or a restart as invented starting capital. |
+| `configured fee ceiling is too low` | Inspect `execution_attempt.fee_decision` and its reference base fee. Fixed mode needs max ≥ base + fixed priority; competitive mode needs room for a positive tip under its own ceilings. The attempt was not signed. |
+| `network_missing`, `network_stale`, `network_zero_samples` | Competitive mode uses its baseline and any eligible competitor evidence, with a fresh base-fee check. Inspect the fee-refresh RPC category/error; stale evidence is excluded. |
+| `priority_ceiling` / `max_fee_ceiling_reduced_tip` | The selected bid is below the desired bid. Read both fields; do not interpret the desired bid as submitted or as proof of outbidding. |
+| Provider accepted, inclusion unavailable | RPC acceptance is not a receipt. An uncertain outcome halts for reconciliation; never replace or resubmit it through this policy. |
 
 Each start pauses entries and selects Simulation with a vault or Paper without one. Paper displays modeled candidates. Simulation runs the existing read-only contract execution checks. Live requires `DRY_RUN=false` in operator configuration plus a valid vault, signer and limits. `EVENT_EXECUTION_MODE` is accepted for compatibility and cannot enable new live entries. A recorded live position resumes exit management and needs a fresh Live request once flat. The dashboard displays a refusal reason if a switch is blocked. Select the desired mode again after resolving it.
 
 Before recovery can exit a recorded position, the runtime validates retained execution receipt block hashes, including receipts older than 64 blocks. The entry backing an open position is checked every maintenance pass, even if its trade row was trimmed. An unavailable read defers execution; a missing or changed canonical block halts for reconciliation. Do not clear or reset the position to bypass this check.
 
 ### Phase 2 dashboard operation
+
+Fees remain fixed unless the operator opts in. The [competitive example](EVENT_FEES.md) uses a 20 gwei baseline, 1.25× network and 1.5× competitor multipliers, and 100/200 gwei priority/total ceilings. All fee settings use integer wei or basis points; the old `EVENT_PRIORITY_FEE_WEI` / `EVENT_MAX_FEE_WEI` fields remain fixed-mode bids only. Exits receive the same baseline when feasible, even while entries are paused. Changing fee configuration requires the ordinary operator service handoff, not a dashboard control. These experimental bids cannot guarantee order or profit.
 
 The primary row contains exactly two buttons. **Mode: …** displays the runtime's acknowledged mode and requests the other mode; every switch pauses entries. **Start Trading / Stop Trading** reflects applied permission to open new trades, including while the bot is idle. A saved request is shown as pending until the runtime acknowledges it. Start is blocked for unknown/stale state and pending or refused mode requests. Stop continues to request a pause with stale status. Paper and unavailable modes explain their limitations. Strategy switches, scan and position-exit actions are separate from this row.
 

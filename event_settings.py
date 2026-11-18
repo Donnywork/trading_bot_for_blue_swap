@@ -49,6 +49,12 @@ class EventSettings:
     max_gas: int = 1_500_000
     priority_wei: int = 2_000_000_000
     max_fee_wei: int = 20_000_000_000
+    fee_policy: str = "fixed"
+    fee_baseline_wei: int = 20_000_000_000
+    fee_network_bps: int = 12_500
+    fee_competitor_bps: int = 15_000
+    fee_tip_cap_wei: int = 100_000_000_000
+    fee_max_cap_wei: int = 200_000_000_000
     bot_address: str = ""
     owner: str = ""
     market_bots: tuple = (market.MARKET_BOT,)
@@ -56,6 +62,10 @@ class EventSettings:
         "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
         "0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7",
     )
+
+    @property
+    def fee_ceiling(self):
+        return self.max_fee_wei if self.fee_policy == "fixed" else self.fee_max_cap_wei
 
     @property
     def limits(self):
@@ -140,6 +150,22 @@ class EventSettings:
         max_fee = bounded(env, "EVENT_MAX_FEE_WEI", 20_000_000_000, 1, 200_000_000_000)
         if priority > max_fee:
             raise ConfigurationError("priority fee exceeds maximum fee")
+        policy = env.get("EVENT_FEE_POLICY", "fixed")
+        if policy not in ("fixed", "competitive"):
+            raise ConfigurationError("EVENT_FEE_POLICY must be fixed or competitive")
+        baseline = bounded(
+            env, "EVENT_FEE_BASELINE_WEI", 20_000_000_000, 1, 100_000_000_000
+        )
+        tip_cap = bounded(
+            env, "EVENT_FEE_TIP_CAP_WEI", 100_000_000_000, 1, 100_000_000_000
+        )
+        fee_cap = bounded(
+            env, "EVENT_FEE_MAX_CAP_WEI", 200_000_000_000, 1, 200_000_000_000
+        )
+        if not baseline <= tip_cap <= fee_cap:
+            raise ConfigurationError(
+                "competitive fees require baseline <= tip cap <= max cap"
+            )
         return cls(
             mode="simulate" if addresses[0] else "paper",
             live_enabled=env.get("DRY_RUN", "true").lower() == "false",
@@ -153,6 +179,16 @@ class EventSettings:
             max_gas=bounded(env, "EVENT_MAX_GAS", 1_500_000, 100_000, 5_000_000),
             priority_wei=priority,
             max_fee_wei=max_fee,
+            fee_policy=policy,
+            fee_baseline_wei=baseline,
+            fee_network_bps=bounded(
+                env, "EVENT_FEE_NETWORK_BPS", 12_500, 10_000, 50_000
+            ),
+            fee_competitor_bps=bounded(
+                env, "EVENT_FEE_COMPETITOR_BPS", 15_000, 10_000, 50_000
+            ),
+            fee_tip_cap_wei=tip_cap,
+            fee_max_cap_wei=fee_cap,
             bot_address=addresses[0],
             owner=addresses[1],
             market_bots=bots,

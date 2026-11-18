@@ -33,6 +33,12 @@ Ordered same-block backruns remain unsupported. The atomic executor checks the w
 
 The execution adapter preserves Sepolia-only checks, owner limits, whole-cycle simulation, `SWAP_GAS_BUFFER=2.0`, and before-send skip versus post-send halt classifications. It never rebuilds and retries an uncertain send. Actual live submission is not authorized by this implementation work.
 
+## Competitive fee preparation
+
+All execution paths share the opt-in [Phase 2 fee policy](EVENT_FEES.md). Default `fixed` preserves `EVENT_PRIORITY_FEE_WEI` / `EVENT_MAX_FEE_WEI`. `competitive` uses a 20 gwei baseline, cached eight-block network p90 evidence and supported configured-competitor effective-tip estimates, with integer 1.25×/1.5× multipliers and separate 100/200 gwei ceilings. Dynamic maximum headroom is `2 * current_base + selected_tip`, bounded by the total ceiling. Missing evidence falls back deterministically; a fresh base-fee check and affordability remain mandatory. Exits use the same policy independently of entry pause/feed restrictions.
+
+Fee evidence never revalidates an invalidated candidate. Unsupported competitor transactions still trigger the engine's existing invalidation rules even when they cannot supply a fee sample. Public attempts distinguish desired and selected bids, evidence ages/sources, gas estimate/buffer, monotonic submission durations, provider acceptance and receipt inclusion/order. The worker makes no synchronous fee-history request during submission. The policy implements no replacement, cancellation, relay, bundle or parallel broadcast; identical-byte failover and unknown-send halts are preserved. Higher tips cannot guarantee ordering.
+
 ## Pool state and simulation
 
 Both Phase 2 pools have token0=f564 and token1=fETH, with 18 decimals. Each snapshot carries chain ID, block number/hash, pool/token identity, fee, and the complete initialized-tick liquidity layout. Model swaps on independent copies; never change a canonical snapshot while evaluating a hypothetical sequence.
@@ -186,12 +192,13 @@ Reproduce the counts with `uv run pytest -qs tests/test_phase2_rpc.py`.
 | `EVENT_EXIT_SECONDS` | `60` | Front-run inventory exit timer, 5–300 seconds |
 | `EVENT_COOLDOWN_SECONDS` | `10` | Delay after execution attempts/failures, 1–300 seconds |
 | `EVENT_MAX_GAS` | `1500000` | Maximum gas limit including the 2× estimate buffer |
-| `EVENT_PRIORITY_FEE_WEI` | `2000000000` | Public transaction priority fee |
-| `EVENT_MAX_FEE_WEI` | `20000000000` | Public transaction total fee ceiling |
+| `EVENT_PRIORITY_FEE_WEI` | `2000000000` | Fixed-mode exact priority fee, integer wei/gas |
+| `EVENT_MAX_FEE_WEI` | `20000000000` | Fixed-mode exact maximum fee, integer wei/gas |
+| `EVENT_FEE_POLICY` | `fixed` | Opt-in `competitive`; [all six policy controls](EVENT_FEES.md#configuration) |
 | `BOT_CONTRACT_ADDRESS` | empty | One Phase2TradingBot holding all strategy funds |
 | `OWNER_ADDRESS` | empty | Enrolled owner, verified against that contract |
 | `EVENT_MARKET_BOTS` | named market bot | Comma-separated signal signer allowlist |
-| `EVENT_COMPETITORS` | two observed recurring signers | Comma-separated invalidating signer allowlist |
+| `EVENT_COMPETITORS` | two observed recurring signers | Comma-separated invalidating signer allowlist; supported official-pool transactions also supply competitive fee evidence |
 
 These defaults are bounded research settings, not demonstrated profitable live parameters. A higher priority fee does not guarantee a front-run, and public backruns after receipt confirmation can lose the race to competitors.
 

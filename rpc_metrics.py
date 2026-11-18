@@ -14,8 +14,9 @@ PURPOSES = (
     "Trade quotes and simulation",
     "Live execution",
     "Portfolio and chart diagnostics",
+    "Fee evidence refresh",
 )
-STARTUP, SNAPSHOT, SCAN, FEED, RECEIPTS, QUOTES, LIVE, DIAGNOSTICS = PURPOSES
+STARTUP, SNAPSHOT, SCAN, FEED, RECEIPTS, QUOTES, LIVE, DIAGNOSTICS, FEES = PURPOSES
 _current = ContextVar("rpc_purpose", default=STARTUP)
 
 

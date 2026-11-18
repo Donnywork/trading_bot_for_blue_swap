@@ -8,7 +8,9 @@ from web3.exceptions import BlockNotFound
 import arbitrage
 import bot_contract
 import event_activity
+import event_fees
 import event_market as market
+import event_submission
 import frontrun
 import rpc_metrics as rpc
 from event_snapshot import hexstr
@@ -29,6 +31,8 @@ class Executor:
         self.live_history = store if settings.mode == "live" else None
         self.history_verified = False
         self.entry_guard = lambda action: None
+        self.fees = event_fees.FeeCache(w3, settings, clock)
+        self.attempt = {}
         self.bot = None
         self.operator = None
         if settings.mode == "paper":
@@ -73,7 +77,7 @@ class Executor:
             raise ConfigurationError(
                 "Event limits conflict with the owner-configured vault limits"
             )
-        if self.w3.eth.get_balance(self.operator) < s.max_gas * s.max_fee_wei:
+        if self.w3.eth.get_balance(self.operator) < s.max_gas * s.fee_ceiling:
             raise ConfigurationError("Operator ETH below maximum transaction cost")
 
     def current(self, block, block_hash):
@@ -84,6 +88,19 @@ class Executor:
             or not 0 <= self.clock() - header["timestamp"] <= 30
         ):
             raise ConfigurationError("execution snapshot is no longer current")
+        return header
+
+    def start_attempt(self, candidate, action):
+        timing = event_submission.Timing(
+            self.fees.first_seen(candidate["hash"]), self.clock
+        )
+        self.attempt = {
+            "action": action,
+            "target": candidate["hash"],
+            "policy": self.settings.fee_policy,
+            "timing": timing.data,
+        }
+        return timing
 
     def single(self, fee, amount, buy, block):
         if self.bot is None:
@@ -127,6 +144,7 @@ class Executor:
         return fn, output, minimum
 
     def backrun(self, candidate, action="backrun"):
+        timing = self.start_attempt(candidate, action)
         if action not in ("backrun", "arbitrage"):
             raise ValueError("unsupported cycle action")
         if self.bot is None:
@@ -161,9 +179,11 @@ class Executor:
             best["amount_in"],
             best["min_quote_out"],
             candidate,
+            timing=timing,
         )
 
     def enter(self, candidate, snapshot):
+        timing = self.start_attempt(candidate, "entry")
         plan, swap = candidate["frontrun"], candidate["swap"]
         if (
             self.bot is None
@@ -209,11 +229,19 @@ class Executor:
             raise ConfigurationError("no bounded front-run entry passes validation")
         self.current(snapshot["block"], snapshot["block_hash"])
         return self.perform(
-            "entry:" + candidate["hash"], best[1], "entry", best[2], best[4], candidate
+            "entry:" + candidate["hash"],
+            best[1],
+            "entry",
+            best[2],
+            best[4],
+            candidate,
+            timing=timing,
         )
 
     def exit(self, reason):
         position = self.store.data["position"]
+        candidate = {"hash": position["target"], "reason": reason}
+        timing = self.start_attempt(candidate, "exit")
         header = self.w3.eth.get_block("latest")
         if not 0 <= self.clock() - header["timestamp"] <= 30:
             raise ValueError("exit chain state stale")
@@ -228,23 +256,23 @@ class Executor:
             "exit",
             position["base_raw"],
             minimum,
-            {"hash": position["target"], "reason": reason},
+            candidate,
+            timing=timing,
         )
 
-    def perform(self, key, fn, action, amount, minimum, candidate):
+    def perform(self, key, fn, action, amount, minimum, candidate, *, timing=None):
         if key in self.store.data["attempts"]:
             raise ValueError("candidate already attempted")
         s = self.settings
+        timing = timing or self.start_attempt(candidate, action)
         if self.w3.eth.chain_id != 11155111:
             raise ValueError("execution requires Sepolia")
         gas = fn.estimate_gas({"from": self.operator})
-        if gas * bot_contract.SWAP_GAS_BUFFER > s.max_gas:
+        buffered = int(gas * bot_contract.SWAP_GAS_BUFFER)
+        self.attempt.update(estimated_gas=gas, gas_limit=buffered)
+        if buffered > s.max_gas:
             raise ConfigurationError("buffered gas exceeds event limit")
-        base_fee = self.w3.eth.get_block("latest")["baseFeePerGas"]
-        if s.max_fee_wei < base_fee + s.priority_wei:
-            raise ConfigurationError("configured fee ceiling is too low")
-        if self.w3.eth.get_balance(self.operator) < s.max_gas * s.max_fee_wei:
-            raise ConfigurationError("operator ETH below maximum transaction cost")
+        balance = self.w3.eth.get_balance(self.operator)
         row = {
             "action": action,
             "target": candidate["hash"],
@@ -252,7 +280,10 @@ class Executor:
             "minimum_raw": minimum,
             "reason": candidate.get("reason", ""),
             "estimated_gas": gas,
+            "gas_limit": buffered,
+            "timing": timing.data,
         }
+        self.attempt = row
         position = self.store.data["position"]
         row["mode"] = s.mode
         row["position_id"] = (
@@ -279,22 +310,15 @@ class Executor:
         if s.mode not in ("simulate", "live"):
             raise ValueError("paper execution cannot send")
         tx = None
-        if s.mode == "live":
-            tx = fn.build_transaction(
-                {
-                    "from": self.operator,
-                    "gas": gas,
-                    "maxPriorityFeePerGas": s.priority_wei,
-                    "maxFeePerGas": s.max_fee_wei,
-                    "nonce": self.w3.eth.get_transaction_count(
-                        self.operator, "pending"
-                    ),
-                }
-            )
-            row.update(operator=self.operator, nonce=tx["nonce"])
+        nonce = (
+            self.w3.eth.get_transaction_count(self.operator, "pending")
+            if s.mode == "live"
+            else None
+        )
         if action != "exit":
-            self.entry_guard(action)
-            self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
+            header = self.current(
+                candidate["snapshot_block"], candidate["snapshot_hash"]
+            )
             if action == "entry":
                 target = self.w3.eth.get_transaction(candidate["hash"])
                 if target.get("blockNumber") is not None:
@@ -311,6 +335,28 @@ class Executor:
                     raise ValueError("target nonce changed during entry preparation")
         else:
             fn.call({"from": self.operator})
+            header = self.w3.eth.get_block("latest")
+        decision = self.fees.decide(header, action)
+        self.attempt["fee_decision"] = row["fee_decision"] = decision
+        if not decision["allowed"]:
+            raise ConfigurationError("configured fee ceiling is too low")
+        if balance < s.max_gas * decision["selected_max_fee_wei"]:
+            raise ConfigurationError("operator ETH below maximum transaction cost")
+        if s.mode == "live":
+            tx = fn.build_transaction(
+                {
+                    "from": self.operator,
+                    "chainId": 11155111,
+                    "gas": gas,
+                    "nonce": nonce,
+                    "maxPriorityFeePerGas": decision["selected_priority_wei"],
+                    "maxFeePerGas": decision["selected_max_fee_wei"],
+                }
+            )
+            row.update(operator=self.operator, nonce=nonce)
+        if action != "exit":
+            self.entry_guard(action)
+        timing.mark("validation_complete")
         if s.mode == "simulate":
             self.store.begin(key, row)
             self.store.finish(key, "simulated", position, row)
@@ -319,7 +365,11 @@ class Executor:
         try:
             with rpc.purpose(rpc.LIVE):
                 receipt = bot_contract.send_tx(
-                    self.w3, self.account, tx, gas_buffer=bot_contract.SWAP_GAS_BUFFER
+                    self.w3,
+                    self.account,
+                    tx,
+                    gas_buffer=bot_contract.SWAP_GAS_BUFFER,
+                    timing=timing,
                 )
         except bot_contract.NotSent:
             self.store.finish(key, "not_sent", position, row)
@@ -333,12 +383,23 @@ class Executor:
                         block=receipt["blockNumber"],
                         block_hash=hexstr(receipt["blockHash"]),
                         gas_wei=receipt["gasUsed"] * receipt["effectiveGasPrice"],
+                        inclusion=event_submission.inclusion(receipt),
                     )
+                    # Optional diagnostics must not turn a known revert into uncertainty.
+                    try:
+                        with rpc.purpose(rpc.RECEIPTS):
+                            header = self.w3.eth.get_block(receipt["blockNumber"])
+                        if header["hash"] == receipt["blockHash"]:
+                            row["inclusion"] = self.inclusion(
+                                receipt, header, candidate, decision
+                            )
+                    except Exception:  # noqa: BLE001 — accounting retains the known revert
+                        row["inclusion_error"] = "Revert block metadata unavailable."
                 self.store.finish(key, "reverted", position, row)
                 return row | {"status": "reverted"}
-            self.store.halt("execution outcome uncertain; reconcile before restart")
+            self.halt_uncertain()
         except Exception:  # noqa: BLE001 — any uncertainty after intent must halt
-            self.store.halt("execution outcome uncertain; reconcile before restart")
+            self.halt_uncertain()
         try:
             with rpc.purpose(rpc.RECEIPTS):
                 header = self.w3.eth.get_block(receipt["blockNumber"])
@@ -356,6 +417,7 @@ class Executor:
                 gas_wei=receipt["gasUsed"] * receipt["effectiveGasPrice"],
                 block_time=header["timestamp"],
                 transaction_index=receipt.get("transactionIndex"),
+                inclusion=self.inclusion(receipt, header, candidate, decision),
             )
             try:
                 row["legs"] = event_activity.receipt_legs(receipt, header["timestamp"])
@@ -391,6 +453,22 @@ class Executor:
         except Exception:  # noqa: BLE001 — a confirmed fill must never lose accounting
             self.store.halt("receipt accounting failed; reconcile before restart")
         return row | {"status": "confirmed"}
+
+    def halt_uncertain(self):
+        try:
+            self.store.save()  # Best effort to retain broadcast timings in the durable intent.
+        finally:
+            self.store.halt("execution outcome uncertain; reconcile before restart")
+
+    def inclusion(self, receipt, header, candidate, decision):
+        target = candidate.get("target_inclusion")
+        known = self.fees.first_seen(candidate["hash"])
+        if target is None and known:
+            target = known["inclusion"]
+        rival = decision["competitor"]
+        return event_submission.inclusion(
+            receipt, header, target, rival["inclusion"] if rival else None
+        )
 
     def verify_recent(self):
         if self.live_history is None:

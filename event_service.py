@@ -16,6 +16,7 @@ from web3.exceptions import TransactionNotFound, Web3Exception
 import backrun
 import config
 import control
+import event_fees
 import event_history
 import event_market as market
 import ledger
@@ -74,6 +75,11 @@ class Service:
         self.controls = strategy.DEFAULT
         self.modes, self.metrics = modes, metrics
         self.observer = observer
+        self.fees = getattr(executor, "fees", None) or event_fees.FeeCache(
+            executor.w3, settings, clock
+        )
+        self.executor.fees = self.fees
+        self.fee_gap = False
         self.mode_done = self.start_floor = None
         self.mode_block = (
             "Select Live after recovery before starting entries"
@@ -170,6 +176,7 @@ class Service:
         else:
             self.executor, self.settings, self.store = ex, ex.settings, ex.store
             ex.entry_guard = self.entry_guard
+            ex.fees = self.fees
             self.engine.reset("execution mode changed")
             self.arbitrage_block, self.last_refresh = None, 0
             self.mode_block = ""
@@ -210,6 +217,7 @@ class Service:
                 with rpc.purpose(rpc.SNAPSHOT):
                     value = self.snapshots.refresh()
         except Exception as exc:
+            self.fees.invalidate()
             self.price_history.verified = False
             if isinstance(exc, SnapshotUnavailable):
                 self.invalidate_prices()
@@ -309,6 +317,7 @@ class Service:
                     "action": action,
                     "hash": decision["hash"],
                     "reason": error_summary(exc),
+                    "diagnostics": getattr(self.executor, "attempt", {}),
                 }
             )
             raise
@@ -378,8 +387,20 @@ class Service:
                 reason = "target_nonce_mined"
         if reason and self.clock() >= self.next_attempt:
             self.next_attempt = self.clock() + self.settings.cooldown
-            with rpc.purpose(rpc.QUOTES):
-                result = self.executor.exit(reason)
+            try:
+                with rpc.purpose(rpc.QUOTES):
+                    result = self.executor.exit(reason)
+            except (OSError, Web3Exception, ValueError) as exc:
+                self.record(
+                    {
+                        "kind": "execution",
+                        "action": "exit",
+                        "status": "execution_rejected",
+                        "reason": error_summary(exc),
+                        "diagnostics": getattr(self.executor, "attempt", {}),
+                    }
+                )
+                raise
             self.read_controls()
             self.process_mode(busy=True)
             self.record(result)
@@ -398,6 +419,7 @@ class Service:
             or receipt["blockNumber"] != self.engine.snapshot["block"]
         ):
             return
+        self.fees.confirm(tx, receipt, self.engine.snapshot)
         decision = self.engine.handle(
             {
                 "kind": "mined",
@@ -406,6 +428,13 @@ class Service:
                 "receipt": receipt_dict(receipt),
             }
         )
+        if decision.get("status") == "paper_revalidated":
+            decision["target_inclusion"] = {
+                "block": receipt["blockNumber"],
+                "block_hash": hexstr(receipt["blockHash"]),
+                "transaction_index": receipt.get("transactionIndex"),
+                "source": "receipt_matching_snapshot",
+            }
         self.record(decision)
         self.maybe_execute(decision)
 
@@ -418,12 +447,14 @@ class Service:
             self.discarded_events["feed_changed"] += 1
             return
         if event["kind"] == "head":
+            self.fees.schedule()
             self.refresh()
             for tx in self.engine.pending_transactions():
                 self.included(tx)
             self.cross_pool()
             return
         if event.get("removed"):
+            self.fees.invalidate()
             self.executor.history_verified = False
             self.invalidate_prices()
             if self.observer:
@@ -434,6 +465,12 @@ class Service:
             return
         if self.observer and event.get("transaction"):
             self.observer.remember(event["transaction"])
+        if event.get("transaction"):
+            self.fees.observe(
+                event["transaction"],
+                received=event.get("received"),
+                received_mono=event.get("received_mono"),
+            )
         if event["kind"] == "mined":
             self.refresh()
             self.included(event["transaction"])
@@ -450,6 +487,12 @@ class Service:
 
     def maintain(self):
         self.read_controls()
+        gap = self.feed.gap.is_set() or self.generation != self.feed.generation
+        if (
+            gap and not self.fee_gap
+        ) or self.receipt_generation != self.feed.generation:
+            self.fees.invalidate()
+        self.fee_gap = gap
         if self.receipt_generation != self.feed.generation:
             self.executor.history_verified = False
             self.receipt_generation = self.feed.generation
@@ -525,6 +568,7 @@ class Service:
                 "history_error": self.history_error,
                 "observation_error": self.observer.error if self.observer else "",
                 "exit_seconds": self.settings.exit_seconds,
+                "fee_policy": self.settings.fee_policy,
                 "mode_availability": {
                     "simulate": ""
                     if self.settings.bot_address
@@ -535,6 +579,7 @@ class Service:
                 },
                 "last_evaluation": self.last_evaluation,
                 "last_execution": self.last_execution,
+                "execution_attempt": getattr(self.executor, "attempt", None),
                 "decision_counts": dict(self.decision_counts),
                 "discarded_events": dict(self.discarded_events),
                 "feed": {
@@ -636,6 +681,8 @@ class Service:
                     log.error(self.message)
                     raise
                 finally:
+                    if self.health not in ("halted", "failed") and not stop.is_set():
+                        self.fees.schedule()
                     if (
                         self.observer
                         and self.health not in ("halted", "failed")

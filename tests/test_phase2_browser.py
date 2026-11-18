@@ -179,6 +179,40 @@ def refresh(page):
     page.wait_for_function("() => !busy && !commanding")
 
 
+def test_fee_evidence_distinguishes_selection_acceptance_and_inclusion(
+    browser_dashboard,
+):
+    page, value, save, tmp, _, _ = browser_dashboard
+    before = (tmp / "control.json").read_text()
+    value["fee_policy"] = "competitive"
+    value["execution_attempt"] = {
+        "fee_decision": {
+            "policy": "competitive",
+            "action": "exit",
+            "decided_at": time.time(),
+            "reference_block": 300,
+            "desired_priority_wei": 300_000_000_000,
+            "selected_priority_wei": 100_000_000_000,
+            "selected_max_fee_wei": 120_000_000_000,
+            "allowed": True,
+            "reasons": ["priority_ceiling"],
+            "network_status": "stale",
+        },
+        "timing": {"provider_accepted": True, "broadcast_ms": 200},
+    }
+    save()
+    refresh(page)
+    expect(page.locator("#fee-evidence")).to_contain_text("priority_ceiling")
+    expect(page.locator("#fee-evidence")).to_contain_text("Network: stale")
+    expect(page.locator("#fee-evidence")).to_contain_text(
+        "first seen to broadcast unavailable"
+    )
+    expect(page.locator("#fee-evidence")).to_contain_text(
+        "Provider accepted. Inclusion unavailable."
+    )
+    assert (tmp / "control.json").read_text() == before
+
+
 def test_two_controls_acknowledgements_refusal_and_stale_stop(browser_dashboard):
     page, value, save, tmp, _, _ = browser_dashboard
     expect(page.locator("#controls button")).to_have_count(2)

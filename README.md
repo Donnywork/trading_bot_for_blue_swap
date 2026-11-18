@@ -22,6 +22,8 @@ What you get:
 
 ## How it fits together
 
+Phase 2 fees default to **`EVENT_FEE_POLICY=fixed`**, preserving the existing 2 gwei priority / 20 gwei maximum fields. Opt-in `competitive` starts at 20 gwei, adjusts from cached recent network and supported competitor bids, and chooses dynamic base-fee headroom under separate 100/200 gwei ceilings. Every entry, cycle and exit shares it. The dashboard's execution details show selected fees, fallback/ceiling reasons, submission timing and available inclusion evidence. Higher tips cannot guarantee ordering. See [the fee policy reference](docs/EVENT_FEES.md) for the six controls, formulas, visibility limits and offline request measurements. Installing this update does not opt in or enable trading.
+
 If a provider rejects the `eth_getLogs` range at startup, catch-up can reduce it. JSON-RPC quota/authentication failures use backoff and preserve the range; diagnostics retain HTTP status codes without provider bodies. [Phase 2 troubleshooting](docs/GETTING_STARTED.md#phase-2-troubleshooting)
 
 **One Phase 2 contract:** [docs/EVENT_CONTRACT_SETUP.md](docs/EVENT_CONTRACT_SETUP.md) walks through building, preparing and deploying `Phase2TradingBot`, registering/funding one address, and simulation-to-live setup. One `BOT_CONTRACT_ADDRESS` holds the shared balance for front-run entry/exit, receipt-triggered atomic backruns, and optional independent cross-pool arbitrage. Build offline with `uv run python phase2_contract.py build`. The Standard JSON includes inherited cycle logic and interface source dependencies; only Phase2TradingBot is deployed. The obsolete standalone arbitrage builder/artifacts have been removed. Preserve the exact build and plan for verifying any existing deployment.
@@ -61,6 +63,7 @@ Runtime failures report their exception type and source location without provide
 | `event_activity.py`, `event_observer.py`, `event_portfolio.py` | receipt/Swap markers, bounded background diagnostics, pinned holdings and Decimal display accounting |
 | `event_engine.py` | candidate lifecycle, pending receipt work, expiry and nonce settlement; offline |
 | `event_execution.py`, `event_store.py` | exact execution checks and durable intent/position accounting |
+| `event_fees.py`, `event_submission.py` | bounded background fee evidence, integer selection, local timing and inclusion/order diagnostics |
 | `operator_lock.py` | shared local live-sender lock, halt checks and service handoff rules |
 | `phase2_contract.py`, `contracts/Phase2TradingBot.sol` | unified Phase 2 build/deployment and owner calldata |
 | `main.py` / `legacy_main.py` | Phase 2 entry point / original polling runner and reconciliation tools |

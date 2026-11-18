@@ -12,6 +12,7 @@ from web3.exceptions import BlockNotFound, TimeExhausted, Web3RPCError
 import bot_contract
 import control
 import event_feed
+import event_fees
 import event_history
 import event_market as market
 import event_modes
@@ -629,6 +630,7 @@ def fake_executor(tmp_path, mode="live"):
             get_transaction=lambda h: {"blockNumber": None},
         )
     )
+    ex.fees = event_fees.FeeCache(ex.w3, ex.settings, ex.clock)
     fn = SimpleNamespace(
         estimate_gas=lambda _: 100_000,
         build_transaction=lambda tx: tx,
@@ -931,6 +933,63 @@ def test_exit_runs_when_entries_paused_and_feed_disconnected(tmp_path, snapshot)
     svc.executor.exit = exit_position
     svc.maintain()
     assert calls == ["time_limit"] and svc.controls.event_paused
+
+
+def test_competitive_evidence_cannot_bypass_competitor_invalidation(tmp_path, snapshot):
+    from test_event_fees import transaction
+
+    svc = service(tmp_path, snapshot)
+    svc.settings = replace(svc.settings, fee_policy="competitive")
+    svc.fees = event_fees.FeeCache(svc.executor.w3, svc.settings, svc.clock)
+    svc.executor.fees = svc.fees
+    svc.refresh()
+    tx = transaction()
+    # Seed a prepared engine candidate to verify the real competitor invalidation path.
+    svc.engine.candidates[HASH] = {
+        "hash": HASH,
+        "status": "prepared",
+        "expires": svc.clock() + 60,
+        "backrun": {"buy_fee": 500},
+        "frontrun": None,
+    }
+    svc.handle(
+        {
+            "kind": "pending",
+            "generation": svc.generation,
+            "transaction": tx,
+            "received": svc.clock(),
+        }
+    )
+    assert svc.engine.candidates[HASH]["status"] == "stale"
+    assert svc.engine.candidates[HASH]["backrun"] is None
+    h = {
+        "number": snapshot["block"],
+        "hash": Web3.to_bytes(hexstr=snapshot["block_hash"]),
+        "timestamp": snapshot["timestamp"],
+        "baseFeePerGas": 10**9,
+    }
+    assert svc.fees.decide(h, "entry")["competitor"] is not None
+    # Removed notifications also invalidate fee evidence.
+    svc.handle({"kind": "mined", "generation": svc.generation, "removed": True})
+    assert svc.fees.decide(h, "exit")["competitor"] is None
+
+
+def test_fee_refresh_failure_does_not_delay_disconnected_exit(tmp_path, snapshot):
+    svc = service(tmp_path, snapshot)
+    svc.settings = replace(svc.settings, fee_policy="competitive")
+    svc.fees = event_fees.FeeCache(svc.executor.w3, svc.settings, svc.clock)
+    svc.executor.fees = svc.fees
+    svc.fees.refresh(
+        svc.fees.epoch
+    )  # Fake header lacks fee metadata; worker fails safely.
+    assert svc.fees.error
+    svc.feed.ready.clear()
+    svc.feed.gap.set()
+    svc.store.data["position"] = {"opened": svc.clock() - 100}
+    calls = []
+    svc.executor.exit = lambda reason: calls.append(reason) or {"status": "not_sent"}
+    svc.maintain()
+    assert calls == ["time_limit"]
 
 
 def test_service_records_prices_and_publishes_applied_entry_state(tmp_path, snapshot):
@@ -1672,7 +1731,7 @@ def test_cycle_execution_keys_distinguish_backrun_and_independent_scan(
     )
     ex.current = lambda *a: None
     calls = []
-    ex.perform = lambda key, fn, action, *args: calls.append((key, action))
+    ex.perform = lambda key, fn, action, *args, **kwargs: calls.append((key, action))
     decision = {
         "hash": HASH,
         "snapshot_block": 7,
@@ -1718,6 +1777,7 @@ def test_in_memory_single_swap_entry_restart_exit_preserves_deposits(
     )
     ex.clock = lambda: eth.get_block("latest")["timestamp"]
     ex.store.clock = ex.clock
+    ex.fees = event_fees.FeeCache(ex.w3, ex.settings, ex.clock)
     quoter = SimpleNamespace(
         functions=SimpleNamespace(
             quoteExactInputSingle=lambda params: Call((params[2], 2**96, 0, 100000))
