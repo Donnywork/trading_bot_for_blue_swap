@@ -18,13 +18,14 @@
 | Scan / exit | Separate **Maintenance and position actions** area |
 | Decision pages | Expand **Recent decisions and watched actors**, scroll the table, then use Previous/Next |
 | Legacy polling recovery | `http://127.0.0.1:8765/legacy`; controls apply to `legacy_main.py` only |
-| Runtime ABI | `build/Phase2TradingBot.artifact.json`; copy the saved artifact to the server |
+| Runtime ABI | `abis/phase2_trading_bot.json`, included in the checkout; no runtime build needed |
 
 ### Phase 2 troubleshooting
 
 | Message / symptom | Next step |
 |---|---|
 | `awaiting_scan` | Click **Scan Pool Liquidity**. A failed scan requires another click. |
+| `Cannot read abis/phase2_trading_bot.json` | Restore the tracked ABI from the repository. Runtime and owner calldata need no local build artifact. Older versions reporting `Vault checks failed: FileNotFoundError` should update the checkout. |
 | `eth_getLogs` fails during startup | Catch-up narrows HTTP 400/413/422 or specifically identified JSON-RPC range/result-size failures. JSON-RPC quota/authentication errors preserve the range and back off. For 401/403, check provider access; for 429, check request limits and remaining quota. |
 | `Reconcile …/HALTED before starting a live sender` | Reconcile the indicated service's transaction outcome before clearing its halt marker. Both services' markers block all local live senders. |
 | `inventory or an unresolved intent` | Resume/reconcile the service that owns the position. Manual swaps/deployments require both ledgers flat. |

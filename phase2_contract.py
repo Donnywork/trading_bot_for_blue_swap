@@ -19,6 +19,16 @@ from runtime import load_environment as load_dotenv
 
 SOURCE = "contracts/Phase2TradingBot.sol"
 ARTIFACT = config.ROOT / "build/Phase2TradingBot.artifact.json"
+ABI_FILE = config.ROOT / "abis/phase2_trading_bot.json"
+
+
+def load_abi():
+    try:
+        return json.loads(ABI_FILE.read_text())
+    except (OSError, ValueError):
+        raise ConfigurationError(
+            "Cannot read abis/phase2_trading_bot.json; restore the bundled Phase 2 ABI from the repository"
+        ) from None
 
 
 def standard_json_input():
@@ -193,7 +203,7 @@ def main():
     calldata.add_argument("args", nargs="*")
     args = parser.parse_args()
     if args.command == "calldata":
-        abi = json.loads(ARTIFACT.read_text())["abi"]
+        abi = load_abi()
         bot = Web3().eth.contract(
             address=Web3.to_checksum_address(args.address), abi=abi
         )

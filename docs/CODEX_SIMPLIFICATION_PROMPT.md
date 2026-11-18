@@ -5,7 +5,7 @@ Simplify the Python trading bot in this repository. Make `python main.py` the no
 ## Scope
 
 - Read `AGENTS.md` first and preserve in-progress work. Treat the existing Phase 2 event service as the primary runtime. Reuse its execution path and consolidate duplicate startup and configuration code where it helps. Keep legacy tooling needed to reconcile existing positions or transaction records. Preserve the trading strategies and their behavior.
-- Leave all Solidity files under `contracts/` byte-for-byte intact. Preserve the deployed contract interface, verification artifacts, deployment plans and records, including any unresolved deployment intent. Use the saved Phase 2 artifact at runtime.
+- Leave all Solidity files under `contracts/` byte-for-byte intact. Preserve the deployed contract interface, verification artifacts, deployment plans and records, including any unresolved deployment intent. Use the bundled `abis/phase2_trading_bot.json` at runtime.
 - Preserve monitoring behavior, feed filters, saved liquidity profiles, snapshot format, and Uniswap V3 math. Limit changes in these areas to the startup, scan, and catch-up request efficiency described below, plus RPC counting at the transport boundary.
 - Keep the dashboard on its existing separate launch path and bound to `127.0.0.1`. Preserve its `Host`, `Origin`, and content-type checks. The dashboard reads published state and writes validated commands exclusively to `logs/control.json`. Add a mode request to those commands. Keep RPC calls, signing, broadcasting, and execution decisions in the bot. Keep `DRY_RUN`, keys, addresses, and trade limits in operator configuration.
 

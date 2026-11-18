@@ -119,7 +119,7 @@ The build is offline. If solc 0.8.27 is missing, install it once, then build aga
 uv run python -c 'import solcx; solcx.install_solc("0.8.27")'
 ```
 
-The installer downloads a compiler; it does not load `.env` or send blockchain transactions. Builds use solc **0.8.27**, optimizer **200 runs**, EVM **paris**, and no viaIR. Keep `build/Phase2TradingBot.artifact.json` and `build/Phase2TradingBot.standard-input.json` for runtime and verification.
+The installer downloads a compiler; it does not load `.env` or send blockchain transactions. Builds use solc **0.8.27**, optimizer **200 runs**, EVM **paris**, and no viaIR. Keep `build/Phase2TradingBot.artifact.json` and `build/Phase2TradingBot.standard-input.json` with the deployment backup for verification. Runtime and owner calldata use the tracked `abis/phase2_trading_bot.json`; running an existing contract needs no local build.
 
 Replace the two uppercase address placeholders below with your own public wallet addresses. The example uses **100 / 1 / 0.1** in human token units; change those amounts to your chosen limits:
 
@@ -167,7 +167,7 @@ All local live senders use the same check under `logs/operator.lock`: both servi
 6. For constructor arguments, use the **`constructor_arguments`** hex string from the exact deployment plan used to deploy. It is already ABI-encoded; copy only the string value, without JSON quotes. Compiler settings must match: optimizer enabled, **200 runs**, EVM **paris**, no viaIR. Those settings are included in the Standard JSON file.
 7. Submit verification. After success, use **Read Contract** to check `owner()` equals your primary wallet, `operator()` equals your bot wallet, and `contractVersion()` returns `2`.
 
-Keep the deployed build and plan together for verification. Etherscan requires the source, compiler settings and constructor arguments to match the deployed bytecode. See its [verification instructions](https://info.etherscan.com/how-to-verify-contracts/) and [mismatch explanations](https://docs.etherscan.io/contract-verification/common-verification-errors). The artifact includes the ABI for the script; runtime does not compile.
+Keep the deployed build and plan together for verification. Etherscan requires the source, compiler settings and constructor arguments to match the deployed bytecode. See its [verification instructions](https://info.etherscan.com/how-to-verify-contracts/) and [mismatch explanations](https://docs.etherscan.io/contract-verification/common-verification-errors). Runtime reads the bundled ABI without compiling or opening the deployment artifact.
 
 ## 4. Register and fund the new address
 
@@ -205,7 +205,7 @@ EVENT_BASE_CAP=YOUR_MAX_FETH_PER_TRADE
 EVENT_MIN_PROFIT=YOUR_MIN_F564_PROFIT_PER_CYCLE
 ```
 
-Remove obsolete `ARBITRAGE_VAULT_ADDRESS` and `EVENT_FRONT_VAULT_ADDRESS` settings. Retain `build/Phase2TradingBot.artifact.json` on the server. Use `main.py` for Phase 2 and `phase2_contract.py` for deployment and owner calldata. `legacy_main.py` provides the legacy polling and recovery interface.
+Remove obsolete `ARBITRAGE_VAULT_ADDRESS` and `EVENT_FRONT_VAULT_ADDRESS` settings. The Phase 2 ABI is included in the checkout at `abis/phase2_trading_bot.json`. Use `main.py` for Phase 2 and `phase2_contract.py` for deployment and owner calldata. `legacy_main.py` provides the legacy polling and recovery interface.
 
 The contract starts **paused**. Verify these getters via the ABI/verified contract page: `contractVersion()` = 2, owner/operator/router/token identities, pool0 = narrow, pool1 = wide, fees 500/10000, chosen caps and profit floor. Then generate an owner action offline:
 
@@ -234,4 +234,4 @@ A live front-run is still two transactions and has no guaranteed profit or order
 
 See [EVENT_STRATEGIES.md](EVENT_STRATEGIES.md) for the runtime, controls and recovery behavior. The agent's implementation work did not deploy or move funds. Your own deployment status must be checked against its record and on-chain receipt.
 
-For unattended operation, continue with [Phase 2 on Ubuntu](DEPLOY.md#phase-2-on-ubuntu). Copy the saved `build/Phase2TradingBot.artifact.json` to the server explicitly: git and the general rsync example omit `build/`. Preserve your existing execution records when moving a running installation.
+For unattended operation, continue with [Phase 2 on Ubuntu](DEPLOY.md#phase-2-on-ubuntu). Git and the general rsync example include the runtime ABI; `build/` can remain excluded. Preserve your existing execution records when moving a running installation.

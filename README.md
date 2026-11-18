@@ -77,7 +77,7 @@ Runtime failures report their exception type and source location without provide
 | `config.py` | pool and quoter reads, price and quote helpers (also a read-only CLI) |
 | `contracts/TradingBot.sol` | the bot contract (`mocks/` is test-only) |
 | `drafts/` | local scratch space for throwaway scripts and notes; gitignored, so it only exists on your machine (empty it when you are done). Agents work in it with the Read / Write / Edit tools directly, not with shell heredocs or `python -c` |
-| `abis/` | ABIs; `trading_bot.json` is written by `deploy` for your deployment and is gitignored: copy it to the server with `.env` |
+| `abis/` | Includes the tracked `phase2_trading_bot.json` for Phase 2 runtime and owner calldata. Legacy `trading_bot.json` is deployment-specific and gitignored. |
 | `deploy/*.service` | systemd units for Ubuntu 24.04 (the bot, and the optional dashboard) |
 | `docs/GETTING_STARTED.md` | **start here**: install, first run, dashboard, strategies, going live |
 | `docs/DEPLOY.md` | full deploy and 24/7 reference, owner operations, troubleshooting |
@@ -104,7 +104,7 @@ uv run python dashboard.py
 
 On a server, reach the dashboard from your laptop with `ssh -L 8765:127.0.0.1:8765 user@server`, then open <http://localhost:8765>. It only listens on the server's loopback address and has no login, so never expose its port.
 
-Open the **Phase 2 trading** overview. `awaiting_scan` asks for **Scan Pool Liquidity**. For deployment, funding and simulation, continue with [EVENT_CONTRACT_SETUP](docs/EVENT_CONTRACT_SETUP.md). Runtime simulation/live needs the saved `build/Phase2TradingBot.artifact.json` on the machine running the service.
+Open the **Phase 2 trading** overview. `awaiting_scan` asks for **Scan Pool Liquidity**. For deployment, funding and simulation, continue with [EVENT_CONTRACT_SETUP](docs/EVENT_CONTRACT_SETUP.md). Runtime simulation/live and owner calldata use the bundled `abis/phase2_trading_bot.json`; a server checkout needs no compiler or copied build artifact to run an existing contract.
 
 `legacy_main.py`, `bot_contract.py deploy/swap`, `live_check.py`, and the dashboard's polling-strategy controls belong to the [legacy workflow](docs/GETTING_STARTED.md#legacy-polling-bot-reference).
 

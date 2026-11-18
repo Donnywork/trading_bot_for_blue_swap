@@ -199,7 +199,7 @@ These defaults are bounded research settings, not demonstrated profitable live p
 
 **Live** additionally requires `DRY_RUN=false`, an operator `PRIVATE_KEY`, the matching enrolled owner, and the deployed/funded Phase2TradingBot. The owner's key is never used. The operator must hold native ETH for the configured maximum transaction cost (0.03 ETH at defaults). Owner caps must allow the full recorded exit amount. Single entries cap received fETH accordingly. One service serializes all strategies on the shared balance and closes a recorded front-run position before opening another entry or cycle.
 
-Follow the [contract walkthrough](EVENT_CONTRACT_SETUP.md) to prepare the deployed vault and retain its matching `build/Phase2TradingBot.artifact.json` on the server. Start Phase 2 with `main.py`. For existing polling positions, use `legacy_main.py` and the legacy single-swap CLI.
+Follow the [contract walkthrough](EVENT_CONTRACT_SETUP.md) to prepare the deployed vault. The runtime ABI ships in `abis/phase2_trading_bot.json`; the server needs no build artifact or compiler to run it. Start Phase 2 with `main.py`. For existing polling positions, use `legacy_main.py` and the legacy single-swap CLI.
 
 Optional `event_arbitrage` in `control.json` evaluates the current cross-pool spread once per snapshot hash, independent of a target transaction. It obeys entry pause, feed readiness, cooldown and open-position gating. Exact quote/simulation validation and atomic execution are shared with backruns, with distinct `arbitrage:` attempt keys. Receipt-triggered backruns use `backrun:` keys. The contract enforces a positive f564 gain for each cycle before native ETH gas; separate front-run swaps have no round-trip profit guarantee.
 

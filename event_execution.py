@@ -1,6 +1,5 @@
 """Exact event execution adapters; live sends require explicit startup configuration."""
 
-import json
 import time
 
 from web3 import Web3
@@ -14,7 +13,7 @@ import frontrun
 import rpc_metrics as rpc
 from event_snapshot import hexstr
 from legacy_main import received_from_receipt
-from phase2_contract import ARTIFACT
+from phase2_contract import load_abi
 from runtime import ConfigurationError
 
 
@@ -36,9 +35,8 @@ class Executor:
             return
         if w3.eth.chain_id != 11155111:
             raise ConfigurationError("execution requires Sepolia")
-        abi = json.loads(ARTIFACT.read_text())["abi"]
         self.bot = w3.eth.contract(
-            address=Web3.to_checksum_address(settings.bot_address), abi=abi
+            address=Web3.to_checksum_address(settings.bot_address), abi=load_abi()
         )
         fn = self.bot.functions
         if not w3.eth.get_code(self.bot.address) or fn.contractVersion().call() != 2:

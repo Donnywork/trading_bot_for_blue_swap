@@ -2,13 +2,13 @@ import json
 import subprocess
 import sys
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from eth_tester.exceptions import TransactionFailed
 from web3 import Web3
 
-import event_execution
 import event_market as market
 import event_snapshot
 import phase2_contract
@@ -187,13 +187,32 @@ def test_settings_use_one_address_and_refuse_split_configuration():
             EventSettings.from_env(env | {key: env["BOT_CONTRACT_ADDRESS"]})
 
 
-def test_executor_initializes_one_contract_for_both_capabilities(
-    combined, tmp_path, monkeypatch
+def without_build(monkeypatch):
+    read_text = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path.is_relative_to(phase2_contract.ARTIFACT.parent):
+            raise FileNotFoundError(path)
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(
+        phase2_contract,
+        "compile_contract",
+        lambda: pytest.fail("runtime attempted compilation"),
+    )
+
+
+def test_bundled_abi_matches_compiled_contract(combined_artifacts):
+    assert phase2_contract.load_abi() == combined_artifacts["Phase2TradingBot"]["abi"]
+
+
+@pytest.mark.parametrize("mode", ["simulate", "live"])
+def test_executor_initializes_with_bundled_abi_without_build(
+    combined, tmp_path, monkeypatch, mode
 ):
     e = combined
-    artifact = tmp_path / "artifact.json"
-    artifact.write_text(json.dumps({"abi": e.bot.abi}))
-    monkeypatch.setattr(event_execution, "ARTIFACT", artifact)
+    without_build(monkeypatch)
     for key, value in (
         ("BASE", e.b.address),
         ("QUOTE", e.a.address),
@@ -215,11 +234,12 @@ def test_executor_initializes_one_contract_for_both_capabilities(
     w3 = SimpleNamespace(eth=Eth())
     settings = replace(
         EventSettings(),
-        mode="simulate",
+        mode=mode,
         bot_address=e.bot.address,
         owner=e.owner.lower(),
     )
-    ex = Executor(w3, {}, settings, EventStore(tmp_path / "events", {}, "simulate"))
+    account = SimpleNamespace(address=e.operator) if mode == "live" else None
+    ex = Executor(w3, {}, settings, EventStore(tmp_path / "events", {}, mode), account)
     assert ex.bot.address == e.bot.address
     assert ex.bot.functions.contractVersion().call() == 2
     with pytest.raises(ValueError, match="owner mismatch"):
@@ -268,14 +288,8 @@ def test_unsigned_plan_exact_limits_and_cli_offline(combined_artifacts, tmp_path
     assert json.loads(output.read_text()) == saved
 
 
-def test_owner_calldata_uses_isolated_artifact(
-    combined_artifacts, tmp_path, monkeypatch, capsys
-):
-    artifact = tmp_path / "artifact.json"
-    artifact.write_text(
-        json.dumps({"abi": combined_artifacts["Phase2TradingBot"]["abi"]})
-    )
-    monkeypatch.setattr(phase2_contract, "ARTIFACT", artifact)
+def test_owner_calldata_uses_bundled_abi_without_build(monkeypatch, capsys):
+    without_build(monkeypatch)
     monkeypatch.setattr(
         phase2_contract, "load_dotenv", lambda: pytest.fail("calldata loaded env")
     )
