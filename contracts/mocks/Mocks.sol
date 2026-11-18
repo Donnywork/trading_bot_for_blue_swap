@@ -3,12 +3,16 @@ pragma solidity ^0.8.27;
 
 // Test-only contracts. Not deployed.
 contract MockToken {
+    event Transfer(address indexed from, address indexed to, uint256 amount);
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
     function decimals() external pure returns (uint8) { return 18; }
 
-    function mint(address to, uint256 amount) external { balanceOf[to] += amount; }
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        emit Transfer(address(0), to, amount);
+    }
 
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
@@ -18,6 +22,7 @@ contract MockToken {
     function transfer(address to, uint256 amount) external returns (bool) {
         balanceOf[msg.sender] -= amount;
         balanceOf[to] += amount;
+        emit Transfer(msg.sender, to, amount);
         return true;
     }
 
@@ -25,6 +30,7 @@ contract MockToken {
         allowance[from][msg.sender] -= amount;
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
         return true;
     }
 }

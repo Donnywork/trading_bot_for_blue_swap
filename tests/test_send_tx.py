@@ -100,11 +100,26 @@ def test_a_receipt_timeout_stays_a_timeout():
         send(w3)
 
 
-def test_a_node_that_rejects_the_transaction_is_an_ordinary_failure():
-    # the node answered with an error: it was refused, not sent
+@pytest.mark.parametrize("receipt", [None, {}, {"status": 2}])
+def test_malformed_receipt_is_unknown_after_broadcast(receipt):
     w3 = W3()
-    w3.eth.fail["send"] = Web3RPCError("nonce too low")
-    with pytest.raises(Web3RPCError):
+    w3.eth.receipt = receipt
+    with pytest.raises(bot_contract.SentUnknown):
+        send(w3)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        Web3RPCError("nonce too low"),
+        Web3RPCError("already known"),
+        ValueError("malformed response"),
+    ],
+)
+def test_a_broadcast_error_requires_reconciliation(error):
+    w3 = W3()
+    w3.eth.fail["send"] = error
+    with pytest.raises(bot_contract.SentUnknown):
         send(w3)
 
 

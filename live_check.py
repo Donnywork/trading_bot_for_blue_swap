@@ -12,7 +12,7 @@ ZERO_ADDRESS = "0x" + "00" * 20
 # addresses that are neither operator nor owner, and a token the owner never allowed
 STRANGER = Web3.to_checksum_address("0x000000000000000000000000000000000000dEaD")
 UNLISTED_TOKEN = Web3.to_checksum_address("0x000000000000000000000000000000000000bEEF")
-UNLISTED_FEE = 10000
+UNLISTED_FEE = 12345  # deliberately outside the configured V3 tiers
 # how a node reports an eth_call that reverts (tests add the in-memory chain's own error type)
 REJECTIONS = (ContractLogicError, Web3RPCError)
 
@@ -309,9 +309,7 @@ def main():
     print(f"Contract: {os.environ['BOT_CONTRACT_ADDRESS']}")
     print(f"Operator wallet: {account.address}\n")
 
-    market = (
-        config.load_market()
-    )  # pool, token and factory checks (raises if inconsistent)
+    market = config.load_market(w3=w3)  # pool, token and factory checks
     print()
     bot = bot_contract.load_bot(w3, os.environ["BOT_CONTRACT_ADDRESS"])
 
@@ -334,10 +332,36 @@ def main():
         min_eth=Decimal(os.environ.get("MIN_OPERATOR_ETH", "0.01")),
         quote_fn=quote_fn,
     )
+    for index in range(1, len(config.configured_pools())):
+        market = config.load_market(index, w3=w3)
+        fee = market["fee"]
+        report.add(
+            "PASS" if bot.functions.feeAllowed(fee).call() else "FAIL",
+            f"secondary fee tier {fee} is allowed",
+        )
+        check_swaps(
+            report,
+            w3,
+            bot,
+            account.address,
+            fee,
+            list(market["tokens"].values()),
+            Decimal(os.environ["MAX_TRADE_AMOUNT"]),
+            quote_fn,
+        )
     report.summary()
     if report.failed:
         raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    import traceback
+
+    from legacy_main import redact
+
+    try:
+        main()
+    except Exception:  # noqa: BLE001 - RPC exceptions may include credentials
+        print(redact(traceback.format_exc()), file=sys.stderr)
+        raise SystemExit(1) from None

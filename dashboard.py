@@ -15,23 +15,28 @@ from pathlib import Path
 from typing import ClassVar
 from urllib.parse import parse_qs, urlsplit
 
-from dotenv import load_dotenv
-
 import compare
 import control
+import event_activity
+import event_diagnostics
+import event_history
+import event_portfolio
+import event_store
 import history
 import ledger
 import state
 import status
 import strategy
 import v3pool
-from main import PRELOAD_MAX_AGE, redact
+from legacy_main import PRELOAD_MAX_AGE, redact
+from runtime import load_environment as load_dotenv
 
 # Loopback only, on purpose: the page can change what the bot does, and it has no login. Reach it
 # from your laptop through an SSH tunnel (see docs/DEPLOY.md), never by opening a port.
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PAGE = Path(__file__).parent / "dashboard.html"
+LEGACY_PAGE = Path(__file__).parent / "dashboard_legacy.html"
 MAX_BODY = 10_000
 # what /api/status carries: the price card's change over a few hours, the guard, the last trades.
 # The chart and the trades list ask /api/prices and /api/trades for what they show.
@@ -214,6 +219,10 @@ class Dashboard:
                 history.trailing_run(points, now, PRELOAD_MAX_AGE), cfg
             ),
             "config": strategy.to_dict(cfg),
+            "events": event_store.dashboard_view(
+                self.state_file.parent / "events/state.json", now
+            ),
+            "event_controls": {key: getattr(cfg, key) for key in control.EVENT_FIELDS},
             "control": self.control_view(cfg),
             "schema": strategy.schema(),
         }
@@ -223,6 +232,165 @@ class Dashboard:
             return ledger.load(self.ledger_file)
         except ValueError:  # snapshot() reports it; the other views just show nothing
             return ledger.empty()
+
+    def events_view(self):
+        now = self.clock()
+        value = event_store.dashboard_view(
+            self.state_file.parent / "events/state.json", now
+        )
+        try:
+            cfg = control.load(self.control_file)
+            requested = {key: getattr(cfg, key) for key in control.EVENT_FIELDS}
+            control_error = ""
+        except (ValueError, OSError):
+            requested = {}
+            control_error = (
+                "Saved controls are unreadable; repair before issuing commands."
+            )
+        return {
+            "now": now,
+            "events": value,
+            "event_controls": requested,
+            "control_error": control_error,
+            "entry": event_diagnostics.entry_status(value, now),
+            "trading_controls": event_diagnostics.trading_controls(
+                value, requested, control_error, now
+            ),
+            "portfolio": event_portfolio.view(
+                self.state_file.parent / "events", value, now
+            ),
+        }
+
+    def event_activity_view(self, query):
+        if query:
+            raise QueryError(
+                "Activity uses retained local history; no query parameters"
+            )
+        path = self.state_file.parent / "events/activity.json"
+        try:
+            value = event_activity.read(path)
+            runtime = event_store.dashboard_view(
+                path.with_name("state.json"), self.clock()
+            )
+            if runtime.get("health") == "halted":
+                value["verified"] = False
+                value["error"] = (
+                    "Execution halted; canonical markers withheld pending reconciliation."
+                )
+            value["unverified_rows"] = sum(
+                not r["canonical"] or not value["verified"] for r in value["rows"]
+            )
+            value["rows"] = [
+                r for r in value["rows"] if r["canonical"] and value["verified"]
+            ]
+            value["coverage_note"] = (
+                "Only recorded Swap logs and confirmed receipts. No historical backfill. Missing time or signer metadata is explicit; metadata lookups are bounded."
+            )
+            return value
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            ArithmeticError,
+        ):
+            return {
+                "rows": [],
+                "error": "Transaction history is unreadable; inspect runtime diagnostics.",
+                "verified": False,
+            }
+
+    def event_prices_view(self, query):
+        if set(query) - {"range", "max", "fee", "mode", "from", "to"} or any(
+            len(v) != 1 for v in query.values()
+        ):
+            raise QueryError("Use one range, max, fee and mode per request")
+        fee = query.get("fee", ["500"])[0]
+        if fee not in event_history.IDENTITY["pools"]:
+            raise QueryError("fee must be 500 or 10000")
+        now = self.clock()
+        state = self.events_view()["events"]
+        mode = query.get("mode", [state.get("mode") or "paper"])[0]
+        if mode not in (*event_history.MODES, "all"):
+            raise QueryError("mode must be paper, simulate, live or all")
+        limit = int(query_number(query, "max", CHART_DEFAULT_POINTS, *CHART_MAX_POINTS))
+        lo = (
+            0
+            if query.get("range") == ["all"]
+            else now - query_number(query, "range", 3600, 60, 86400 * 30)
+        )
+        lo = query_number(query, "from", lo, 0, now)
+        hi = query_number(query, "to", now, lo, now + 86400)
+        error = ""
+        try:
+            path = self.state_file.parent / "events/prices.jsonl"
+            stat = path.stat() if path.exists() else None
+            rows = self.remembered(
+                (
+                    "event_prices",
+                    stat.st_mtime_ns if stat else None,
+                    stat.st_size if stat else 0,
+                ),
+                lambda: event_history.read(path),
+            )
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            rows, error = (
+                [],
+                "Phase 2 price history is unreadable. Check runtime history diagnostics.",
+            )
+        invalidated = sum(not r.get("canonical", True) for r in rows)
+        if state.get("history_error"):
+            rows = []  # A failed canonical check must not leave a stale branch visible.
+        segments = event_history.segments(rows, mode, int(fee), lo, hi)
+        count = sum(map(len, segments))
+        # Divide the point budget across segments; never join across a missing interval.
+        visible = segments[-max(1, limit // 2) :]
+        budget = limit - 2 * len(visible)
+        thinned = []
+        for segment in visible:
+            allowance = 2 + int(budget * len(segment) / max(1, count))
+            thinned.append(
+                segment
+                if len(segment) <= allowance
+                else [segment[0], segment[-1]]
+                if allowance < 4
+                else downsample(segment, allowance)
+            )
+        latest = next(
+            (
+                r
+                for r in reversed(rows)
+                if r.get("canonical", True) and (mode == "all" or r["mode"] == mode)
+            ),
+            None,
+        )
+        return {
+            "now": now,
+            "from": lo,
+            "to": hi,
+            "retained_from": next(
+                (r["timestamp"] for r in rows if r.get("canonical", True)), None
+            ),
+            "invalidated_samples": invalidated,
+            "fee": int(fee),
+            "mode": mode,
+            "pool": event_history.IDENTITY["pools"][fee],
+            "unit": "f564 per fETH",
+            "segments": thinned,
+            "samples": count,
+            "latest": {
+                "timestamp": latest["timestamp"],
+                "price": latest["prices"][fee],
+                "block": latest["block"],
+            }
+            if latest
+            else None,
+            "stale": latest is None or not 0 <= now - latest["timestamp"] <= 30,
+            "error": error or state.get("history_error", ""),
+            "gap_seconds": event_history.GAP_SECONDS,
+            "omitted_segments": len(segments) - len(visible),
+        }
 
     def prices_view(self, query):
         # ------------------------------------
@@ -333,10 +501,15 @@ class Dashboard:
             chain = state.load(self.state_file)
         except ValueError:
             chain = None  # snapshot() reports it
-        return v3pool.scaled(
-            v3pool.current_profile(self.depth_file),
-            chain["depth_scale"] if chain else 1.0,
-        )
+        try:
+            return v3pool.scaled(
+                v3pool.current_profile(
+                    self.depth_file, expected=chain.get("market") if chain else None
+                ),
+                chain["depth_scale"] if chain else 1.0,
+            )
+        except (ValueError, OSError):
+            return None
 
     @staticmethod
     def depth_key(depth):
@@ -346,18 +519,28 @@ class Dashboard:
     def replayed(self, points, start, signature, cfg):
         # every strategy's replay under `cfg`, with warnings; cached per (prices, settings, depth)
         depth = self.pool_depth()
+        try:
+            chain = state.load(self.state_file) if self.state_file else None
+        except (ValueError, OSError):
+            chain = None
+        fee_pct = (
+            chain["market"]["fee"] / 10_000
+            if chain and chain.get("market")
+            else strategy.POOL_FEE_PCT
+        )
         key = (
             "rows",
             signature,
             json.dumps(strategy.to_dict(cfg), sort_keys=True),
             self.depth_key(depth),
+            fee_pct,
         )
 
         def make():
             window = [p for p in points if p[0] >= start]
             stats = compare.step_stats(window)
             rows = compare.compare(
-                points, cfg, start, self.cooldown, self.size, stats, depth
+                points, cfg, start, self.cooldown, self.size, stats, depth, fee_pct
             )
             return {"rows": rows, "steps": stats}
 
@@ -491,22 +674,46 @@ class Dashboard:
                 current = control.load(self.control_file)
                 paused, scan_request = current.paused, current.scan_request
                 liquidate_request = current.liquidate_request
+                event_values = {
+                    key: getattr(current, key) for key in control.EVENT_FIELDS
+                }
             except ValueError:
                 # A damaged file: the bot is still running on its last good settings, which may be
                 # paused. Fixing the file with the form must not lift that unseen, so it fails
                 # closed (paused; the button resumes). The request numbers need no care: a click
                 # always asks above whatever the bot served.
                 paused, scan_request, liquidate_request = True, 0, 0
+                event_values = {
+                    key: getattr(strategy.DEFAULT, key) for key in control.EVENT_FIELDS
+                }
             config = replace(
                 config,
                 paused=paused,
                 scan_request=scan_request,
                 liquidate_request=liquidate_request,
+                **event_values,
             )
             control.save(self.control_file, config)
         return strategy.to_dict(config)
 
-    COMMANDS: ClassVar[tuple] = ("pause", "resume", "scan", "liquidate")
+    COMMANDS: ClassVar[tuple] = (
+        "pause",
+        "resume",
+        "scan",
+        "liquidate",
+        "event_pause",
+        "event_resume",
+        "event_backrun_on",
+        "event_backrun_off",
+        "event_frontrun_on",
+        "event_frontrun_off",
+        "event_arbitrage_on",
+        "event_arbitrage_off",
+        "event_exit",
+        "event_scan",
+        "event_simulate",
+        "event_live",
+    )
 
     def command(self, raw):
         # ------------------------------------
@@ -531,7 +738,55 @@ class Dashboard:
         name = raw["command"]
         with self.write_lock:
             current = control.load(self.control_file)  # ValueError if damaged
-            if name == "scan":
+            if name in ("event_simulate", "event_live"):
+                changed = replace(
+                    current,
+                    event_paused=True,
+                    event_mode=name.removeprefix("event_"),
+                    event_mode_request=max(
+                        int(self.clock()), current.event_mode_request + 1
+                    ),
+                )
+            elif name == "event_resume":
+                value = event_store.dashboard_view(
+                    self.state_file.parent / "events/state.json", self.clock()
+                )
+                state = event_diagnostics.trading_controls(
+                    value,
+                    {key: getattr(current, key) for key in control.EVENT_FIELDS},
+                    "",
+                    self.clock(),
+                )
+                if state["start_block"]:
+                    raise ValueError(state["start_block"])
+                changed = replace(
+                    current,
+                    event_paused=False,
+                    event_start_request=max(
+                        int(self.clock()),
+                        current.event_start_request + 1,
+                        (value.get("start_floor") or 0) + 1,
+                    ),
+                )
+            elif name == "event_pause":
+                changed = replace(current, event_paused=True)
+            elif name in (
+                "event_backrun_on",
+                "event_backrun_off",
+                "event_frontrun_on",
+                "event_frontrun_off",
+                "event_arbitrage_on",
+                "event_arbitrage_off",
+            ):
+                key, value = name.rsplit("_", 1)
+                changed = replace(current, **{key: value == "on"})
+            elif name in ("event_scan", "event_exit"):
+                key = name + "_request"
+                values = {key: max(int(self.clock()), getattr(current, key) + 1)}
+                if name == "event_exit":
+                    values["event_paused"] = True
+                changed = replace(current, **values)
+            elif name == "scan":
                 # always above the last request (and so above what the bot served)
                 request = max(int(self.clock()), current.scan_request + 1)
                 changed = replace(current, scan_request=request)
@@ -545,6 +800,7 @@ class Dashboard:
             "paused": changed.paused,
             "scan_request": changed.scan_request,
             "liquidate_request": changed.liquidate_request,
+            **{key: getattr(changed, key) for key in control.EVENT_FIELDS},
         }
 
     def control_view(self, cfg):
@@ -624,6 +880,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # read-only data views that take a query string: path -> Dashboard method
     VIEWS: ClassVar[dict[str, str]] = {
+        "/api/event-activity": "event_activity_view",
+        "/api/event-prices": "event_prices_view",
         "/api/prices": "prices_view",
         "/api/trades": "trades_view",
         "/api/compare": "compare_view",
@@ -640,10 +898,15 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/", "/index.html"):
                 page = PAGE.read_bytes()
                 self.reply(200, page, "text/html; charset=utf-8", page_csp(page))
+            elif self.path == "/legacy":
+                page = LEGACY_PAGE.read_bytes()
+                self.reply(200, page, "text/html; charset=utf-8", page_csp(page))
+            elif self.path == "/api/events":
+                self.reply(200, self.app.events_view())
             elif self.path == "/api/status":
                 self.reply(200, self.app.snapshot())
             elif parts.path in self.VIEWS:
-                query = parse_qs(parts.query)
+                query = parse_qs(parts.query, keep_blank_values=True)
                 self.reply(200, getattr(self.app, self.VIEWS[parts.path])(query))
             else:
                 self.reply(404, {"error": "not found"})
@@ -719,7 +982,7 @@ def cli():
     # the same two numbers the bot uses, for the comparison's paper replay only
     app = Dashboard(
         dry_run,
-        cooldown=int(os.environ.get("COOLDOWN_SECONDS", "300")),
+        cooldown=int(os.environ.get("COOLDOWN_SECONDS", "60")),
         size=Decimal(os.environ.get("MAX_TRADE_AMOUNT", "1000")),
         depth_file=v3pool.LIVE_PROFILE_FILE,
     )

@@ -1,10 +1,11 @@
 from decimal import Decimal
 
 import pytest
+import requests
 from web3.exceptions import Web3RPCError
 
 import config
-import main
+import legacy_main as main
 import pool_monitor
 
 
@@ -43,11 +44,20 @@ def fake_clock(monkeypatch):
 
 def stub_responses(monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        config.Web3.HTTPProvider,
-        "make_request",
-        lambda self, method, params: calls.append(method) or {},
-    )
+
+    def send(self, req, **kwargs):
+        import json
+
+        payload = json.loads(req.body)
+        calls.append(payload["method"])
+        reply = requests.Response()
+        reply.status_code = 200
+        reply._content = json.dumps(
+            {"jsonrpc": "2.0", "id": payload["id"], "result": "0x1"}
+        ).encode()
+        return reply
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
     return calls
 
 
@@ -74,7 +84,7 @@ def test_provider_without_rate_never_sleeps(monkeypatch):
 
 def test_provider_takes_the_cap_from_env(monkeypatch):
     monkeypatch.setenv("MAX_RPC_PER_SECOND", "4")
-    assert config.rpc_provider("http://rpc.test")._interval == 0.25
+    assert config.rpc_provider("http://rpc.test").batch_size == 4
 
 
 # ---------------------------------------------------------------- failover

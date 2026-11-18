@@ -10,7 +10,7 @@ import ledger
 # ------------------------------------
 # Exact Uniswap V3 swap maths over the pool's real liquidity layout. Pure and offline: no web3, no
 # chain read, so the bot can ask "what does a buy of this size cost?" without a quote call. base =
-# token0, quote = token1; price = quote per base; amounts are human units (fETH, f564).
+# fETH, quote = f564; price = quote per base; amounts are human units (fETH, f564).
 #
 # The layout (pool_profile.json) is a snapshot of the pool as of 2026-11-04 (its "block"). If
 # liquidity providers add or pull liquidity the costs change, and reading the whole layout again
@@ -28,6 +28,7 @@ LIVE_PROFILE_FILE = Path(__file__).parent / "logs" / "pool_profile.json"
 TICK_BASE = 1.0001
 MAX_TICK = 887272
 FEE = 0.003
+LEGACY_POOL = "0x6a8bcbc98ff2485582049e67299fb16ad900728b"
 log = logging.getLogger("bot")
 
 
@@ -36,9 +37,13 @@ def check_profile(profile, where):
         profile
     ):
         raise ValueError(f"{where}: not a pool profile")
-    if profile["d0"] != profile["d1"] or profile["fee"] != round(FEE * 1e6):
+    if (
+        profile["d0"] != profile["d1"]
+        or type(profile["fee"]) is not int
+        or profile["fee"] not in (100, 500, 3000, 10000)
+    ):
         raise ValueError(
-            f"{where}: the pool profile does not match the maths (equal decimals, 0.3% fee)"
+            f"{where}: the pool profile does not match the maths (equal decimals, supported V3 fee)"
         )
     # (a damaged file with the right keys must be refused here, not crash a trade later: a tick
     # out of range or a huge net overflows the maths with an OverflowError, which nothing catches)
@@ -46,6 +51,7 @@ def check_profile(profile, where):
     request = profile.get("request", 0)
     if (
         type(profile["d0"]) is not int
+        or type(profile.get("base_is_token0", True)) is not bool
         or not 0 <= profile["d0"] <= 36
         or type(profile.get("block")) is not int
         or type(request) is not int
@@ -77,14 +83,33 @@ _live = {}  # path -> (file stamp, profile): read again only when the file chang
 _warned = set()  # (path, file stamp) of damaged files already reported
 
 
-def current_profile(live_file=LIVE_PROFILE_FILE):
+def matching_profile(profile, expected):
+    if expected is not None:
+        # Untagged historical snapshots belong only to Phase 1, never to the new tokens.
+        if "pool_address" not in profile:
+            if (
+                expected["pool_address"].lower() != LEGACY_POOL
+                or expected["fee"] != 3000
+                or not expected["base_is_token0"]
+            ):
+                raise ValueError(
+                    "No matching pool layout: request a fresh scan for this market"
+                )
+        elif any(profile.get(key) != value for key, value in expected.items()):
+            raise ValueError(
+                "Pool layout belongs to a different market; request a fresh scan"
+            )
+    return profile
+
+
+def current_profile(live_file=LIVE_PROFILE_FILE, expected=None):
     # The layout the bot scanned last, if there is a usable one; else the one that ships with the
     # code (the scanned file does not exist until the first scan; a damaged one is ignored, with
     # a warning once, since the dashboard would otherwise show a layout nobody scanned).
     try:
         stat = Path(live_file).stat()
     except OSError:
-        return load_profile()
+        return matching_profile(load_profile(), expected)
     # (a scan replaces the file, so the inode changes with every save)
     stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
     try:
@@ -92,14 +117,14 @@ def current_profile(live_file=LIVE_PROFILE_FILE):
         if cached is None or cached[0] != stamp:
             profile = check_profile(json.loads(Path(live_file).read_text()), live_file)
             cached = _live[live_file] = (stamp, profile)
-        return cached[1]
+        return matching_profile(cached[1], expected)
     except (OSError, ValueError) as e:
         if (live_file, stamp) not in _warned:
             _warned.add((live_file, stamp))
             log.warning(
                 "ignoring the scanned pool layout, using the shipped one: %s", e
             )
-        return load_profile()
+        return matching_profile(load_profile(), expected)
 
 
 def save_profile(path, profile):
@@ -127,7 +152,13 @@ def depth_scale(profile, price, live_liquidity):
 
 class V3Pool:
     def __init__(self, profile, price):
-        ticks = sorted(profile["ticks"], key=lambda t: t["tick"])
+        ticks = profile["ticks"]
+        if not profile.get("base_is_token0", True):
+            # Reflect the raw token1/token0 coordinate into f564/fETH: range endpoints
+            # swap roles, so liquidityNet changes sign as well as the tick.
+            ticks = [{"tick": -t["tick"], "net": -t["net"]} for t in ticks]
+        ticks = sorted(ticks, key=lambda t: t["tick"])
+        self.fee = profile["fee"] / 1_000_000
         scale = 10 ** profile["d0"]
         self.tick_sqrt = [TICK_BASE ** (t["tick"] / 2) for t in ticks]
         self.net = [t["net"] / scale for t in ticks]  # liquidity in human units
@@ -139,7 +170,7 @@ class V3Pool:
 
     def buy_with_quote(self, quote):
         # spend `quote` (fee included), receive base; the price rises
-        left, out = quote * (1 - FEE), 0.0
+        left, out = quote * (1 - self.fee), 0.0
         while left > 1e-18:
             nxt = self.tick_sqrt[self.i] if self.i < len(self.tick_sqrt) else math.inf
             room = self.L * (nxt - self.s)
@@ -159,7 +190,7 @@ class V3Pool:
 
     def sell_base(self, base):
         # sell `base` (fee included), receive quote; the price falls
-        left, out = base * (1 - FEE), 0.0
+        left, out = base * (1 - self.fee), 0.0
         while left > 1e-18:
             nxt = self.tick_sqrt[self.i - 1] if self.i > 0 else 0.0
             room = self.L * (1 / nxt - 1 / self.s) if nxt > 0 else math.inf

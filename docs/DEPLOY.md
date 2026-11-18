@@ -1,4 +1,52 @@
-# Deploying the bot contract, verifying it live, and running the bot 24/7 on Ubuntu 24.04
+# Running the bot on Ubuntu 24.04
+
+## Phase 2 on Ubuntu
+
+Complete [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md) first, through simulation. That guide owns contract deployment, verification, funding and owner actions. This section installs the same event service on a server; the legacy reference below is for `TradingBot` / `main.py`.
+
+1. Prepare Ubuntu and install `uv` using [server preparation](#13-prepare-the-ubuntu-server). Copy/clone the project using [code installation](#14-put-the-code-on-the-server), then run `uv sync --frozen --no-dev` in the project directory. Keep the checked-in `research/2026-11-17-phase2-arbitrage/snapshot.json`.
+2. For simulation/live, copy **the saved `build/Phase2TradingBot.artifact.json` from your deployed build** into `build/` on the server. Both git and the rsync example exclude it. Runtime reads its ABI and never compiles. Preserve the matching Standard JSON, plan and deployment record in your deployment backup, including any unresolved intent. Do not rebuild over them as part of a server move.
+3. Configure the server's `.env` privately with your HTTP/Alchemy endpoints and Phase 2 settings from the walkthrough. A configured vault starts in Simulation. Keep `DRY_RUN=true` until ready to enable live requests. If copying an existing configuration, preserve its operator identity and use `chmod 600 .env`. The owner's key stays in the owner's wallet.
+4. For an existing running installation, stop the source service and let any active operation finish before moving it. Transfer its complete `logs/` state while stopped, including event execution records, halt markers, scan acknowledgements and controls. Do not create an empty ledger on a second host while inventory or intent exists on the first. The shared sender lock is local to one checkout, not distributed across hosts.
+5. On upgrade, use **Stop Trading**, let any active operation finish and reconcile open inventory or intent. Stop and disable the old `trading-bot-events.service` if installed. Stop any existing `trading-bot.service` or foreground runner before replacing code or unit files. Verify both old services are inactive and keep the same checkout and `logs/`. Copy `deploy/trading-bot.service` and `deploy/trading-bot-dashboard.service` to `/etc/systemd/system/`. Replace `__USER__` and `__PROJECT_DIR__` in both. The default service now runs Phase 2 via `.venv/bin/python main.py`.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now trading-bot trading-bot-dashboard
+journalctl -u trading-bot -f
+```
+
+From your laptop:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 USER@SERVER
+```
+
+Open `http://127.0.0.1:8765` and check the active mode and health. **Scan Pool Liquidity** requests one pinned scan of both pools. Failed requests need another click. The dashboard stays loopback-only and writes `logs/control.json`.
+
+Configure `DRY_RUN=false` before launching a live-capable service. Changing environment settings requires restarting the bot. Switching between Simulation and Live from the dashboard takes effect in the running process. Entries pause on startup and after a switch. **Start Trading** enables them. **Stop Trading** leaves monitoring and recorded exits running. `EVENT_EXECUTION_MODE` is accepted for older configurations. Fresh starts use Simulation with a vault or Paper without one. Live recovery resumes a recorded position under the sender lock.
+
+All local live entry points share `operator_lock.sender()`: both services, manual swaps and deployments. Under the lock they check both halt markers and the other service's ledger. Manual commands require both ledgers flat; services may resume their own inventory through their normal ledger checks. An unreadable ledger or unresolved outcome requires reconciliation. Halt blocks exit cleanly without automatic systemd restart; unexpected bugs exit nonzero. Preserve `logs/events/` across restarts.
+
+HTTP status codes in the journal distinguish quota and access problems. A provider can serve the feed while a different provider rejects historical log reads. See [Phase 2 troubleshooting](GETTING_STARTED.md#phase-2-troubleshooting).
+
+Dashboard/portfolio upgrade: install the complete updated checkout, including `event_activity.py`, `event_observer.py`, `event_portfolio.py`, the history/diagnostic modules and both dashboard pages. No Solidity deployment or artifact rebuild is needed. Restart **both the bot and dashboard** using the handoff above, then reload the browser. This is an operator action; implementation/testing does not restart services. The page uses `/api/events`, `/api/event-prices` and `/api/event-activity`; every dashboard request reads local files only. Inline assets retain hash-based CSP and no third-party requests. `/legacy` remains separate.
+
+Preserve `logs/events/prices.jsonl`, `activity.json`, `portfolio.json`, all execution ledgers, scan acknowledgements and halt markers. Price history is bounded to 5 MB; activity history to 4,000 rows / 5 MB. New receipt records add pool legs, route, position identity, block time and gas metadata without resetting old records. Older trades may lack chart annotations or revert gas data. Realized P/L is explicitly retained-history performance (up to 200 ledger attempts), never lifetime. There is no established portfolio baseline or external-flow reconciliation; portfolio return remains unavailable.
+
+The diagnostic worker reuses accepted snapshot prices, fetched Swap logs, feed sender identities and confirmed receipts. At most one pass starts per 15 seconds and passes never overlap. Holdings need two pinned `balanceOf` calls, optional operator balance and a canonical hash check; when no recent snapshot is available, a header and primary `slot0` read supply the valuation. Activity adds anchor checks and at most four uncached transaction/block metadata lookups per pass; metadata enrichment defers while inventory is open. Provider middleware/retries may add HTTP attempts, all counted under **Portfolio and chart diagnostics**. Diagnostics share the provider throttle, with thread-safe pacing and failover selection, and never hold a transport lock while waiting for a response. They cannot initiate scans or sends. Failures retain last successful holdings and their timestamp, or withhold invalidated chart markers; damaged files are not overwritten automatically.
+
+Recovery checks all retained mined execution blocks once before applying the 64-block steady-state cutoff; an open position's entry block is always checked before exits, including when its trade row has been trimmed. Feed reconnects and failed verification reads require revalidation. Price recovery adds one retained-anchor header check when needed and preserves invalidated observations with `canonical=false` within the existing size bound. Higher-block scans cannot revive them. These recovery reads are separate from the 15-second background schedule. Holdings diagnostics continue while awaiting a scan; halted/failed runtimes do not schedule new passes. JSON-RPC quota/authentication failures back off without shrinking the catch-up range.
+
+After restart, verify the two primary buttons show the acknowledged mode and applied entry state, both charts render, and Portfolio identifies the correct contract/block. New recordings accumulate without backfill. Start remains a separate fresh operator request after mode acknowledgement. Use the [dashboard guide](GETTING_STARTED.md#phase-2-dashboard-operation) for chart navigation, marker attribution, accounting coverage and decision pagination. To verify the UI offline in a development checkout: `uv sync`, `uv run playwright install chromium`, then `make test-browser`; it uses temporary synthetic controls and an isolated browser.
+
+## Legacy deployment and polling reference
+
+Everything below describes the original polling installation (now `legacy_main.py`). For existing legacy recovery run `legacy_main.py` explicitly. The shipped `trading-bot.service` starts Phase 2. When retaining a legacy unit, its `ExecStart` must use `legacy_main.py`, and the Phase 2 service must be stopped.
+
+**Phase 2:** follow [PHASE2.md](PHASE2.md) for the complete environment block and migration procedure. Use Infura primary, Alchemy fallback, and the template's 5 requests/s cap per provider. The loop uses `POOL_ADDRESS` / `POOL_FEE` (0.05%, `500`); `SECONDARY_POOL_ADDRESS` / `SECONDARY_POOL_FEE` (1%, `10000`) enable explicit read-only comparisons. Both new token addresses must match the pool. `config.py --all-pools f564 1000` compares quotes at one block; `live_check.py` checks both pools. Strategy prices and P/L stay in f564 regardless of token order. Portfolio return in f564 is the competition objective.
+
+Existing vaults require owner updates to both new token caps and both fee permissions, plus Phase 2 registration/funding; editing `.env` cannot do this. No Solidity change is needed. New deploys use the configured fees. Stop services, reconcile old positions and archive existing `logs/` before migration: startup refuses untagged records or a different `logs/market.json` identity. The shipped Phase 1 profile is refused for Phase 2 risk sizing. Keep risk sizing and fast polling off initially. A requested Phase 2 narrow-pool scan takes roughly 700 bitmap reads plus initialized ticks (several minutes), superseding the Phase 1 scan estimates below. Without a matching scan, dashboard impact estimates are explicitly marked as based on Phase 1.
 
 Testnet (Sepolia) only. The RPC provider is Infura or Alchemy — either works, only `RPC_URL` differs.
 
@@ -29,7 +77,7 @@ Three parties. Keep them straight and everything else follows.
 The owner and the bot wallet must be **different** wallets (the deploy script refuses otherwise). There is no separate "wallet address" setting: the bot wallet's address is computed from `PRIVATE_KEY`.
 
 - **Why a contract?** The platform scores a "bot contract" linked to your enrolled wallet. The contract proves the link with `owner()`, which returns your enrolled wallet.
-- **Why a separate bot wallet?** Its key sits in a file on an unattended server. If it leaks the damage should be small: it can only call `swap()`, only for f564/fETH, only on fee tier 3000, and only up to `MAX_TRADE_AMOUNT` per swap. It cannot withdraw.
+- **Why a separate bot wallet?** Its key sits in a file on an unattended server. If it leaks the damage should be small: it can only call `swap()`, only for allowed tokens and configured fee tiers (Phase 2: 500 and 10000), and only up to each token's on-chain cap. It cannot withdraw.
 - **Who pays gas?** Whoever sends the transaction. The bot wallet sends the swaps, so **it** needs Sepolia ETH. The contract needs no ETH.
 - **What does the contract do on its own?** Nothing. A contract only runs when called, and receiving tokens triggers no code. `main.py` decides when to trade; the contract is the vault and executor it calls.
 - **What runs where?** The server runs `main.py` under systemd. The owner acts only from MetaMask on your own computer. The owner key never touches the server.
@@ -182,6 +230,8 @@ PY
 
 ## 2. Deploy the contract
 
+This section deploys the original single-swap `TradingBot`. For the current contract, follow [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md), then [Phase 2 on Ubuntu](#phase-2-on-ubuntu). The old `main.py` swap interface is incompatible with Phase2TradingBot. Runtime and recovery details for the event service are in [EVENT_STRATEGIES](EVENT_STRATEGIES.md).
+
 ### 2.1 Where to run it
 
 Deploying compiles the contract with `solc 0.8.27`, which `py-solc-x` downloads on first use. Check the server's CPU:
@@ -211,7 +261,7 @@ What happens, in order:
    Deployer / operator: 0xBOT…WALLET        <- the bot wallet
    Owner:               0xOWNER…ADDR        <- your enrolled wallet
    Router:              0x3bFA…e48E
-   Allowed fee tiers:   [3000]
+   Allowed fee tiers:   [500, 10000]
    Allowed token:       0xfd84…D5B8 (cap per swap: 10000000000000000)
    Allowed token:       0x1967…EF11 (cap per swap: 10000000000000000)
    Deployer ETH:        0.05
@@ -238,7 +288,7 @@ python bot_contract.py status
 | `owner()` | your enrolled wallet |
 | `operator()` | the bot wallet |
 | `pending:` | `0x000…000` (no ownership transfer in progress) |
-| `fee 3000 allowed:` | `True` |
+| `fee 500 allowed:`, `fee 10000 allowed:` | `True` for both configured Phase 2 pools |
 | each token's `cap per swap` | your `MAX_TRADE_AMOUNT` |
 | last line | no `WARNING` |
 
@@ -313,7 +363,7 @@ Each asks the real Uniswap quoter for a price, then simulates the swap through y
 ### 2.10 Run the bot loop for a few ticks (dry run)
 
 ```bash
-python main.py --ticks 3
+python legacy_main.py --ticks 3
 ```
 
 This runs the real bot loop three times against your real contract and exits by itself. Expect `Started. … dry_run=True`, three `price=… decision=hold …` lines, then `Stopped.`. It proves the RPC reads, the contract balances, the operator check and the logging all work. `decision=hold` is correct here: the strategy needs 20 samples. The bot wallet must show **no** new transactions on Etherscan.
@@ -343,7 +393,7 @@ Send the printed calldata from your **enrolled wallet** in MetaMask (section 5),
 |---|---|
 | `live_check.py`: 0 failed, every WARN understood | 2.8 |
 | quote and simulated swap work in both directions | 2.9 |
-| `main.py --ticks 3` reads the chain and sends nothing | 2.10 |
+| `legacy_main.py --ticks 3` with `DRY_RUN=true` | 2.10 |
 | live swaps move the vault's balances the right way | 2.11 |
 | the enrolled wallet receives a withdrawal | 2.12 |
 | the platform accepts the contract on the form (and you've asked them whether its trades count) | 2.6 |
@@ -381,7 +431,7 @@ A halted bot exits with status 0 on purpose, so systemd does **not** restart it.
 
 ```bash
 # .env: DRY_RUN=true
-python main.py
+python legacy_main.py
 ```
 
 Healthy output:
@@ -414,9 +464,9 @@ No. The bot is already a loop that sleeps between checks (`Runner.run` in `main.
 
 | How | Survives closing SSH | Restarts after a crash | Starts after a reboot |
 |---|---|---|---|
-| `python main.py` in a terminal | no | no | no |
+| `python legacy_main.py` in a terminal | no | no | no |
 | `tmux` (or `screen`) | yes | no | no |
-| `nohup python main.py &` | yes | no | no |
+| `nohup python legacy_main.py &` | yes | no | no |
 | **systemd** (already on Ubuntu 24.04) | yes | yes | yes |
 
 - **Short runs and testing: use tmux.** It is the simplest and is enough while you are still watching the bot:
@@ -424,7 +474,7 @@ No. The bot is already a loop that sleeps between checks (`Runner.run` in `main.
   ```bash
   sudo apt install -y tmux
   tmux new -s bot
-  cd ~/bot && source .venv/bin/activate && python main.py
+  cd ~/bot && source .venv/bin/activate && python legacy_main.py
   # detach with Ctrl+b then d; come back with: tmux attach -t bot
   # stop it: attach, then Ctrl+C (it finishes the current tick and exits)
   ```
@@ -440,6 +490,7 @@ As your admin user (not `tradingbot`):
 ```bash
 sed -e 's|__USER__|tradingbot|' \
     -e 's|__PROJECT_DIR__|/home/tradingbot/bot|' \
+    -e 's|python main.py|python legacy_main.py|' \
     /home/tradingbot/bot/deploy/trading-bot.service \
   | sudo tee /etc/systemd/system/trading-bot.service >/dev/null
 
@@ -447,7 +498,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now trading-bot       # start now and at every boot
 ```
 
-The unit runs `/home/tradingbot/bot/.venv/bin/python main.py` directly, so a restart needs no network and never re-syncs packages.
+This legacy-only substitution runs `/home/tradingbot/bot/.venv/bin/python legacy_main.py` directly. Use the Phase 2 installation at the top of this page for the event service.
 
 > The systemd unit has not been run end to end on a real Ubuntu server. Do the first run with `DRY_RUN=true` and check `systemctl status` and the log before going live.
 

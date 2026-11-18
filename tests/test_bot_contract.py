@@ -455,7 +455,10 @@ def test_print_calldata_encodes_owner_call(env, capsys):
 @pytest.fixture
 def cli(env, monkeypatch, capsys):
     # point the CLI helpers at the in-memory chain instead of Sepolia
-    monkeypatch.setattr(bot_contract, "connect", lambda: (env.w3, None))
+    monkeypatch.setattr(bot_contract, "connect_read_only", lambda: env.w3)
+    monkeypatch.setattr(
+        bot_contract, "connect", lambda: pytest.fail("read-only command loaded signer")
+    )
     monkeypatch.setattr(bot_contract, "load_bot", lambda w3, address: env.bot)
     monkeypatch.setenv("BOT_CONTRACT_ADDRESS", env.bot.address)
     monkeypatch.setenv("F564_ADDRESS", env.a.address)
@@ -494,3 +497,5 @@ def test_generic_calldata_parses_each_argument_type(env, cli):
         bot_contract.cmd_calldata("nope", [])
     with pytest.raises(SystemExit, match="wrong number"):
         bot_contract.cmd_calldata("setFeeAllowed", ["500"])
+    with pytest.raises(SystemExit, match="Boolean"):
+        bot_contract.cmd_calldata("setFeeAllowed", ["500", "treu"])

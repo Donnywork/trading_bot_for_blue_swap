@@ -5,11 +5,14 @@ from decimal import Decimal
 from pathlib import Path
 
 import solcx
-from dotenv import load_dotenv
 from web3 import Web3
 from web3.exceptions import TimeExhausted, Web3Exception
 
 import config
+import ledger
+import operator_lock
+from runtime import error_summary
+from runtime import load_environment as load_dotenv
 
 ROOT = Path(__file__).parent
 SOLC_VERSION = "0.8.27"
@@ -25,7 +28,6 @@ GAS_BUFFER = 1.2  # headroom over the estimate for deploys and other owner trans
 # they then needed 21 to 38% more than estimated; with twice the limit all four succeed. Gas that
 # is not used is refunded, so a generous limit costs nothing on the gas actually burnt.
 SWAP_GAS_BUFFER = 2.0
-FEE_TIERS = [3000]  # the only pool fee tier the bot trades
 
 
 class NotSent(Exception):
@@ -120,6 +122,14 @@ def validate_owner(owner, bot_wallet):
     return owner
 
 
+class Reverted(RuntimeError):
+    """A definite mined revert; retain its public receipt for gas accounting."""
+
+    def __init__(self, tx_id, receipt):
+        super().__init__(f"Transaction reverted: {tx_id}")
+        self.receipt = receipt
+
+
 def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER):
     # ------------------------------------
     # Fill nonce/gas/fees, sign, send, wait for the receipt. The gas limit is the estimate times
@@ -145,30 +155,30 @@ def send_tx(w3, account, tx, gas_buffer=GAS_BUFFER):
             base = w3.eth.get_block("latest")["baseFeePerGas"]
             tx["maxPriorityFeePerGas"] = priority
             tx["maxFeePerGas"] = base * 2 + priority
-    except OSError as e:
+        signed = account.sign_transaction(tx)
+    except (OSError, Web3Exception, ValueError, TypeError) as e:
         raise NotSent(f"could not prepare the transaction: {e}") from e
 
-    signed = account.sign_transaction(tx)
     try:
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-    except (
-        OSError
-    ) as e:  # the request may have reached the node before the connection broke
-        raise SentUnknown(f"connection error while sending: {e}") from e
-    print("Tx sent:", tx_hash.to_0x_hex())
+    except Exception as e:
+        # Even 'nonce too low' / 'already known' can mean these bytes landed elsewhere.
+        raise SentUnknown(
+            "broadcast outcome unknown; reconcile the operator nonce"
+        ) from e
+    tx_id = "transaction"
     try:
+        tx_id = tx_hash.to_0x_hex()
+        print("Tx sent:", tx_id)
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        if receipt["status"] not in (0, 1):
+            raise ValueError("invalid receipt status")
     except TimeExhausted:
         raise
-    except (
-        OSError,
-        Web3Exception,
-    ) as e:  # it is on its way; we just cannot see how it ended
-        raise SentUnknown(
-            f"sent {tx_hash.to_0x_hex()} but reading its receipt failed: {e}"
-        ) from e
+    except Exception as e:
+        raise SentUnknown(f"sent {tx_id} but its receipt could not be verified") from e
     if receipt["status"] != 1:
-        raise RuntimeError(f"Transaction reverted: {tx_hash.to_0x_hex()}")
+        raise Reverted(tx_id, receipt)
     return receipt
 
 
@@ -200,7 +210,11 @@ def load_bot(w3, address):
     if not w3.eth.get_code(address):
         raise SystemExit(f"No contract at {address}: check BOT_CONTRACT_ADDRESS")
     # the ABI saved at deploy time matches the deployed bytecode even if the source changed
-    abi = json.loads(ABI_PATH.read_text()) if ABI_PATH.exists() else compile_bot()[0]
+    if not ABI_PATH.is_file():
+        raise FileNotFoundError(
+            "abis/trading_bot.json is required; restore the deployed ABI"
+        )
+    abi = json.loads(ABI_PATH.read_text())
     return w3.eth.contract(address=address, abi=abi)
 
 
@@ -272,7 +286,14 @@ def vault_tokens(w3, bot):
 
 
 def cmd_deploy():
+    with operator_lock.sender(ledger.LOG_DIR, "manual"):
+        _deploy_command()
+
+
+def _deploy_command():
     w3, account = connect()
+    fees = [fee for _, fee in config.configured_pools()]
+    config.market_tokens()
 
     if os.environ.get("BOT_CONTRACT_ADDRESS"):
         raise SystemExit(
@@ -292,7 +313,7 @@ def cmd_deploy():
     print("Deployer / operator:", account.address)
     print("Owner:              ", owner)
     print("Router:             ", router)
-    print("Allowed fee tiers:  ", FEE_TIERS)
+    print("Allowed fee tiers:  ", fees)
     for token_address, cap in caps.items():
         print(f"Allowed token:       {token_address} (cap per swap: {cap})")
     eth = Web3.from_wei(w3.eth.get_balance(account.address), "ether")
@@ -303,7 +324,7 @@ def cmd_deploy():
         raise SystemExit("aborted")
 
     address, abi, ctor_args = deploy_bot(
-        w3, account, owner, router, account.address, caps, FEE_TIERS
+        w3, account, owner, router, account.address, caps, fees
     )
 
     print("\nDeployed TradingBot at:", address)
@@ -329,7 +350,7 @@ def cmd_verify_input():
 
 
 def cmd_status():
-    w3, account = connect()
+    w3 = connect_read_only()
     bot = load_bot(w3, os.environ["BOT_CONTRACT_ADDRESS"])
 
     operator = bot.functions.operator().call()
@@ -339,15 +360,13 @@ def cmd_status():
     print("operator():", operator)
     print("router():  ", bot.functions.router().call())
     print("ETH:       ", Web3.from_wei(w3.eth.get_balance(bot.address), "ether"))
-    for fee in FEE_TIERS:
+    for _, fee in config.configured_pools():
         print(f"fee {fee} allowed:", bot.functions.feeAllowed(fee).call())
     for sym, _, bal, cap in vault_tokens(w3, bot):
         print(f"{sym}:".ljust(11), bal, f"(cap per swap: {cap})")
 
-    eth = Web3.from_wei(w3.eth.get_balance(account.address), "ether")
+    eth = Web3.from_wei(w3.eth.get_balance(operator), "ether")
     print("\nOperator ETH (pays gas):", eth)
-    if account.address != operator:
-        print("WARNING: PRIVATE_KEY is not the contract's operator: swaps will revert")
 
 
 def print_calldata(bot, fn_name, args):
@@ -367,7 +386,7 @@ def cmd_withdraw_calldata(token, amount):
     # `token` is fETH, f564 or an address; `amount` is human units or "all".
     # ------------------------------------
 
-    w3, _ = connect()
+    w3 = connect_read_only()
     bot = load_bot(w3, os.environ["BOT_CONTRACT_ADDRESS"])
     known = {"feth": os.environ["FETH_ADDRESS"], "f564": os.environ["F564_ADDRESS"]}
     address = Web3.to_checksum_address(known.get(token.lower(), token))
@@ -387,7 +406,7 @@ def cmd_withdraw_calldata(token, amount):
 def cmd_calldata(fn_name, values):
     # generic owner-function calldata, e.g. `calldata setTokenCap 0xTOKEN 1000000000000000000`
     # (raw on-chain values, no unit conversion)
-    w3, _ = connect()
+    w3 = connect_read_only()
     bot = load_bot(w3, os.environ["BOT_CONTRACT_ADDRESS"])
     abi = next(
         (x for x in bot.abi if x["type"] == "function" and x["name"] == fn_name), None
@@ -402,6 +421,8 @@ def cmd_calldata(fn_name, values):
         elif spec["type"].startswith("uint"):
             args.append(int(value))
         elif spec["type"] == "bool":
+            if value.lower() not in ("true", "false"):
+                raise SystemExit("Boolean argument must be true or false")
             args.append(value.lower() == "true")
         else:
             raise SystemExit(f"Unsupported argument type {spec['type']}")
@@ -409,6 +430,12 @@ def cmd_calldata(fn_name, values):
 
 
 def cmd_swap(token_in, amount):
+    live = os.environ.get("DRY_RUN", "true").lower() == "false"
+    with operator_lock.sender(ledger.LOG_DIR, "manual", live=live):
+        _swap_command(token_in, amount)
+
+
+def _swap_command(token_in, amount):
     # cheap checks first: no compile or RPC work for an amount we would refuse anyway
     max_trade = Decimal(os.environ["MAX_TRADE_AMOUNT"])
     if not Decimal(amount).is_finite() or Decimal(amount) > max_trade:
@@ -447,14 +474,15 @@ USAGE = (
 
 
 def main():
-    load_dotenv()
     args = sys.argv[1:]
+    if args == ["verify-input"]:
+        cmd_verify_input()
+        return
+    load_dotenv()
     if args == ["deploy"]:
         cmd_deploy()
     elif args == ["status"]:
         cmd_status()
-    elif args == ["verify-input"]:
-        cmd_verify_input()
     elif len(args) == 3 and args[0] == "swap":
         cmd_swap(args[1], args[2])
     elif len(args) == 3 and args[0] == "withdraw-calldata":
@@ -466,4 +494,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001 — CLI boundary must not print provider bodies
+        print(f"Contract command failed: {error_summary(exc)}", file=sys.stderr)
+        raise SystemExit(1) from None

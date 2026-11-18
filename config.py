@@ -2,14 +2,19 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from decimal import Decimal, InvalidOperation
+from itertools import batched
 from pathlib import Path
 
-from dotenv import load_dotenv
+import requests
 from web3 import Web3
 from web3.exceptions import Web3Exception
 from web3.providers import BaseProvider
+
+from runtime import error_kind, rejected_log_range
+from runtime import load_environment as load_dotenv
 
 log = logging.getLogger("bot")
 
@@ -29,6 +34,52 @@ with open(ROOT / "abis/quoter.json", "r") as f:
 
 SLIPPAGE_BPS = 100  # 1%
 MAX_PRICE_IMPACT_PCT = Decimal(2)
+SUPPORTED_FEES = (100, 500, 3000, 10000)
+
+
+def configured_pools():
+    # The primary is the loop's execution pool; the secondary is for explicit research reads.
+    pools = []
+    for prefix, default_fee in (("POOL", 500), ("SECONDARY_POOL", 10000)):
+        raw = os.environ.get(f"{prefix}_ADDRESS", "").strip()
+        if not raw and prefix == "SECONDARY_POOL":
+            continue
+        if not Web3.is_address(raw) or int(raw, 16) == 0:
+            raise ValueError(f"{prefix}_ADDRESS must be a nonzero Ethereum address")
+        try:
+            fee = int(os.environ.get(f"{prefix}_FEE", str(default_fee)))
+        except ValueError:
+            raise ValueError(
+                f"{prefix}_FEE must be a supported integer fee tier"
+            ) from None
+        if fee not in SUPPORTED_FEES:
+            raise ValueError(f"{prefix}_FEE must be one of {SUPPORTED_FEES}")
+        pools.append((Web3.to_checksum_address(raw), fee))
+    if len({p[0] for p in pools}) != len(pools) or len({p[1] for p in pools}) != len(
+        pools
+    ):
+        raise ValueError(
+            "Primary and secondary pools must have different addresses and fees"
+        )
+    return pools
+
+
+def market_tokens():
+    tokens = {}
+    for symbol in ("feth", "f564"):
+        name = f"{symbol.upper()}_ADDRESS"
+        raw = os.environ.get(name, "")
+        if not Web3.is_address(raw) or int(raw, 16) == 0:
+            raise ValueError(f"{name} must be a nonzero Ethereum address")
+        tokens[symbol] = Web3.to_checksum_address(raw)
+    if tokens["feth"] == tokens["f564"]:
+        raise ValueError("FETH_ADDRESS and F564_ADDRESS must differ")
+    return tokens
+
+
+def quote_per_base(sqrt_price_x96, decimals0, decimals1, base_is_token0):
+    price = (sqrt_price_x96 / 2**96) ** 2 * 10 ** (decimals0 - decimals1)
+    return price if base_is_token0 else 1 / price
 
 
 def rpc_rate():
@@ -60,25 +111,89 @@ def fallback_urls():
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+class RpcAdapter(requests.adapters.HTTPAdapter):
+    """Pace and count every HTTP attempt, underneath Web3's cache and retry loop."""
+
+    def __init__(self, rate, metrics):
+        super().__init__(max_retries=0)
+        self.interval = float(1 / rate) if rate else 0.0
+        self.metrics = metrics
+        self.next_at = 0.0
+        self.pacing_lock = threading.Lock()
+
+    def send(self, request, **kwargs):
+        if request.method != "POST":
+            return super().send(request, **kwargs)
+        body = request.body
+        batch = body.startswith(b"[")
+        count = len(json.loads(body)) if batch else 1
+        # Diagnostic reads share the quota with execution. Lock only pacing;
+        # a slow diagnostic HTTP response must never hold the execution thread.
+        with self.pacing_lock:
+            now = time.monotonic()
+            wait = self.next_at - now
+            if self.interval and count > 1 and self.next_at:
+                # Start a fresh quota window for a batch, including after scalar reads.
+                wait = max(wait, self.last_at + 1 - now)
+            if wait > 0:
+                time.sleep(wait)
+            self.last_at = time.monotonic()
+            self.next_at = self.last_at + (
+                1 if count > 1 and self.interval else self.interval
+            )
+        if self.metrics is not None:
+            self.metrics.attempt(
+                count, method=None if batch else json.loads(body)["method"]
+            )
+        return super().send(request, **kwargs)
+
+
 class ThrottledProvider(Web3.HTTPProvider):
     # ------------------------------------
     # HTTPProvider that spaces the bot's JSON-RPC calls so they never exceed
     # MAX_RPC_PER_SECOND: without it a burst is possible (the depth scan fires about 120
-    # reads back to back, though already DEPTH_CALL_PAUSE apart). Every call comes from the
-    # one bot thread, so a next-free time is enough; `rate` None means no throttling.
+    # reads back to back, though already DEPTH_CALL_PAUSE apart). The pacing adapter
+    # is shared by execution and background diagnostics; None means no throttling.
     # ------------------------------------
 
-    def __init__(self, url, rate=None, **kwargs):
-        super().__init__(url, **kwargs)
-        self._interval = float(1 / rate) if rate else 0.0
-        self._next_at = 0.0
+    def __init__(self, url, rate=None, metrics=None, **kwargs):
+        session = requests.Session()
+        adapter = RpcAdapter(rate, metrics)
+        for scheme in ("http://", "https://"):
+            session.mount(scheme, adapter)
+        super().__init__(url, session=session, **kwargs)
+        self.batch_size = min(20, max(1, int(rate))) if rate else 20
 
-    def make_request(self, method, params):
-        wait = self._next_at - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        self._next_at = time.monotonic() + self._interval
-        return super().make_request(method, params)
+    def depth_calls(self, params):
+        # All items are read-only, numeric-block eth_calls. Match IDs explicitly.
+        if not 1 <= len(params) <= self.batch_size:
+            raise ValueError("liquidity batch exceeds provider limit")
+        payload = [
+            {"jsonrpc": "2.0", "id": i, "method": "eth_call", "params": p}
+            for i, p in enumerate(params)
+        ]
+        reply = json.loads(
+            self._request_session_manager.make_post_request(
+                self.endpoint_uri,
+                json.dumps(payload).encode(),
+                **self.get_request_kwargs(),
+            )
+        )
+        if not isinstance(reply, list) or len(reply) != len(params):
+            raise ValueError("incomplete liquidity batch")
+        if any(
+            not isinstance(r, dict) or type(r.get("id")) is not int or "error" in r
+            for r in reply
+        ):
+            raise ValueError("invalid liquidity batch response")
+        results = {r["id"]: r.get("result") for r in reply}
+        if set(results) != set(range(len(params))) or not all(
+            isinstance(v, str) for v in results.values()
+        ):
+            raise ValueError("invalid liquidity batch response")
+        return [
+            bytes.fromhex(results[i].removeprefix("0x")) for i in range(len(params))
+        ]
 
 
 class FailoverProvider(BaseProvider):
@@ -102,6 +217,7 @@ class FailoverProvider(BaseProvider):
         self._cooldown = cooldown
         self._active = 0
         self._until = [0.0] * len(providers)
+        self._selection_lock = threading.Lock()
 
     def __str__(self):
         return f"failover over {len(self._providers)} RPC providers"
@@ -118,29 +234,54 @@ class FailoverProvider(BaseProvider):
         return min(order, key=lambda i: self._until[i])
 
     def make_request(self, method, params):
+        return self._request(
+            method, lambda provider: provider.make_request(method, params)
+        )
+
+    @property
+    def batch_size(self):
+        return min(p.batch_size for p in self._providers)
+
+    def depth_calls(self, params):
+        return self._request(
+            "eth_call batch", lambda provider: provider.depth_calls(params)
+        )
+
+    def _request(self, method, send):
         failures = 0
+        range_error = None
         while True:
+            with self._selection_lock:
+                selected = self._active
             try:
-                return self._providers[self._active].make_request(method, params)
+                return send(self._providers[selected])
             except (OSError, Web3Exception) as e:
                 if failures >= len(self._providers) - 1:
+                    if range_error is not None and range_error is not e:
+                        # Preserve both outcomes: the last provider may be rate-limited
+                        # while an earlier provider could serve a narrower log range.
+                        raise e from range_error
                     raise  # every provider has refused: nothing left to try
+                if method == "eth_getLogs" and rejected_log_range(e):
+                    range_error = e
                 failures += 1
                 log.warning(
                     "rpc provider %d/%d failed on %s (%s); trying the next one",
-                    self._active + 1,
+                    selected + 1,
                     len(self._providers),
                     method,
-                    type(e).__name__,
+                    error_kind(e),
                 )
-                self._until[self._active] = time.monotonic() + self._cooldown
-                self._active = self._pick_next()
+                with self._selection_lock:
+                    self._until[selected] = time.monotonic() + self._cooldown
+                    if self._active == selected:
+                        self._active = self._pick_next()
 
     def is_connected(self, show_traceback=False):
         return any(p.is_connected() for p in self._providers)
 
 
-def rpc_provider(url):
+def rpc_provider(url, metrics=None):
     # ------------------------------------
     # The provider every connection goes through (load_market below and
     # bot_contract.connect_read_only), so the cap and the failover cover the loop and
@@ -149,7 +290,9 @@ def rpc_provider(url):
     # MAX_RPC_PER_SECOND cap, so each key is paced separately.
     # ------------------------------------
 
-    providers = [ThrottledProvider(u, rpc_rate()) for u in [url] + fallback_urls()]
+    providers = [
+        ThrottledProvider(u, rpc_rate(), metrics) for u in [url] + fallback_urls()
+    ]
     if len(providers) == 1:
         return providers[0]
     return FailoverProvider(providers)
@@ -223,7 +366,9 @@ MIN_TICK, MAX_TICK = -887272, 887272
 DEPTH_TOLERANCE = 0.01
 
 
-def read_depth(pool, decimals0, decimals1, block, pause=0.0, stop=None):
+def read_depth(
+    pool, decimals0, decimals1, block, pause=0.0, stop=None, *, batch_provider=None
+):
     # ------------------------------------
     # The pool's whole liquidity layout: every initialised tick and its net liquidity (the input of
     # v3pool). Read-only eth_calls, about 120 of them (one per 256 ticks, one per initialised
@@ -233,25 +378,53 @@ def read_depth(pool, decimals0, decimals1, block, pause=0.0, stop=None):
     # reading it takes 30 to 40 s.
     # ------------------------------------
 
-    def ask(call):
+    def check_stop():
         if (
             stop is not None and stop()
         ):  # a stop signal: give up, the scan is only a read
             raise InterruptedError("stopped while reading the pool's layout")
-        time.sleep(pause)
+
+    def ask(call):
+        check_stop()
+        if pause:
+            time.sleep(pause)
         return call.call(block_identifier=block)
+
+    def read_many(name, keys):
+        size = batch_provider.batch_size if batch_provider else 1
+        for group in batched(keys, size):
+            check_stop()
+            fn = getattr(pool.functions, name)
+            if size == 1:
+                yield group[0], ask(fn(group[0]))
+                continue
+            params = [
+                [
+                    {"to": pool.address, "data": pool.encode_abi(name, args=[k])},
+                    hex(block),
+                ]
+                for k in group
+            ]
+            outputs = [o["type"] for o in fn.abi["outputs"]]
+            for key, data in zip(
+                group, batch_provider.depth_calls(params), strict=True
+            ):
+                values = pool.w3.codec.decode(outputs, data)
+                yield key, values[0] if len(values) == 1 else values
 
     spacing = ask(pool.functions.tickSpacing())
     sqrt_price_x96, current_tick, *_ = ask(pool.functions.slot0())
     liquidity = ask(pool.functions.liquidity())
     ticks = []
-    for word in range((MIN_TICK // spacing) >> 8, ((MAX_TICK // spacing) >> 8) + 1):
-        bits = ask(pool.functions.tickBitmap(word))
-        for bit in range(256):
-            if bits >> bit & 1:
-                tick = (word * 256 + bit) * spacing
-                gross, net, *_ = ask(pool.functions.ticks(tick))
-                ticks.append({"tick": tick, "gross": gross, "net": net})
+    words = range((MIN_TICK // spacing) >> 8, ((MAX_TICK // spacing) >> 8) + 1)
+    initialized = [
+        (word * 256 + bit) * spacing
+        for word, bits in read_many("tickBitmap", words)
+        for bit in range(256)
+        if bits >> bit & 1
+    ]
+    for tick, (gross, net, *_) in read_many("ticks", initialized):
+        ticks.append({"tick": tick, "gross": gross, "net": net})
     active = sum(t["net"] for t in ticks if t["tick"] <= current_tick)
     if abs(active - liquidity) > DEPTH_TOLERANCE * liquidity:
         raise ValueError(
@@ -271,7 +444,7 @@ def read_depth(pool, decimals0, decimals1, block, pause=0.0, stop=None):
     }
 
 
-def quote_swap(quoter, token_in, token_out, fee, amount_in):
+def quote_swap(quoter, token_in, token_out, fee, amount_in, block_identifier="latest"):
     # ------------------------------------
     # Quote (read-only): .call(), never a transaction
     # ------------------------------------
@@ -285,24 +458,28 @@ def quote_swap(quoter, token_in, token_out, fee, amount_in):
                 fee,
                 0,  # sqrtPriceLimitX96 = 0: no price limit
             )
-        ).call()
+        ).call(block_identifier=block_identifier)
     )
 
     return amount_out, ticks_crossed, gas_estimate
 
 
-def load_market():
+def load_market(pool_index=0, w3=None):
     # ------------------------------------
     # Connect and gather everything get_quote() needs
     # ------------------------------------
 
     load_dotenv()
     RPC_URL = os.environ["RPC_URL"]
-    POOL_ADDRESS = os.environ["POOL_ADDRESS"]
+    pools = configured_pools()
+    if not 0 <= pool_index < len(pools):
+        raise ValueError("SECONDARY_POOL_ADDRESS is not configured")
+    POOL_ADDRESS, expected_fee = pools[pool_index]
+    expected_tokens = market_tokens()
     ROUTER_ADDRESS = os.environ["ROUTER_ADDRESS"]
     QUOTER_ADDRESS = os.environ["QUOTER_ADDRESS"]
 
-    w3 = Web3(rpc_provider(RPC_URL))
+    w3 = w3 or Web3(rpc_provider(RPC_URL))
 
     if not w3.is_connected():
         raise ConnectionError("Failed to connect to Ethereum RPC")
@@ -340,8 +517,12 @@ def load_market():
     print("Tick spacing:", tick_spacing)
     print("Liquidity:", liquidity)
 
-    if fee != 3000:
-        raise ValueError(f"Unexpected fee tier: {fee}")
+    if fee != expected_fee:
+        raise ValueError(f"Pool fee {fee} does not match configured fee {expected_fee}")
+    if {token0_address.lower(), token1_address.lower()} != {
+        address.lower() for address in expected_tokens.values()
+    }:
+        raise ValueError("Pool tokens do not match FETH_ADDRESS / F564_ADDRESS")
 
     if liquidity == 0:
         raise ValueError("Pool has zero in-range liquidity: not usable")
@@ -357,18 +538,22 @@ def load_market():
 
     read_price(pool, decimals0, decimals1)
 
+    by_address = {
+        token0_address.lower(): (token0_address, decimals0, symbol0),
+        token1_address.lower(): (token1_address, decimals1, symbol1),
+    }
     return {
+        "w3": w3,
         "pool": pool,
         "quoter": quoter,
         "fee": fee,
         "tokens": {
-            symbol0.lower(): (token0_address, decimals0, symbol0),
-            symbol1.lower(): (token1_address, decimals1, symbol1),
+            key: by_address[address.lower()] for key, address in expected_tokens.items()
         },
     }
 
 
-def get_quote(market, token_in, amount):
+def get_quote(market, token_in, amount, block_identifier="latest"):
     # ------------------------------------
     # Quote `amount` (human units) of `token_in` ("fETH" or "f564") for the other
     # token. Read-only. Returns a dict and prints a report.
@@ -389,7 +574,7 @@ def get_quote(market, token_in, amount):
         raise ValueError("Amount must be positive")
 
     amount_out, ticks_crossed, gas_estimate = quote_swap(
-        market["quoter"], addr_in, addr_out, fee, amount_in
+        market["quoter"], addr_in, addr_out, fee, amount_in, block_identifier
     )
 
     # integer math for anything that goes on-chain
@@ -399,7 +584,9 @@ def get_quote(market, token_in, amount):
     min_human = Decimal(amount_out_min) / 10**dec_out
 
     # spot price (out per in), display only
-    sqrt_price_x96 = market["pool"].functions.slot0().call()[0]
+    sqrt_price_x96 = (
+        market["pool"].functions.slot0().call(block_identifier=block_identifier)[0]
+    )
     price_1_per_0 = (sqrt_price_x96 / 2**96) ** 2
     t0_is_in = addr_in == market["pool"].functions.token0().call()
     spot = price_1_per_0 if t0_is_in else 1 / price_1_per_0
@@ -410,6 +597,7 @@ def get_quote(market, token_in, amount):
     impact_pct = (expected - out_human) / expected * 100
 
     print(f"\n=== QUOTE: {sym_in} -> {sym_out} ===")
+    print(f"Pool:             {market['pool'].address} (fee {fee})")
     print(f"Amount in:        {amount} {sym_in}")
     print(f"Amount out:       {out_human} {sym_out}")
     print(f"Min out ({SLIPPAGE_BPS} bps): {min_human} {sym_out}")
@@ -426,6 +614,8 @@ def get_quote(market, token_in, amount):
         )
 
     return {
+        "pool_address": market["pool"].address,
+        "fee": fee,
         "token_in": addr_in,
         "token_out": addr_out,
         "amount_in": amount_in,
@@ -437,18 +627,40 @@ def get_quote(market, token_in, amount):
 
 
 def main():
-    # usage: uv run python config.py [fETH|f564 AMOUNT]
+    # --all-pools compares executable quotes at one block; never sends a transaction.
+    args = sys.argv[1:]
+    all_pools = bool(args and args[0] == "--all-pools")
+    if all_pools:
+        args = args[1:]
+    if len(args) not in (0, 2) or (all_pools and len(args) != 2):
+        raise SystemExit("usage: config.py [--all-pools] [fETH|f564 AMOUNT]")
     market = load_market()
-
-    if len(sys.argv) == 3:
-        get_quote(market, sys.argv[1], sys.argv[2])
-    elif len(sys.argv) == 1:
+    if all_pools:
+        markets = [market] + [
+            load_market(i, market["w3"]) for i in range(1, len(configured_pools()))
+        ]
+        block = market["w3"].eth.block_number
+        quotes = [get_quote(m, args[0], args[1], block) for m in markets]
+        best = max(quotes, key=lambda q: q["amount_out"])
+        print(
+            f"\nBest output at block {block}: pool={best['pool_address']} fee={best['fee']}"
+        )
+    elif args:
+        get_quote(market, args[0], args[1])
+    else:
         max_trade_amount = os.environ["MAX_TRADE_AMOUNT"]
         for token_in in ("fETH", "f564"):
             get_quote(market, token_in, max_trade_amount)
-    else:
-        raise SystemExit("usage: config.py [fETH|f564 AMOUNT]")
 
 
 if __name__ == "__main__":
-    main()
+    # Provider exceptions may contain credentials, including fallback URLs.
+    import traceback
+
+    from legacy_main import redact
+
+    try:
+        main()
+    except Exception:  # noqa: BLE001 - redact provider errors before displaying them
+        print(redact(traceback.format_exc()), file=sys.stderr)
+        raise SystemExit(1) from None

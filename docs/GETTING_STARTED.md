@@ -1,5 +1,74 @@
 # Getting started
 
+**Use [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md) for the current bot.** Follow it in order: install and observe in paper mode, prepare one Phase2TradingBot, verify/register/fund it, simulate, then deliberately enable live trading. It contains the complete commands and wallet/limit examples. For Ubuntu service installation, continue with [DEPLOY](DEPLOY.md#phase-2-on-ubuntu).
+
+### Phase 2 command reference
+
+| Task | Command / location |
+|---|---|
+| Start Phase 2 | `uv run python main.py` or `make run` |
+| Bounded observation | `uv run python main.py --seconds 1200` |
+| Dashboard | `make dashboard`, then open `http://127.0.0.1:8765` |
+| Unsigned preparation, deployment, owner actions | [Operator walkthrough](EVENT_CONTRACT_SETUP.md) |
+| Enable entries | Verify the active mode, then **Start Trading** |
+| Switch mode | Click the single **Mode: …** toggle, wait for acknowledgement, then **Start Trading** |
+| Pause entries | **Stop Trading** keeps monitoring, receipt checks and exits running |
+| Saved event status and execution records | `logs/events/`; retain across restarts |
+| Phase 2 price charts | Both pools are stacked on the main page; select one shared time window. Units are f564 per fETH. |
+| Scan / exit | Separate **Maintenance and position actions** area |
+| Decision pages | Expand **Recent decisions and watched actors**, scroll the table, then use Previous/Next |
+| Legacy polling recovery | `http://127.0.0.1:8765/legacy`; controls apply to `legacy_main.py` only |
+| Runtime ABI | `build/Phase2TradingBot.artifact.json`; copy the saved artifact to the server |
+
+### Phase 2 troubleshooting
+
+| Message / symptom | Next step |
+|---|---|
+| `awaiting_scan` | Click **Scan Pool Liquidity**. A failed scan requires another click. |
+| `eth_getLogs` fails during startup | Catch-up narrows HTTP 400/413/422 or specifically identified JSON-RPC range/result-size failures. JSON-RPC quota/authentication errors preserve the range and back off. For 401/403, check provider access; for 429, check request limits and remaining quota. |
+| `Reconcile …/HALTED before starting a live sender` | Reconcile the indicated service's transaction outcome before clearing its halt marker. Both services' markers block all local live senders. |
+| `inventory or an unresolved intent` | Resume/reconcile the service that owns the position. Manual swaps/deployments require both ledgers flat. |
+| `cannot verify … execution ledger` | Restore/reconcile the unreadable record; do not delete it to bypass the check. |
+| `another local service holds the operator lock` | Stop the other local sender and let its active operation finish. Deleting the lock file is not a handoff. |
+| No simulated execution | Check the Phase 2 panel's entry pause and module switches. `prepared` is only a model result; `simulated` confirms execution checks. |
+| Feed connected / snapshot ready, but entries paused | Read the entry explanation. After selecting a mode, wait for acknowledgement, then click **Start Trading**. An older Start request cannot authorize the new mode. |
+| Rejected or unprepared target | The latest evaluation shows the rejection stage/reason. `unprepared` means successful pending preparation is missing; it is not proof that a profitable trade was missed. Older records may only contain a generic rejection. |
+| No opportunity | The enabled strategy found no eligible route under its caps and profit floor. Backruns wait for target inclusion; independent cross-pool arbitrage is separately enabled. |
+| Empty price chart after upgrade | Restart bot and dashboard using the normal handoff. History starts with new reconciled block observations; it is not reconstructed from the legacy CSV. Select another range if needed. |
+| Stale price or gaps | The chart labels prices older than 30 seconds. Gaps over 60 seconds, restarts and mode changes break the line. Check feed and snapshot freshness; the dashboard never refreshes the chain itself. |
+| Price history unreadable | Inspect `history_error` in event status and preserve the damaged file for diagnosis. Chart storage failures do not halt exits or reset trading records. |
+| Mode says “Switching…” | The file write succeeded but the runtime has not acknowledged it. Wait or inspect the process; Start stays disabled. A refusal retains the actual mode and shows its reason. |
+| Start disabled / stale runtime | Restore fresh runtime status before starting. **Stop Trading** remains available to request a pause when the control file is usable. |
+| Holdings stale or read error | The last successful observation retains its block/time and balances. Inspect `observation_error` and RPC diagnostics. No unavailable balance is replaced with zero. |
+| Awaiting scan, but holdings available | Holdings diagnostics continue on their bounded schedule using pinned balances and the primary spot price. A full liquidity scan is still required for entries. |
+| Prices or entry references withheld after recovery | Invalidated prices stay excluded even after a higher-block scan succeeds. An open-entry reference requires verified execution and activity; its recorded position remains visible for reconciliation. |
+| Missing transaction markers | Coverage begins with recorded logs/receipts; signer/time enrichment is bounded. Unverified or reorganized markers are withheld. Inspect the transaction table, which also lists swaps without a known time. |
+| Portfolio return unavailable | No valid portfolio baseline exists. Do not use deposits, recent trades, or a restart as invented starting capital. |
+
+Each start pauses entries and selects Simulation with a vault or Paper without one. Paper displays modeled candidates. Simulation runs the existing read-only contract execution checks. Live requires `DRY_RUN=false` in operator configuration plus a valid vault, signer and limits. `EVENT_EXECUTION_MODE` is accepted for compatibility and cannot enable new live entries. A recorded live position resumes exit management and needs a fresh Live request once flat. The dashboard displays a refusal reason if a switch is blocked. Select the desired mode again after resolving it.
+
+Before recovery can exit a recorded position, the runtime validates retained execution receipt block hashes, including receipts older than 64 blocks. The entry backing an open position is checked every maintenance pass, even if its trade row was trimmed. An unavailable read defers execution; a missing or changed canonical block halts for reconciliation. Do not clear or reset the position to bypass this check.
+
+### Phase 2 dashboard operation
+
+The primary row contains exactly two buttons. **Mode: …** displays the runtime's acknowledged mode and requests the other mode; every switch pauses entries. **Start Trading / Stop Trading** reflects applied permission to open new trades, including while the bot is idle. A saved request is shown as pending until the runtime acknowledges it. Start is blocked for unknown/stale state and pending or refused mode requests. Stop continues to request a pause with stale status. Paper and unavailable modes explain their limitations. Strategy switches, scan and position-exit actions are separate from this row.
+
+The **0.05% primary pool is above the 1% secondary pool**. Both remain visible with independent price axes unless Shared price scale is selected. Hover for exact recorded time/price and a synchronized time cursor. Wheel/trackpad zoom is centered on the pointer; drag pans both charts. On touch devices, drag horizontally or pinch; keyboard users can focus a chart and use arrows or +/−. Presets offer 15 minutes, 1 hour, 6 hours, 24 hours and all retained history. Zoom, pan, presets and Reset enter historical inspection; refreshes preserve the selected window. **Follow latest** explicitly resumes live scrolling. Accessible price and paginated transaction tables are below the charts.
+
+Prices come from reconciled snapshots. Gaps over 60 seconds, process restarts and mode changes break lines. These samples do not capture every intra-block move. Transaction markers use normalized confirmed swap amounts: triangles for your buys/sells, diamonds for market bots, squares for competitors; quieter other/unknown actors are optional. Watched categories use configured `EVENT_MARKET_BOTS` / `EVENT_COMPETITORS` transaction signers, never a shared router's pool-event sender. Hover, focus or select an annotation for full addresses, amounts, execution/post-swap prices, exact block/transaction/log order and transaction links. Multiple swaps retain distinct log identities, and grouped glyphs expose all constituent swaps. Entry/exit references share a position ID across pools; atomic-cycle legs share a transaction hash. Pending, reverted, not-sent and simulated attempts remain in the execution/decision views and never become confirmed chart markers.
+
+**Portfolio** shows actual contract balances including deposits, in every execution mode. Both token balances and the primary-pool price are pinned to one block and checked against its hash. fETH marked value = fETH balance × f564-per-fETH price; total = f564 balance + marked fETH value. Operator native ETH is a separate Gas wallet. Simulation does not change actual holdings. The open position records only bot-acquired fETH and its acquisition cost; deposited fETH is separate. Its exits follow target nonce inclusion, the configured event time limit or an explicit exit request, with the runtime cooldown after failures.
+
+**Realized trading P/L** sums confirmed exit proceeds minus recorded position cost, plus confirmed atomic-cycle proceeds minus input. It covers the retained live execution ledger (at most 200 attempts), with dates and missing-history labels; it is not lifetime performance. **Unrealized P/L** is recorded position quantity × the current pinned spot price minus recorded cost, with stale marks labeled. **Gas spent** sums confirmed mined execution costs, including recorded reverts, in native ETH; older missing gas records make the total unavailable. Simulated attempts have no confirmed P/L. No whole-portfolio baseline or reconciled external-flow ledger currently exists, so portfolio change/return reads **“Unavailable — baseline not established.”** Deposits/withdrawals affect holdings, never trading P/L. No flow-adjusted return is claimed. Spot valuation excludes liquidation fees, slippage and impact; trading P/L and competition portfolio return measure different things.
+
+Price history is capped at 5 MB; transaction history at 4,000 rows and 5 MB. Trimming and canonical verification status are disclosed. No historical backfill is started. Unknown signer/time metadata stays explicit, and corrupt history is preserved for diagnosis. Full snapshot catch-up defers while a position is open, so chart spot samples can gap while lightweight holdings and receipt annotations continue. The decision section retains the latest 30 session decisions, paginated ten per page in a scrollable table. Later pages hold their contents during refreshes until you return to page 1.
+
+Startup/recovery rechecks the retained price anchor. Snapshot validation failure or removed logs conservatively mark earlier observations invalid; they remain in the bounded file for diagnosis but are excluded from chart lines, latest-price labels and tables. New canonical observations resume without connecting through that history. Position valuation and fallback entry lines remain withheld until execution validation succeeds; fallback lines also require verified activity.
+
+## Legacy polling bot reference
+
+The rest of this page is for existing **TradingBot + legacy_main.py** installations. Historical references to `main.py` in descriptions below refer to the polling runner. Its deployment, `live_check.py` and swap commands use the legacy contract interface.
+
 A step-by-step walkthrough from an empty checkout to a bot you can watch and steer from your laptop. It is written to be followed in order; each step says what you should see, so you know when it worked.
 
 **Testnet only (Sepolia).** The tokens are worthless. Nothing here has the safeguards real money would need, and none of the strategies has a proven edge: treat this as a way to learn, compare ideas and test the machinery.
@@ -68,6 +137,8 @@ make test                # runs the tests: in-memory chain, no network, no trans
 
 ## Step 2. Fill in `.env`
 
+**Existing Phase 1 installation:** follow [Phase 2 migration](PHASE2.md), including new token/pool addresses, Infura + Alchemy, vault permissions, and archiving reconciled Phase 1 records. Do not overwrite an existing `.env` with the copy command below. The template now selects the Phase 2 0.05% pool for the loop and the 1% pool for read-only comparison. Both have fETH as the strategy's base and f564 as its quote, despite the reversed on-chain token order.
+
 ```bash
 cp .env.example .env
 chmod 600 .env           # only you can read it
@@ -98,6 +169,10 @@ Then send about **0.05 Sepolia ETH** to that printed address (a faucet, or from 
 | Variable | Put here | Secret? |
 |---|---|---|
 | `RPC_URL` | your Infura **or Alchemy** Sepolia URL (DEPLOY 1.1) | **yes** (contains the key) |
+| `RPC_FALLBACK_URLS` | Alchemy Sepolia URL when Infura is primary; replace the template placeholder or clear it | **yes** |
+| `MAX_RPC_PER_SECOND` | template uses `5` requests/s per provider (`0` disables the cap) | no |
+| `POOL_ADDRESS`, `POOL_FEE` | primary execution pool, Phase 2 narrow pool / `500` | no |
+| `SECONDARY_POOL_ADDRESS`, `SECONDARY_POOL_FEE` | comparison pool, Phase 2 wide pool / `10000` | no |
 | `PRIVATE_KEY` | already written by the script above. It is the **bot wallet's** key, not your MetaMask one | **yes** |
 | `OWNER_ADDRESS` | your enrolled MetaMask address (copy it from MetaMask to keep the capitalisation) | no |
 | `MAX_TRADE_AMOUNT` | size of one buy, in units of the token being spent (see [trade size](#trade-size)). Start with `0.01` | no |
@@ -109,6 +184,8 @@ Then send about **0.05 Sepolia ETH** to that printed address (a faucet, or from 
 `DRY_RUN=true` means **nothing is ever sent**: the bot asks the chain what *would* happen. Only the word `false` (in any capitalisation) turns a dry run off; anything else, including a typo, stays a dry run. You will flip it only in step 10.
 
 ## Step 3. Deploy your bot contract
+
+This deploys the **legacy TradingBot/main.py** installation. For the current contract, use [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md); runtime and recovery details are in [EVENT_STRATEGIES](EVENT_STRATEGIES.md).
 
 This is the one step that sends a real (testnet) transaction, so read the output before moving on.
 
@@ -130,6 +207,8 @@ Why both? A buy spends f564 (the *quote* token). The matching sell gives back fE
 
 ## Step 5. Check that everything is wired up
 
+`uv run python config.py --all-pools f564 1000` compares both configured pools at one block (read-only). `live_check.py` checks both pool fees and simulates both directions. These commands do not activate arbitrage or automatic routing. The target is portfolio return in f564; the dashboard's strategy P/L is not the official competition score.
+
 ```bash
 uv run python live_check.py          # read-only: roles, limits, guards, a simulated swap each way
 uv run python bot_contract.py status # owner, operator, balances, operator ETH
@@ -139,9 +218,11 @@ uv run python bot_contract.py status # owner, operator, balances, operator ETH
 
 ## Step 6. Run the bot in dry run
 
+On migration, `Unidentified market records` or `Market changed` means the old ledger/history cannot be reused: reconcile the old position and archive `logs/` as explained in [PHASE2.md](PHASE2.md). Startup writes a public `logs/market.json` identity for fresh records. `RISK_PER_TRADE_PCT needs pool_profile.json` means there is no valid matching layout: keep risk sizing at `0`, pause new buys in a deliberate dry run, and request a scan. Phase 2 narrow-pool scans need roughly 700 bitmap reads plus initialized ticks (several minutes). Fast polling remains off until Phase 2 research validates its timing.
+
 ```bash
-uv run python main.py --ticks 3     # three ticks (about a minute), then it exits by itself: a smoke test
-uv run python main.py               # the real loop, in the foreground. Ctrl+C stops it
+uv run python legacy_main.py --ticks 3     # three legacy ticks
+uv run python legacy_main.py               # legacy polling loop
 ```
 
 **You should see** lines like:
@@ -421,8 +502,8 @@ Everything lives in `logs/` (git-ignored). None of it contains a secret.
 | run the tests / lint | `make test` / `make check` |
 | see where things stand (terminal) | `make status` |
 | open the dashboard | `make dashboard`, then `http://localhost:8765` |
-| run the bot in the foreground | `make run` |
-| try a few ticks and exit | `uv run python main.py --ticks 3` |
+| run the legacy polling bot in the foreground | `uv run python legacy_main.py` |
+| try a few legacy ticks and exit | `uv run python legacy_main.py --ticks 3` |
 | check the deployed contract (read-only) | `uv run python live_check.py` |
 | see who trades in the pool | `uv run python pool_monitor.py --watch 300` |
 | see the contract's owner, operator, balances | `uv run python bot_contract.py status` |

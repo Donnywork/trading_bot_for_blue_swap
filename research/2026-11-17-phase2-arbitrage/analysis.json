@@ -1,0 +1,26 @@
+{
+  "block": 12157163,
+  "utc": "2026-11-17T21:48:24+00:00",
+  "spot_gap_pct": 0.9351293335770006,
+  "zero_impact_fee_hurdle_pct": "1.060631325763892047033617800",
+  "liquidity_boundaries": [
+    {
+      "fee": 500,
+      "active_lower": 984.0290539328204,
+      "active_upper": 1050.1120725183675,
+      "active_to_backstop_liquidity_ratio": 56.62518599422809,
+      "buy_f564_to_next_boundary": 18633.02784247856,
+      "sell_feth_to_next_boundary": 11.06955177372615
+    },
+    {
+      "fee": 10000,
+      "active_lower": 934.1696153864627,
+      "active_upper": 1053.266980989772,
+      "active_to_backstop_liquidity_ratio": 90.02920648772985,
+      "buy_f564_to_next_boundary": 6343.680756430763,
+      "sell_feth_to_next_boundary": 15.789052308701912
+    }
+  ],
+  "positive_sampled_cycles": 0,
+  "offline_model_max_abs_quote_error_f564": 2.02817318495363e-09
+}

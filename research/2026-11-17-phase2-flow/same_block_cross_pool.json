@@ -1,0 +1,1070 @@
+[
+  {
+    "block": 12109012,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x0f2c8297149cecaf56dfd35690342214a46b0309dc6db5b63bcb0a43259cb4ac",
+      "0x88141cabf40f4cae2ee63bab9da748a5221527ff2af99f0b813f2a71056d8759"
+    ],
+    "f564_pool_flow": 50.63727730898472,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001580058008426976
+  },
+  {
+    "block": 12109019,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x5d15e300f727c6cafa202da8902f50e7c6cb914a0fe75786fe47ae9e9aae96df",
+      "0x13af4791eaa338e2cf6faa496a4db9590c56bc2e94d842ddbdde0d904ffbfbe0"
+    ],
+    "f564_pool_flow": 7.240392000572228,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0013420950076052048
+  },
+  {
+    "block": 12109073,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x1b7897a6b3d19796817e9c561b2d36b975c2f9ba7cab941e33619a65686cabeb",
+      "0xf2c19e3e222bcb7c34805282a57555c9444d214acc2c8da3a6369a73854e7628"
+    ],
+    "f564_pool_flow": 49.579266804424606,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001359579007251088
+  },
+  {
+    "block": 12112522,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xc5f2cf3840b335271401e5bdd6e2a65306a258a00476297a6ea43db95308cc88",
+      "0x97a3743de70c74f136cbde049a96d84f343687869498df343741c98d3bff484b"
+    ],
+    "f564_pool_flow": 1.683812275887533,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0013064280069676158
+  },
+  {
+    "block": 12112651,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x2a8b2cc25e48875da44e62295a6a593efb31a33bb2b98445fd8bd426d4d50387",
+      "0x19a463358b2bf1e1e4ac413e7910495ce2fb9b8b38d6baf70d9f63d5895914ad"
+    ],
+    "f564_pool_flow": 5.07295516098543,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00139481400929876
+  },
+  {
+    "block": 12112894,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xecf0f6c0bced444febc57b73fe74b48f04c516fc9f0be6a8ea9db7c1b618453f",
+      "0x6bd911d54aa18b59ba36ccc822d9910bec36bec2bd06a8817218980b0781dcd5"
+    ],
+    "f564_pool_flow": 14.102466270137938,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0013057650078345901
+  },
+  {
+    "block": 12113340,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xa6c07a971f4ea022d090bf5692f776111564fb4553b90ae1270c42bec49f5172",
+      "0x2184e8d1025a5cbac7a216826d25612d068bd7685bb162922fc1507b18ec565d"
+    ],
+    "f564_pool_flow": 8.054819981493893,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001790761108298649
+  },
+  {
+    "block": 12113552,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xbc17a972d02b44950a9d3de173eb9f56a22c8d393ac5570e0e723b00b42245bd",
+      "0xdcb699b0e4c5f55332f16ef583644d992ed4e9de139e61c5232da1735824417a"
+    ],
+    "f564_pool_flow": 7.378560159156564,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001790826712230036
+  },
+  {
+    "block": 12113863,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x993179445653ab765ad35b245ab1d91530b496cc58cd0502a182f418d42072af",
+      "0x0c0e1f4b6259c4a63a0e1aeae58a10bd3485cd940b66647fb1323a88e5c0923e"
+    ],
+    "f564_pool_flow": 3.3665639225706627,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0019057907079020591
+  },
+  {
+    "block": 12114258,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x1f32dd45dafba015934bc5da54e40698edab896da3bc1d722e1a830ab040e70c",
+      "0x843b7b795df9b75985edc7807cb4ebd763b9ec819d0706852a701edb4c452526"
+    ],
+    "f564_pool_flow": 48.67850512736641,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001303062007384018
+  },
+  {
+    "block": 12114264,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xde6e7801c85632a7ff747609b9c6d05b95a0abdbbf25a17728f86042097e1df4",
+      "0x0c39c4f451f1cf02f7d5010e0b5d7da339ce2b78b00195255e011a458cf360ab"
+    ],
+    "f564_pool_flow": 2.106762751628594,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001395861007909879
+  },
+  {
+    "block": 12114901,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xb170a1ce6f6acd86590f5a6b95604c38b4f42eb52dd9d9b19a35c4f589b9376a",
+      "0x2e589274f0a81bb10b150dc374011a2684c9bca1542bf167efe55dd517633547"
+    ],
+    "f564_pool_flow": 15.302537620448902,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001311966008309118
+  },
+  {
+    "block": 12115251,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xbb5323c4f3239bc8a47fe791a4f68344740d4209bfbc1cc4fca706e16a4cb47f",
+      "0x8646e1b8bac9c6318254f1b04109b020f1b02feb379a361dabba286208f7504e"
+    ],
+    "f564_pool_flow": 11.500685293021206,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0017917410126732898
+  },
+  {
+    "block": 12115979,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd5365da11eab3d190a5f9c2447fd3a86da80a49074550d0dbeeb8d283a3ec262",
+      "0xbc9577facfcb42f1b32f77fc7e10cc83902909fb82f1c01d07f6e02cc1401383"
+    ],
+    "f564_pool_flow": 3.3339357073455176,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001310805007427895
+  },
+  {
+    "block": 12116016,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x018d40d1eb640ce571a465776cef78bc9c079465a94ecf3fad639ecc3c8c9f0b",
+      "0x2c80b56b89193d85dd28b8b003e10fd1199ac5e35e6e0e8c99ec41095529c5d6"
+    ],
+    "f564_pool_flow": 4.539653105900584,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00141039300940262
+  },
+  {
+    "block": 12116513,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x31032c931487a5b4a72b1da28852cd461ecdd4120690b906562e6c440bb0b740",
+      "0x5cdcc958aebb1fc6ab486a66f5ac94b0ca2725c45644d94dfd807f3df56e1451"
+    ],
+    "f564_pool_flow": 48.21055628368231,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001313889007445371
+  },
+  {
+    "block": 12116519,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x4f2a7359357838b6b30073ae0e2f4036709be7824cf799d9e6c6f8aad53697a9",
+      "0x21ea968181299c8d30969ee68b274030dc06f9ae04ba8560b30d935dc06ea26e"
+    ],
+    "f564_pool_flow": 2.124348304963462,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001398264008389584
+  },
+  {
+    "block": 12116548,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd387fe4037eb8f9ce25699f9a86fbfcebaa1e5638470fffd8a53c3ac35c4ff5f",
+      "0x4a651e5c2c97292eaec0439c063cdaeadbfbd1d48ee6b5048f8daaa4805d70b6"
+    ],
+    "f564_pool_flow": 1.231493785621808,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0014234190080660409
+  },
+  {
+    "block": 12117574,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xe0261aed34eaaea08ac4dfef728a06bb589c8e22d4ad58a9f191e068465ff8d5",
+      "0xb25adf8aff2de2bc28b7bb76c003a3db0b3590ad4899ceb291cebb8ff9d62aa0"
+    ],
+    "f564_pool_flow": 25.343331113732802,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.002463991891866648
+  },
+  {
+    "block": 12117580,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x8776693894bad9e02db945cc63b5d95cc1782718188b36cbb9efd8cdeaf96385",
+      "0xa8a4398256c5719b478344788aabb5925a9ef9946db47290743064a4987786d2"
+    ],
+    "f564_pool_flow": 1.0914988681899445,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0025988663153252278
+  },
+  {
+    "block": 12118021,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x9f7758a04f6d5269a2e561dfdfe1eef20d5b7069abde6a08e17f0a865421a9b3",
+      "0x1b3b6e68e74fb6f77800908613dadaf9c7144c06d8ed0ec4c4a96d8288bda39e"
+    ],
+    "f564_pool_flow": 3.7663595196983124,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001333782012893226
+  },
+  {
+    "block": 12119431,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x86e19345ba045e7c84455388cac980501ba8b929a76060c6f579fdab47c43d0b",
+      "0xe17c2e906428f67c22811c3ff2669ecd797462af1d2ff100f39b7d4de18bc932"
+    ],
+    "f564_pool_flow": 2.18826196585826,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00244059308998674
+  },
+  {
+    "block": 12119800,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x19bfa71dc141f2dd33d53849a9196e91fd19c107469f1ebe318cf169fda1636e",
+      "0xf4c0f115962549d3ee4876b8ec7fcfc3cc6cc6b57a7d6138728e7e9122a71569"
+    ],
+    "f564_pool_flow": 3.2879888110892352,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.002482079944764469
+  },
+  {
+    "block": 12120613,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xf29e684e65117695da9bc96d13484f7033bd34760e2b29448af23ecf330ea4af",
+      "0xfe0e793b200cb598e779278cbdae50fdcc0eebfb9be029367d29c91dc99232a6"
+    ],
+    "f564_pool_flow": 2.3688994088972777,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0014136420098954938
+  },
+  {
+    "block": 12121204,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd428c23ee27582bef0745721ac4788ed273b1a5c5c64b2b48cf06db032702d8a",
+      "0x3395b6982b2c5a781a2b10950783f755ee0170bb5ab194382ad3b6a9ce9c4c24"
+    ],
+    "f564_pool_flow": 3.528692067064412,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0012838590064192948
+  },
+  {
+    "block": 12121575,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xbfb14561c3969a751b140e7a1782926a38939b89b95d0b0be081bdff73867cb2",
+      "0xd3a32f2581a439cadd86ee71a97f8c5e8d7cf7a7bad753fea0278eec62dabe4e"
+    ],
+    "f564_pool_flow": 37.07007083870917,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.002548860434895711
+  },
+  {
+    "block": 12121581,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x9bf99c6fe4fdbadb5e9a365a2ec12ead5a75e4c9d1cfea3f0d1cc083a7e87125",
+      "0xfafd0dbd455a7c507bb772db9ebdd19af0d3dffb26bc288e3b8b63e0b89eaded"
+    ],
+    "f564_pool_flow": 1.6225236685781397,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.002725816241028414
+  },
+  {
+    "block": 12122023,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x1711f9bb9fd5862ac1075d57d73b419239d669c8b42f934ce40a402697fd234c",
+      "0x1c7d2ebd5414e00beb3c897107603a30c1b5e544c1e517fc494816977dcc0db3"
+    ],
+    "f564_pool_flow": 3.8400022838750374,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001323942007943652
+  },
+  {
+    "block": 12122986,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xee0f97dbcd14bf639a56e792e8191389b41430808162b2008b491751e87ef21f",
+      "0x420c95012644892eff88221ebd71d02d2dde3b6aef8978b3f772a5a626995073"
+    ],
+    "f564_pool_flow": 10.931196066690745,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.002727900812759536
+  },
+  {
+    "block": 12124095,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x113a68518de0d03ace9acf364b5c9d410eb28d8238c191ea363e37ce78b8d7bf",
+      "0x8a17f1bb41983837a9ba21a022655b7f7b4ed14b9ac7acc8d08ba219c7b2a389"
+    ],
+    "f564_pool_flow": 25.531386218017815,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00440805000617127
+  },
+  {
+    "block": 12124101,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xac10255682b0ec491ab86d5ffeeb069840521d1088ce52213302e4d20e933334",
+      "0xf30b21c45d4b9856318acca87daaa9a386f371fa28f74731b0cbb218d4a3dad5"
+    ],
+    "f564_pool_flow": 1.1005071272508644,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004728570006619998
+  },
+  {
+    "block": 12124468,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xba349f770032d100d984042e899e20a9ae9cf1ee715408d45ee10d90f9c20524",
+      "0xd4d8af567880f26473efa511a25a4f9c10c8bcdf71ae9493de003154bf045364"
+    ],
+    "f564_pool_flow": 47.21259125985898,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0013227030070544158
+  },
+  {
+    "block": 12124474,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x31c1b8b0418d7850df31bc0c0b3ad4d6192056e0c001600e56a208c742016e93",
+      "0x29647dc2248b65410f10e037d25d0258c296d5027286c1d49fbda6d88476c6d3"
+    ],
+    "f564_pool_flow": 2.0883565887290274,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001415553007549616
+  },
+  {
+    "block": 12125580,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x8c074d95e4e45e7bac93404292086294ff772cf337bc5d1f44c6fd3e297ac773",
+      "0x44dca48f7712e3b6db9b5e72454d447da9620b2bfd8cbc7234d2f0cdad705c1d"
+    ],
+    "f564_pool_flow": 28.999791637668068,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004408370007053393
+  },
+  {
+    "block": 12125586,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x4ea3fb8b0ce879b6c1650b2af83051588753815023cef3f62ec3cbc3cbf3ffd1",
+      "0x43e599feea561bd820bd82afe0f793c628e0edeadf714131d5058f365e5d3dcf"
+    ],
+    "f564_pool_flow": 1.2563883769472568,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00472665000756264
+  },
+  {
+    "block": 12125876,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x0fb9b740d89c0627b8871d73e14b997cffbba7f78dbba9d2e73fcc4473172a66",
+      "0xdd15a0b7f8edd7eb7ae6ed7550e8c7ed2eb2c82ca2eba4977314e09a3a5758dd"
+    ],
+    "f564_pool_flow": 42.6232815485896,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001322577007053744
+  },
+  {
+    "block": 12125882,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xb5c173055c792b63021b3575521261dc089f008cc389bbbd3b6cdb74332b02eb",
+      "0xeec90e305d4f1eeb4cfc62ccec1c1a1f18ed0508aacb3a2bcba48c886b34b510"
+    ],
+    "f564_pool_flow": 1.877085223451786,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0014182200075638402
+  },
+  {
+    "block": 12126698,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xabd800a66ffab1c80aa9ccaef0fa545acd96501a5c0df6d10fe0d27fbe15e9ec",
+      "0xc96a4dc07e1c3dbdc2f292ecff25f2d7cd7354880af19db8e047256b0e3fc9a5"
+    ],
+    "f564_pool_flow": 17.934693274309893,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004413640007061824
+  },
+  {
+    "block": 12129228,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x1cb9e63ac619c835a3d9d27760cd43a4333f8f6ca5f50eaa8640452a68ad624d",
+      "0x2d35207575ea71f9bfd560ea547f37044f676ed67427ba3a762e4db4a13a30ab"
+    ],
+    "f564_pool_flow": 32.265016993787185,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004501555806178606
+  },
+  {
+    "block": 12129234,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x848e4734342f138ee99582b5d06de6c65ad58a24cd8e198627a725dcd5ec68f3",
+      "0x5c26eee4614fe5031ac5e904757fbe5de8a8fe68b52fd7a02f5b3628c0965cb5"
+    ],
+    "f564_pool_flow": 1.4045051082110263,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004845377406650518
+  },
+  {
+    "block": 12131612,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xc11eb03aec6b060c8de29a4e3c468e71457dfb8559837d5594bf983442322bf0",
+      "0x9663fdee19feffa2c9eb1792b43b900b2e13bfe85ca2ffe2fe729f08b860958b"
+    ],
+    "f564_pool_flow": 13.196083348262619,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004526423406212738
+  },
+  {
+    "block": 12132057,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xcbbcf90e1182d00b006d7f5ad2d673b85efe364c9969dad021776933e2256ea6",
+      "0xe4b8a1517efa0f8773222c03078290db0bf07cfacac3b63fb9c59b1fbcd1b002"
+    ],
+    "f564_pool_flow": 52.17349022920325,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00449712900705432
+  },
+  {
+    "block": 12132063,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd8a8c4696821ef51efd1ea73d4c4a5f64a9d26bfadcf62bf2117967a9dfe67c1",
+      "0x99851e353653d6e47edf81f72070ea6822c6cbeb2dade48669323857137f2991"
+    ],
+    "f564_pool_flow": 2.3207959927863158,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004850487607608608
+  },
+  {
+    "block": 12132204,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x7ed1e7f2c47e81f39ad61f2691ffa6a16d949a203c9ffac2fa8426daf6e6dd18",
+      "0x4e122060acfd35d0c980c4a226e40bcaf9fd9d42eca7dfb1d0dcb07f71eda88f"
+    ],
+    "f564_pool_flow": 2.4211324757498005,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004887707407187805
+  },
+  {
+    "block": 12132946,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x3b112593b1725e0276236e6784fe96681433fb6bccd6c55aa28a30bc0a74cd25",
+      "0xf04fb333277516af010a4e8debcfc82ce252fb9b7441625571c646b17440f829"
+    ],
+    "f564_pool_flow": 12.743196501559623,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004497006606613245
+  },
+  {
+    "block": 12133393,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x162e6398a624dde6c35e2c7da14fffb621386f46637c72da114ec7d2e83a04af",
+      "0x37a7f6a7585f741eefd0a3c5df4b01c7f60e34ff82c99513d7931ea43d841cc4"
+    ],
+    "f564_pool_flow": 2.1988173818694463,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00449773080661431
+  },
+  {
+    "block": 12135364,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xc7043abacf94ee928c4d086b2b6b34a2897a98591899267e86115e50e6bb358c",
+      "0x33cad10fd88d6fb8069b09a7568b439b480a78debf56e775f5d81eeb0ca56128"
+    ],
+    "f564_pool_flow": 1.2066305576167338,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00132256800661284
+  },
+  {
+    "block": 12135396,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x8141f155b3e97b11e6a7dbd1979380126a195f14b077143c06bb43dce42b49a7",
+      "0x8db5b0a1da283ea50fb663cbac0a95feee11a2bbfd8f014879641dfb0645ddb3"
+    ],
+    "f564_pool_flow": 22.483307988850356,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0014403450072017249
+  },
+  {
+    "block": 12135402,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x8b581c134a9a4b879a7017c8745830e8fdb0e4950ef0cdc42296dd4f8b49ad90",
+      "0xa0941522366bc0be8b5a89b568b689a54d7e598ed034f5998e39b150786e834a"
+    ],
+    "f564_pool_flow": 15.177374955841628,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00142950600714753
+  },
+  {
+    "block": 12135408,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x8a0238de8667e63d33294d7d22ff4894d8dabebcb8f4f4c99277d98f7bc2cf75",
+      "0x0f9a59268bc1040a36af32836d9e9e5e4a9c6ef88f532f7eb3443afbd9f0bb09"
+    ],
+    "f564_pool_flow": 7.8200815560045385,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001420017007100085
+  },
+  {
+    "block": 12135414,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xa3d55a7f92a6156385a46f156bc9c0cf9aae547ee79d51dc613bcbc1da989d59",
+      "0xa73c662d88b3795b940150d8db921af4316947203affb2380983d1291f736486"
+    ],
+    "f564_pool_flow": 1.099789424784717,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0014479320072396601
+  },
+  {
+    "block": 12135544,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xfd0652c9ed4b4be61486238718b47df0e80e66e941edd80fe22b42b51c1652bc",
+      "0x6b54d695d3e837af408ca99463d76aa7ee88ca0bafcb417c6a75b7217b7cf9f8"
+    ],
+    "f564_pool_flow": 2.149307925293897,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00142356600711783
+  },
+  {
+    "block": 12136586,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xf1f277dbfa5bdfa4fdf8125b592cdcead1f8278da240884bd5156622879ce979",
+      "0x4fb52df7cb5b6ab4a62e0735dca5c33c94591bef9f1d735b86318bc50d4df60b"
+    ],
+    "f564_pool_flow": 20.17280746593019,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0051304368085507285
+  },
+  {
+    "block": 12137261,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x5a0a620105a508ed7ba5116d870f85eaa2dc291808860f9e24b1e2d60a961727",
+      "0xf68e5ea895cadfa063940bdb9b401116d999778421118bf9f6e89f7e057f6480"
+    ],
+    "f564_pool_flow": 5.482582096988608,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0045080736079554234
+  },
+  {
+    "block": 12138543,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xea91636797e9b3de3e037679f29af6bfc4d2051e16ff1b2cc49948af0512a245",
+      "0x42705a56837faa9373a2800ed9f4e6cd8de6539fd160d8503fc0a8251481f7c7"
+    ],
+    "f564_pool_flow": 2.6546642134047715,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00456280680671001
+  },
+  {
+    "block": 12139227,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x3f02a5f5db96042ceb40e5703559b4b4f6e5f573af4ffe78f7670e837f97e7b3",
+      "0x0875c980160e4cf6f83d8771baca8bb6bab5c7bcd2b61f6565fa59999896dc9a"
+    ],
+    "f564_pool_flow": 3.877095815312714,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004516600806199256
+  },
+  {
+    "block": 12139869,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xbab9d687772931f254c1d005ccf7bc6635c3a24f0679a0eb39b094b405f010db",
+      "0xf44c7e76204783bc9b290137610e809a5535f17f99c9602930084fd6ba5083d3"
+    ],
+    "f564_pool_flow": 18.43249686674676,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00450646200662715
+  },
+  {
+    "block": 12139875,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xec23548ce9380432d28c2d3326da874b0e59640e503dfe6412306579420f3b5e",
+      "0x694821b942fa01e97bb2b99d5b694cab3dcce6379b8739492d8807b9b8ed53d5"
+    ],
+    "f564_pool_flow": 2.5426105726489823,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004870714207162815
+  },
+  {
+    "block": 12141401,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xaad70a32198b2aa30671707c7e79e36078bb28ca24a7de1b00de7db09d9517ea",
+      "0xef5372981b54ee2a9316b56bb7f5c84874761c1790b9690f454f02dd33a1230a"
+    ],
+    "f564_pool_flow": 26.085306241599028,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00452484240665418
+  },
+  {
+    "block": 12141407,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x3fdc99e3baae598fd29165ee2d48321bf237a84c5d1961a37f3eff2cd0793d02",
+      "0x7637f39240d22ac18c7d3bc11d1c2a906e36a52a36de23bb2a53fdcfdc5779ea"
+    ],
+    "f564_pool_flow": 8.656149675143752,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004880057407176555
+  },
+  {
+    "block": 12142306,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xfa345ba0efedc75e778f03450bc390b8a7f367bd3071bd81b06fb889824826f9",
+      "0x414a4ac29bcaacb9da4c0782b47fea6bb8e208c3f1f80e986d58a723fe73492d"
+    ],
+    "f564_pool_flow": 37.590276432284554,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00452604600709968
+  },
+  {
+    "block": 12142312,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xb5227ec1af1cd54db138791416cd8df37fea2b5128637b0c141efd9bd3d81f32",
+      "0x55f8929f43d9d887c906559df151f56950bdb8d3b78b1bd33132f7aed275dda6"
+    ],
+    "f564_pool_flow": 1.6217713188277116,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0048796596076543675
+  },
+  {
+    "block": 12142623,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x5410bf06dbcc6bfc9559d82a916df883e9ec2adb5763993704301d5f5b088424",
+      "0x9c9644e28f18cff6fb2fa9dcc40f544ede2f8550fc40f3cd83cbc5eeca36819e"
+    ],
+    "f564_pool_flow": 69.5663287735074,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.005123776209041958
+  },
+  {
+    "block": 12142629,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x9ebe33fbc535a5c90de0cdf9415e455abb99a22d6d661042e4f5dc4b2236fb8a",
+      "0x59bcb426d8eb62eeebb91ea4d77f9903fef25af94340ec9ff19cfca9acbac2a6"
+    ],
+    "f564_pool_flow": 9.399855337799181,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004869449408593146
+  },
+  {
+    "block": 12143419,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd899000b2f886357b6b499bab4d1a47c5e6e3d6672f2c01b46b0a511bff298b2",
+      "0xf8df058454cef8f2e2665f1a8b169fa5f4a8362e009ecbd21e50d613e86c0f39"
+    ],
+    "f564_pool_flow": 18.93496076049132,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.005128223409049806
+  },
+  {
+    "block": 12143425,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xf842ceb100047404c8f392618be885ae7b3cbb1e7ae7652db46b229fe5f28db6",
+      "0xfe84059e3c8aae8a437dae0adbfb7bf11f9d9af5c2e4480e647f807b873bb499"
+    ],
+    "f564_pool_flow": 2.0658664277171965,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004884076208618958
+  },
+  {
+    "block": 12144405,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x2f96f6d898f56208a0914d11d75654842a56decc6a67164a9d83fbb0a1f90c33",
+      "0x97166d880de392c7c7550ebbba3eeac899dcd74df6b3170bbfe906474d95a4e2"
+    ],
+    "f564_pool_flow": 25.056265211195523,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00492925200579912
+  },
+  {
+    "block": 12144411,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x1797813616f6b8f55c1c1cc5e44641deda4e3baef601151460f1bda3ce24d3a1",
+      "0x6ecc45fd03470a331ee1f83fdaade4ffce640c0846871f08d600721fa8f4c9c9"
+    ],
+    "f564_pool_flow": 7.127069641458547,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0049027014057678835
+  },
+  {
+    "block": 12144504,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x4c0c7980975be7f98ef66436ebd6e4e5fe6a5325648261e824ae749e920b94f9",
+      "0x7ded1b13da3145a7d3fb589661e1fae53ad5a8b559b789e21351dab4de04ae02"
+    ],
+    "f564_pool_flow": 2.1964133307652673,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0047550360069927
+  },
+  {
+    "block": 12144945,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xc11f1820e10a34befab27f906caa6e819fb1112e73ec73e0e5da0050beb94de7",
+      "0xaf9a9b597623d615f594f22ad7dd423138a7209829f157d6c83d69df3d485c62"
+    ],
+    "f564_pool_flow": 11.720589685534605,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00437647320643599
+  },
+  {
+    "block": 12144950,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x0f4664b3fd71711a177dc52e6af9543a6fca64161db01774f210ba03a4b95593",
+      "0x24f2d4d5a8a838b049d4ff68545bf2457187266a85146feff1c8bcdf76bd9f65"
+    ],
+    "f564_pool_flow": 3.6018385356561566,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.0048856368071847605
+  },
+  {
+    "block": 12144956,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x050838d764d5247a328e94672b1779c6f6a75d57a7d2ac9b7e773d6eef1ca68f",
+      "0xf5f416cbd1c52746bbe27deb32e85f2047ba4c2d0c53cf52017e54114390b799"
+    ],
+    "f564_pool_flow": 1.7328939142985291,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00484755000712875
+  },
+  {
+    "block": 12144997,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x9a8925d3dd962ab04cea1460d131014f830a3875098448dfac7fcfa51201dae0",
+      "0x27de97138a529031f7293e173d5eaec629fe8f1d4c5f96c9e187e502548ed3c0"
+    ],
+    "f564_pool_flow": 30.10156668330046,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.005514966608110245
+  },
+  {
+    "block": 12145388,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xc2d765df336198e5689777114c1cc5ea26321a22fe258971878016ac7eaa766b",
+      "0x781de6ebf4244e6a37d7f92012991042b31b630307c1cbc1ef3855a2d082bdec"
+    ],
+    "f564_pool_flow": 31.211429530527994,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00510617100901089
+  },
+  {
+    "block": 12145394,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xbd2bde35b01521da34c4335c5dce62e357216dad846ee1169a551c94f6196e28",
+      "0x787fb6c2de1b96d9cfa36e38d3506a2a6fea9af80f121dab977d604686f6ff93"
+    ],
+    "f564_pool_flow": 1.3872319365443673,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004862064608580114
+  },
+  {
+    "block": 12145862,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xa3403c79e134fc7414e60d5b18181df8f87a7812aa43c3c830333954175a862f",
+      "0xb7661ba7c290c328f745c365c086bc944d273cf91530a936348a6144fa78e4f7"
+    ],
+    "f564_pool_flow": 11.163350305351742,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004516478407084672
+  },
+  {
+    "block": 12146009,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xfa20dbec541d5f24f267c5535b235ff56ac82bf60f6cbe68663322a0ab7d1a10",
+      "0xfcec81a41d5d55ec0d020a0fc1c009a7d415955c2c405ed7418dcecfe9aaf112"
+    ],
+    "f564_pool_flow": 9.153885743639421,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004856964607142595
+  },
+  {
+    "block": 12147269,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd6f75881766656e9ce1a6a0aa0883056b10cdddeb176c542974970811bb37822",
+      "0x8bf1f93ad2ee1c2e11ea4a3ec987c441c4c381e54b75e16c779e6d18738fc2f8"
+    ],
+    "f564_pool_flow": 17.267219562264927,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00453002400755004
+  },
+  {
+    "block": 12147611,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x236e8ecba06d3b1217d1afe255f3bb28d29688cdfa98b7e3e51d5419afb3c475",
+      "0xb9f48ae07a8e22f2569fb7cfb10f51863e71fcd71decdb38bca32b239dde52c6"
+    ],
+    "f564_pool_flow": 1.059650747889009,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00450539100706728
+  },
+  {
+    "block": 12148389,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xcbe8801ae4c7add180f4c4925312f90adf2a073e864d842e3a20baaee7d12604",
+      "0x0f4058005c542238cfe4da1720da7efcf05b2c0cabf8128e8f032c35f5f626e8"
+    ],
+    "f564_pool_flow": 2.4002524135410113,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004860014407623552
+  },
+  {
+    "block": 12149092,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x75234ca5f4243df4c8066daabd1794c9962079401c3dcebdc6b04af5e13dd2f1",
+      "0x69d7983686a952525b43a708c944dbcab26a6967c886c2d5ee28aa9643f6a9cb"
+    ],
+    "f564_pool_flow": 6.050098369446687,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004507390206628515
+  },
+  {
+    "block": 12150116,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x13caec68d277727420605caa16b932107183172ffd3b32f488f1ccdb75d4ae4b",
+      "0x0544c5b7e7099089c08c9868b0ffcc622c3158800cbf751c5144e0f1a2d19e98"
+    ],
+    "f564_pool_flow": 36.88981600403622,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004520364605761249
+  },
+  {
+    "block": 12150122,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x1cd97221603d421d8d5238280cc6d8ed1d80a94209d9f34ff06708d6144bd589",
+      "0xd90777390c411423ef3aa21cde771803e0c198dd377a8ae2536a135fe41a2b87"
+    ],
+    "f564_pool_flow": 1.5812603276928598,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004860616206194903
+  },
+  {
+    "block": 12150658,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xbc2c4cf749f6efc4f13c83013053d2433eaac8b8129e20daf33c3817eb195c4b",
+      "0x20f30e3d18b189daf02f38fa59d88ad9c5848d0692f8b3b424ff8a3a18048cdf"
+    ],
+    "f564_pool_flow": 5.419037760132937,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004508267406187818
+  },
+  {
+    "block": 12151293,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xb89aeb29da6798574660a654be11667248e6ddc3108ebf189ad2638d2b417cd6",
+      "0xa445b093160abefb4557385b78c1df87ea84070c0a0592a0004af0bc9ba6c2cc"
+    ],
+    "f564_pool_flow": 5.256343610818817,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00132571500618667
+  },
+  {
+    "block": 12152812,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0xd23809a685271afeca250cb5814bf45a6054c74e5119d8f82108212ed0daec5d",
+      "0x37fb2d3bc9e4ba6b78f7043c71a506484ce02c5f0d26bbdb32bfe54ac1bb491b"
+    ],
+    "f564_pool_flow": 3.5241589942146447,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001329072007974432
+  },
+  {
+    "block": 12153300,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x3a4ada44cb4a730ad65df87cf9a05ae4386e525521ef66446c8b950b393eb02d",
+      "0x71a3d63e05f02ff427fd71c8e642bddec62203f5a380cf71644a42308cae3af7"
+    ],
+    "f564_pool_flow": 14.380709562518177,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.00133212000710464
+  },
+  {
+    "block": 12153913,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x44d6188c322e90420cd467ade0ed7ae09ad47f37133aed32893977a65fc9c760",
+      "0xead745f95156612698f86251823879c020db73ed83aba0d6041a0b5d220e1933"
+    ],
+    "f564_pool_flow": 1.7265421286920741,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.001325391007068752
+  },
+  {
+    "block": 12157200,
+    "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "transactions": [
+      "0x29a039fa700f354b916e4cd7544fab1b60f9876e78e3500222232d022a0a8ebf",
+      "0x94d9aab7cc28ea668c33102b440fd63fa9ce1db9f2948032a1729a490a5c2df7"
+    ],
+    "f564_pool_flow": 17.213511743215577,
+    "feth_pool_flow": 0.0,
+    "near_base_neutral": true,
+    "gas_eth": 0.004497047407495079
+  }
+]

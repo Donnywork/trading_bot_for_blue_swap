@@ -273,6 +273,15 @@ class Config:
     # `paused` too (the dashboard does both in one write); the bot sells the open position at the
     # market once per number.
     liquidate_request: int = 0
+    event_paused: bool = True
+    event_backrun: bool = True
+    event_frontrun: bool = False
+    event_arbitrage: bool = False
+    event_exit_request: int = 0
+    event_scan_request: int = 0
+    event_mode: str = "simulate"
+    event_mode_request: int = 0
+    event_start_request: int = 0
 
     def __post_init__(self):
         full = {
@@ -329,6 +338,15 @@ def parse_config(raw):
         "paused",
         "scan_request",
         "liquidate_request",
+        "event_paused",
+        "event_backrun",
+        "event_frontrun",
+        "event_arbitrage",
+        "event_exit_request",
+        "event_scan_request",
+        "event_mode",
+        "event_mode_request",
+        "event_start_request",
     }
     if unknown:
         raise ConfigError(f"unknown setting(s): {sorted(unknown)}")
@@ -374,6 +392,26 @@ def parse_config(raw):
     )
 
     given = raw.get("params", {})
+    event_values = {}
+    for key, default in (
+        ("event_paused", True),
+        ("event_backrun", True),
+        ("event_frontrun", False),
+        ("event_arbitrage", False),
+    ):
+        event_values[key] = raw.get(key, default)
+        if type(event_values[key]) is not bool:
+            raise ConfigError(f"{key} must be true or false")
+    event_values["event_mode"] = raw.get("event_mode", "simulate")
+    if event_values["event_mode"] not in ("simulate", "live"):
+        raise ConfigError("event_mode must be simulate or live")
+    for key in (
+        "event_exit_request",
+        "event_scan_request",
+        "event_mode_request",
+        "event_start_request",
+    ):
+        event_values[key] = number(key, raw.get(key, 0), 0, SCAN_REQUEST_MAX, True)
     if not isinstance(given, dict):
         raise ConfigError("params must be an object")
     params = {}
@@ -411,6 +449,7 @@ def parse_config(raw):
         paused,
         scan_request,
         liquidate_request,
+        **event_values,
     )
     for (
         strategy_name,

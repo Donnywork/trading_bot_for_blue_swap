@@ -76,6 +76,215 @@ def test_snapshot_with_nothing_recorded_yet(app):
     json.dumps(snap)  # everything is serialisable
 
 
+def test_event_controls_preserved_by_form_and_only_write_control(app):
+    event_prices(app)
+    before = set(app.tmp.rglob("*"))
+    app.command({"command": "event_resume"})
+    app.command({"command": "event_frontrun_on"})
+    app.command({"command": "event_scan"})
+    app.update_config({"take_profit_pct": 3})
+    cfg = control.load(app.control_file)
+    assert not cfg.event_paused and cfg.event_frontrun
+    assert cfg.event_scan_request == NOW
+    app.command({"command": "event_exit"})
+    cfg = control.load(app.control_file)
+    assert cfg.event_paused and cfg.event_exit_request == NOW
+    assert set(app.tmp.rglob("*")) - before == {app.control_file}
+
+
+def test_event_status_reads_saved_service_file_and_reports_staleness(app):
+    path = app.tmp / "events/state.json"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps({"updated": NOW - 31, "mode": "paper", "health": "ready"})
+    )
+    snap = app.snapshot()
+    assert snap["events"]["stale"] and snap["events"]["mode"] == "paper"
+    assert snap["event_controls"]["event_paused"]
+    path.write_text("broken")
+    assert app.snapshot()["events"]["health"] == "unreadable"
+
+
+def event_prices(app):
+    import event_history
+
+    folder = app.tmp / "events"
+    folder.mkdir(exist_ok=True)
+    rows = [
+        {
+            "identity": event_history.IDENTITY,
+            "mode": mode,
+            "session": 1,
+            "observed": ts,
+            "timestamp": ts,
+            "block": i,
+            "block_hash": "0x" + f"{i:064x}",
+            "prices": {"500": 1000 + i, "10000": 1100 + i},
+        }
+        for i, (ts, mode) in enumerate(
+            (
+                (NOW - 120, "live"),
+                (NOW - 108, "live"),
+                (NOW - 96, "simulate"),
+                (NOW - 84, "live"),
+                (NOW - 12, "live"),
+            )
+        )
+    ]
+    recorder = event_history.Recorder(folder / "prices.jsonl")
+    for row in rows:
+        recorder.append(row)
+    (folder / "state.json").write_text(
+        json.dumps(
+            {
+                "mode": "live",
+                "health": "ready",
+                "updated": NOW,
+                "snapshot_time": NOW - 12,
+                "connected": True,
+                "mode_done": 10,
+                "controls": {
+                    "event_paused": True,
+                    "event_mode_request": 10,
+                    "event_start_request": 9,
+                    "event_backrun": True,
+                },
+            }
+        )
+    )
+    return folder
+
+
+def test_phase2_views_use_only_event_files_and_preserve_gaps(app, monkeypatch):
+    import socket
+
+    folder = event_prices(app)
+    before = {p: p.read_bytes() for p in app.tmp.rglob("*") if p.is_file()}
+    monkeypatch.setattr(
+        socket.socket, "connect", lambda *a: pytest.fail("dashboard network access")
+    )
+    # A legacy file failure must not prevent Phase 2 status or charts.
+    monkeypatch.setattr(state, "load", lambda *a: pytest.fail("read legacy state"))
+    view = app.events_view()
+    assert view["events"]["mode"] == "live"
+    assert "Start Trading" in view["entry"]["summary"]
+    prices = app.event_prices_view({"fee": ["10000"]})
+    assert prices["unit"] == "f564 per fETH" and not prices["stale"]
+    assert prices["mode"] == "live" and prices["samples"] == 4
+    assert [len(s) for s in prices["segments"]] == [2, 1, 1]
+    assert prices["latest"]["price"] == 1104
+    assert app.event_prices_view({"mode": ["simulate"]})["samples"] == 1
+    assert app.event_prices_view({"range": ["60"]})["samples"] == 1
+    app.clock = lambda: NOW + 100
+    assert app.event_prices_view({})["stale"]
+    assert {p: p.read_bytes() for p in app.tmp.rglob("*") if p.is_file()} == before
+    assert (folder / "prices.jsonl").exists()
+
+
+def test_event_price_empty_corrupt_and_many_gaps(app):
+    assert app.event_prices_view({})["latest"] is None
+    folder = event_prices(app)
+    path = folder / "prices.jsonl"
+    template = json.loads(path.read_text().splitlines()[0])
+    path.write_text(
+        "\n".join(
+            json.dumps(template | {"timestamp": NOW - 20000 + i * 100})
+            for i in range(200)
+        )
+    )
+    result = app.event_prices_view({"range": ["all"], "max": ["50"]})
+    assert sum(map(len, result["segments"])) <= 50
+    assert result["omitted_segments"] > 0
+    path.write_text("broken")
+    assert app.event_prices_view({})["error"]
+    assert app.event_prices_view({})["segments"] == []
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "fee=3000",
+        "mode=legacy",
+        "range=nan",
+        "max=1",
+        "range=",
+        "fee=500&fee=10000",
+        "unexpected=true",
+    ],
+)
+def test_event_chart_rejects_bad_queries(server, query):
+    assert request(server, "GET", "/api/event-prices?" + query)[0].status == 400
+
+
+def test_phase2_and_legacy_pages_are_separate_and_protected(server, app):
+    event_prices(app)
+    response, page = request(server, "GET", "/")
+    assert response.status == 200
+    assert b"/api/events" in page and b"/api/event-prices" in page
+    assert b'id="form"' not in page and b"Strategy comparison" not in page
+    response, page = request(server, "GET", "/legacy")
+    assert response.status == 200 and b"Legacy polling recovery only" in page
+    assert b'id="form"' in page and b"/api/status" in page
+    for path in ("/api/events", "/api/event-prices"):
+        assert request(server, "GET", path)[0].status == 200
+        assert (
+            request(server, "GET", path, headers={"Origin": "https://foreign.invalid"})[
+                0
+            ].status
+            == 403
+        )
+        assert (
+            request(server, "GET", path, headers={"Host": "foreign.invalid"})[0].status
+            == 403
+        )
+
+
+def test_event_commands_refuse_corrupt_controls(app):
+    app.control_file.write_text("broken")
+    with pytest.raises(ValueError):
+        app.command({"command": "event_resume"})
+    assert app.control_file.read_text() == "broken"
+
+
+def test_mode_request_through_loopback_only_writes_control(server, app, monkeypatch):
+    from requests.adapters import HTTPAdapter
+
+    monkeypatch.setattr(
+        HTTPAdapter, "send", lambda *a, **kw: pytest.fail("dashboard called RPC")
+    )
+    folder = event_prices(app)
+    # The dashboard is only permitted to start after a real runtime acknowledgement.
+    value = json.loads((folder / "state.json").read_text())
+    value["mode_done"] = NOW
+    (folder / "state.json").write_text(json.dumps(value))
+    original = {p: p.read_bytes() for p in app.tmp.rglob("*") if p.is_file()}
+    headers = {"Content-Type": "application/json"}
+    for cmd in ("event_live", "event_resume", "event_pause", "event_simulate"):
+        response, body = request(
+            server, "POST", "/api/command", json.dumps({"command": cmd}), headers
+        )
+        assert response.status == 200
+        view = json.loads(body)["control"]
+        assert view["event_paused"] == (cmd != "event_resume")
+        assert view["event_mode"] == ("simulate" if cmd == "event_simulate" else "live")
+        assert request(server, "GET", "/api/status")[0].status == 200
+    before = app.control_file.read_bytes()
+    for raw in (
+        {"command": "event_mainnet"},
+        {"command": "event_live", "DRY_RUN": False},
+    ):
+        assert (
+            request(server, "POST", "/api/command", json.dumps(raw), headers)[0].status
+            == 400
+        )
+    assert app.control_file.read_bytes() == before
+    assert {
+        p: p.read_bytes()
+        for p in app.tmp.rglob("*")
+        if p.is_file() and p != app.control_file
+    } == original
+
+
 def test_snapshot_shows_the_position_targets_and_unrealized_profit(app):
     data = ledger.open_position(
         ledger.empty(), 1000.0, Decimal("0.00001"), Decimal("0.01"), NOW - 600
@@ -167,7 +376,7 @@ def test_a_broken_ledger_or_settings_file_is_reported_not_fatal(app):
 
 def test_serves_the_page_and_the_status(server):
     r, body = request(server, "GET", "/")
-    assert r.status == 200 and b"Trading bot" in body
+    assert r.status == 200 and b"Phase 2 trading" in body
     assert r.getheader("Content-Type").startswith("text/html")
     assert "default-src 'none'" in r.getheader("Content-Security-Policy")
     r, body = request(server, "GET", "/api/status")
@@ -877,7 +1086,7 @@ def test_the_snapshot_tells_the_page_what_the_buttons_show(app):
 
 
 def test_the_page_has_the_buttons(app):
-    page = dashboard.PAGE.read_text()
+    page = dashboard.LEGACY_PAGE.read_text()
     for needle in (
         'id="controls-bar"',
         "/api/command",

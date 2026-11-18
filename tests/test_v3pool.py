@@ -24,9 +24,9 @@ def test_the_saved_layout_loads_and_is_for_the_fee_tier_the_maths_assumes():
     assert PROFILE["ticks"]
 
 
-def test_a_layout_for_another_fee_tier_is_refused(tmp_path):
+def test_a_layout_for_an_unsupported_fee_tier_is_refused(tmp_path):
     other = tmp_path / "other.json"
-    other.write_text(json.dumps({**PROFILE, "fee": 500}))
+    other.write_text(json.dumps({**PROFILE, "fee": 12345}))
     with pytest.raises(ValueError, match="does not match"):
         v3pool.load_profile(other)
 

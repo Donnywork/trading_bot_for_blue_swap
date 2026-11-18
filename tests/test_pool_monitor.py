@@ -195,17 +195,22 @@ def monitor_env(tmp_path, monkeypatch):
     monkeypatch.setattr(pool_monitor, "LOG_DIR", tmp_path)
     monkeypatch.setattr(pool_monitor.config, "read_token", lambda w3, a: ("T", 18))
     monkeypatch.delenv("BOT_CONTRACT_ADDRESS", raising=False)
+    monkeypatch.setenv("FETH_ADDRESS", "0x" + "11" * 20)
+    monkeypatch.setenv("F564_ADDRESS", "0x" + "22" * 20)
 
 
 class Tokens:
     # stands in for pool.functions.token0() / token1()
     def token0(self):
+        self.value = "0x" + "11" * 20
         return self
 
-    token1 = token0
+    def token1(self):
+        self.value = "0x" + "22" * 20
+        return self
 
     def call(self):
-        return "0x" + "00" * 20
+        return self.value
 
 
 def make_pool(logs):

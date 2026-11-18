@@ -11,7 +11,7 @@ from web3.exceptions import Web3RPCError
 
 import bot_contract
 import config
-from main import LOG_DIR, READ_ERRORS, redact
+from legacy_main import LOG_DIR, READ_ERRORS, redact
 
 SEEN_FILE = LOG_DIR / "monitor_seen.json"
 BLOCK_SECONDS = 12  # Sepolia; only used to turn "hours back" into a start block
@@ -70,18 +70,22 @@ def block_times(w3, blocks):
     return {b: w3.eth.get_block(b)["timestamp"] for b in blocks}
 
 
-def to_swaps(logs, times, decimals0, decimals1):
+def to_swaps(logs, times, decimals0, decimals1, base_is_token0=True):
     swaps = []
     for e in logs:
         a = e["args"]
-        price = (a["sqrtPriceX96"] / 2**96) ** 2 * 10 ** (decimals0 - decimals1)
+        price = config.quote_per_base(
+            a["sqrtPriceX96"], decimals0, decimals1, base_is_token0
+        )
+        amount = a["amount0"] if base_is_token0 else a["amount1"]
+        decimals = decimals0 if base_is_token0 else decimals1
         swaps.append(
             Swap(
                 ts=times[e["blockNumber"]],
                 recipient=a["recipient"],
                 # amount0 is from the pool's side: negative means the pool paid token0 out
-                side="buy" if a["amount0"] < 0 else "sell",
-                base_amount=abs(a["amount0"]) / 10**decimals0,
+                side="buy" if amount < 0 else "sell",
+                base_amount=abs(amount) / 10**decimals,
                 price=price,
             )
         )
@@ -190,6 +194,13 @@ def report(block, now, swaps, hours, symbols, new, mine):
 def run(w3, pool, hours, watch):
     symbol0, decimals0 = config.read_token(w3, pool.functions.token0().call())
     symbol1, decimals1 = config.read_token(w3, pool.functions.token1().call())
+    tokens = config.market_tokens()
+    token0 = pool.functions.token0().call().lower()
+    token1 = pool.functions.token1().call().lower()
+    if {token0, token1} != {a.lower() for a in tokens.values()}:
+        raise ValueError("Pool tokens do not match FETH_ADDRESS / F564_ADDRESS")
+    base_is_token0 = token0 == tokens["feth"].lower()
+    symbols = (symbol0, symbol1) if base_is_token0 else (symbol1, symbol0)
     mine = os.environ.get("BOT_CONTRACT_ADDRESS", "").lower()
     seen = load_seen()
 
@@ -200,7 +211,7 @@ def run(w3, pool, hours, watch):
             latest = w3.eth.block_number
             logs = fetch_swaps(pool, last + 1, latest)
             times = block_times(w3, {e["blockNumber"] for e in logs})
-            fresh = to_swaps(logs, times, decimals0, decimals1)
+            fresh = to_swaps(logs, times, decimals0, decimals1, base_is_token0)
             now = w3.eth.get_block(latest)["timestamp"]
         except READ_ERRORS as e:
             if not watch:
@@ -211,7 +222,7 @@ def run(w3, pool, hours, watch):
             swaps = [s for s in swaps + fresh if s.ts >= now - hours * 3600]
             current = {s.recipient for s in swaps}
             new = set() if seen is None else current - seen
-            report(latest, now, swaps, hours, (symbol0, symbol1), new, mine)
+            report(latest, now, swaps, hours, symbols, new, mine)
             seen = current | (seen or set())
             save_seen(seen)
         if not watch:

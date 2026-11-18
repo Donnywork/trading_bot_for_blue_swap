@@ -23,6 +23,39 @@ def empty():
     return {"open": None, "closed": []}
 
 
+def bind_market(directory, identity):
+    # Old positions and prices cannot acquire a new meaning when .env changes phases or pools.
+    directory = Path(directory)
+    marker = directory / "market.json"
+    try:
+        saved = json.loads(marker.read_text())
+    except FileNotFoundError:
+        if any(
+            (directory / name).exists()
+            for name in (
+                "ledger.json",
+                "ledger_dryrun.json",
+                "prices.csv",
+                "state.json",
+                "control.json",
+                "pool_profile.json",
+            )
+        ):
+            raise ValueError(
+                "Unidentified market records in logs/: reconcile any open position, then archive logs/ before changing markets"
+            ) from None
+        atomic_write(marker, json.dumps(identity, sort_keys=True))
+        return
+    except (ValueError, OSError) as e:
+        raise ValueError(
+            "logs/market.json is unreadable; restore it before starting"
+        ) from e
+    if saved != identity:
+        raise ValueError(
+            "Market changed: reconcile any open position, then archive logs/ before starting the new market"
+        )
+
+
 OPEN_KEYS = {"opened", "entry_price", "base", "quote_spent"}
 CLOSED_KEYS = OPEN_KEYS | {"closed", "exit_price", "quote_received", "reason"}
 

@@ -51,6 +51,34 @@ def load(path):
                 "the pool depth scale is not a finite, non-negative number"
             )
         chain["depth_scale"] = scale
+        chain["market"] = raw.get("market")
+        if chain["market"] is not None:
+            market = chain["market"]
+            if (
+                not isinstance(market, dict)
+                or not {
+                    "pool_address",
+                    "base_address",
+                    "quote_address",
+                    "fee",
+                    "base_is_token0",
+                }
+                <= market.keys()
+            ):
+                raise ValueError("invalid market identity")
+            if (
+                type(market["fee"]) is not int
+                or market["fee"] not in (100, 500, 3000, 10000)
+                or type(market["base_is_token0"]) is not bool
+                or not all(
+                    isinstance(market[k], str)
+                    and len(market[k]) == 42
+                    and market[k].startswith("0x")
+                    and all(c in "0123456789abcdefABCDEF" for c in market[k][2:])
+                    for k in ("pool_address", "base_address", "quote_address")
+                )
+            ):
+                raise ValueError("invalid market identity")
         # the bot's last answer to the dashboard's "scan the pool" button: which request it served
         # ("done"), and either the block it read ("block", "at") or why it could not ("error")
         scan = raw.get("scan")

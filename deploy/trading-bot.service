@@ -1,6 +1,6 @@
 # systemd unit for Ubuntu 24.04. Replace __USER__ and __PROJECT_DIR__ (see docs/DEPLOY.md, part 4).
 [Unit]
-Description=Uniswap V3 trading bot (Sepolia testnet)
+Description=Phase 2 trading bot (Sepolia testnet)
 After=network-online.target
 Wants=network-online.target
 # give up (and show "failed") if it crashes 5 times within 10 minutes
@@ -16,7 +16,7 @@ ExecStart=__PROJECT_DIR__/.venv/bin/python main.py
 Environment=PYTHONUNBUFFERED=1
 
 # Restart after a crash (non-zero exit) but NOT after a clean stop or a kill-switch halt
-# (the bot exits 0 in both cases and writes logs/HALTED)
+# Execution halts are recorded in logs/events/HALTED.
 Restart=on-failure
 RestartSec=30
 

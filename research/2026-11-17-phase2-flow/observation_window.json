@@ -1,0 +1,7 @@
+{
+  "start_utc": "2026-11-17T22:37:50.293816+00:00",
+  "scheduled_stop_utc": "2026-11-17T22:57:50.293816+00:00",
+  "seconds": 1200,
+  "observer_pid": 34373,
+  "output_file": "pending_observations-20261117T223346035819Z.jsonl"
+}

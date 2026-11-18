@@ -1,0 +1,24 @@
+{
+  "provider": "Alchemy",
+  "chain_id": 11155111,
+  "addresses": [
+    "0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7",
+    "0x24ff22d754d5c0cfdbd6ad3c30ee8af487abe694",
+    "0x2885f394be3a5c36a0ce67701bfb6c49bb1fb8db",
+    "0x357b12245881cac9d9d62e740e298dccb8b83c0a",
+    "0x566a1071be7c2c5d4c8e8bac4e24f57879183744",
+    "0x6011139d5f16689bde1d245c6247b088f9582026",
+    "0x99a7161a05edbbfd20f36023cea6f3c1dd3a81fd",
+    "0xa353f08d51bc94ab0f16beb85a362ea897f26728",
+    "0xa9169a32c2a4b28d0d3c14a4c5510aee32ef466c",
+    "0xb6bf0ba3f43d4386216df037dca1a1203038e135",
+    "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef"
+  ],
+  "started_utc": "2026-11-17T22:33:46.035576+00:00",
+  "subscribed": true,
+  "state": "stopped",
+  "output_file": "pending_observations-20261117T223346035819Z.jsonl",
+  "pending_notifications": 5,
+  "mined_notifications": 5,
+  "elapsed_seconds": 1447.3049915420124
+}

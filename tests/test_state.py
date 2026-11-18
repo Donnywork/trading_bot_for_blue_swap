@@ -25,6 +25,7 @@ def test_a_saved_state_loads_back(tmp_path):
         "depth_scale": 1.0,
         "scan": None,
         "liquidate": None,
+        "market": None,
     }
 
 

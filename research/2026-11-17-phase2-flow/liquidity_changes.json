@@ -1,0 +1,941 @@
+[
+  {
+    "block": 12107932,
+    "tx_index": 196,
+    "log_index": 356,
+    "hash": "0x195b5dc76eabcf1000aaba4fe3426d130e99e7a15c631a3e58176631f4c4541e",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69670,
+      "tickUpper": -68460,
+      "amount": 15397204559616935695626,
+      "amount0": 14885440150882076804005,
+      "amount1": 14129333911804000000
+    },
+    "fee": 500,
+    "lower_price": 939.791199893862,
+    "upper_price": 1060.6653440068262
+  },
+  {
+    "block": 12107947,
+    "tx_index": 2,
+    "log_index": 31,
+    "hash": "0x880ffa6adefc890c5d27e30cb9f16111dbf95a48ea8bd685c6b938010d2cae14",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -887270,
+      "tickUpper": 887270,
+      "amount": 252982212813470346560,
+      "amount0": 7999999999999999999990,
+      "amount1": 7999999999999999987
+    },
+    "fee": 500,
+    "lower_price": 2.939544628365392e-39,
+    "upper_price": 3.4018874568203963e+38
+  },
+  {
+    "block": 12107957,
+    "tx_index": 117,
+    "log_index": 309,
+    "hash": "0x4459c229e4b2535977e83efbd01ecfc884b24e8b5e5e2ea570e5f28009f268ce",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -68470,
+      "tickUpper": -67450,
+      "amount": 1231776364784517873220,
+      "amount0": 1878392119862391000000,
+      "amount1": 0
+    },
+    "fee": 500,
+    "lower_price": 849.5125993413282,
+    "upper_price": 940.7314141125904
+  },
+  {
+    "block": 12107977,
+    "tx_index": 4,
+    "log_index": 7,
+    "hash": "0xa3b21a66f61421b43e7cd84c7561d9abcd0c98614f7fb45d1a66e1486c516d42",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -67460,
+      "tickUpper": -64770,
+      "amount": 615888182392265440777,
+      "amount0": 2260096164668004999997,
+      "amount1": 0
+    },
+    "fee": 500,
+    "lower_price": 649.8075041628938,
+    "upper_price": 850.3624943232984
+  },
+  {
+    "block": 12108016,
+    "tx_index": 300,
+    "log_index": 346,
+    "hash": "0x57652a7d42d9fd973a7cdfa53ba92fa7e028f4d6e03266ad4768f449ef8661c5",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70480,
+      "tickUpper": -69660,
+      "amount": 1231776364785556572906,
+      "amount0": 0,
+      "amount1": 1520021671522000000
+    },
+    "fee": 500,
+    "lower_price": 1059.605261795488,
+    "upper_price": 1150.1499722316614
+  },
+  {
+    "block": 12108027,
+    "tx_index": 21,
+    "log_index": 28,
+    "hash": "0xe8b139d8d4ceb5a92af1faf9b868e5bce4ea19ec2562700f6af68f86c4fbc698",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -73140,
+      "tickUpper": -70470,
+      "amount": 615888182392618888823,
+      "amount0": 0,
+      "amount1": 2270575981617000000
+    },
+    "fee": 500,
+    "lower_price": 1149.000454588964,
+    "upper_price": 1500.6210344563885
+  },
+  {
+    "block": 12108045,
+    "tx_index": 5,
+    "log_index": 9,
+    "hash": "0x3b8bd262266a2928f7c80fb0e091f22b51ba2cd56ea15edb096745cee405bdc1",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -92200,
+      "tickUpper": -46000,
+      "amount": 6158881823924141493109,
+      "amount0": 133338196555869407350502,
+      "amount1": 133454742633764000000
+    },
+    "fee": 10000,
+    "lower_price": 99.4614384054052,
+    "upper_price": 10092.41096438718
+  },
+  {
+    "block": 12108065,
+    "tx_index": 0,
+    "log_index": 4,
+    "hash": "0xa55419c2a0b8b0c6c90456588f96e97b4922d99f1ee178f371058002848c7868",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -887200,
+      "tickUpper": 887200,
+      "amount": 126491106406735173280,
+      "amount0": 3999999999999999999995,
+      "amount1": 3999999999999999994
+    },
+    "fee": 10000,
+    "lower_price": 2.960192591947277e-39,
+    "upper_price": 3.3781585790071143e+38
+  },
+  {
+    "block": 12108208,
+    "tx_index": 77,
+    "log_index": 223,
+    "hash": "0x2e0755616999674627bb47bc8438329b7acb843b9f01f51f677aa3901e606508",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69620,
+      "tickUpper": -68610,
+      "amount": 5073580761800374789535,
+      "amount0": 3734102815997556354744,
+      "amount1": 4265870772560400896
+    },
+    "fee": 500,
+    "lower_price": 953.993609575361,
+    "upper_price": 1055.3755173602501
+  },
+  {
+    "block": 12120599,
+    "tx_index": 22,
+    "log_index": 24,
+    "hash": "0x7a164693cc4bb538a61f17d54cb0574f45ad579cb0bd7b38cbb2550b87bebe66",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69570,
+      "tickUpper": -68920,
+      "amount": 11693313249938988456146,
+      "amount0": 4905656581314501172028,
+      "amount1": 7000000000000000000
+    },
+    "fee": 500,
+    "lower_price": 984.0290539328204,
+    "upper_price": 1050.1120725183675
+  },
+  {
+    "block": 12135197,
+    "tx_index": 57,
+    "log_index": 143,
+    "hash": "0x44b5099c9f771e3c2c2255dffee3c0ea6bca7841704e5d663f95c4db9b62bc96",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69620,
+      "tickUpper": -68610,
+      "amount": 5073580761800374789535,
+      "amount0": 7280472750689343806432,
+      "amount1": 796194316659279796
+    },
+    "fee": 500,
+    "lower_price": 953.993609575361,
+    "upper_price": 1055.3755173602501
+  },
+  {
+    "block": 12135198,
+    "tx_index": 104,
+    "log_index": 221,
+    "hash": "0x5cff3511c3c48ade0e0c9a20a9bbd2e4031b2904c83040adc4f2b421ad41b144",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70010,
+      "tickUpper": -69000,
+      "amount": 3273984534584731224611,
+      "amount0": 2706946321580822290050,
+      "amount1": 2459855881492420096
+    },
+    "fee": 500,
+    "lower_price": 991.9324626860824,
+    "upper_price": 1097.34617243372
+  },
+  {
+    "block": 12135344,
+    "tx_index": 114,
+    "log_index": 209,
+    "hash": "0x1914a011d08df5eb120e0ecb65cdffba22962bf76a4cebfd05bd59d4e94e12ea",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2081604383257961023681,
+      "amount0": 1856993472612647837157,
+      "amount1": 2030672484799396864
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12136685,
+    "tx_index": 111,
+    "log_index": 219,
+    "hash": "0x0881dd67ea1e0154912fad5d065a680c7745023e27cfa48782ac1ec463b7161b",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 0,
+      "amount0": 0,
+      "amount1": 0
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12136834,
+    "tx_index": 97,
+    "log_index": 233,
+    "hash": "0x62615d51a0c2a9744b7543a637336cd13b8a43884c883dccde2dc3422a712707",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2081604383257961023681,
+      "amount0": 3135077352470085207357,
+      "amount1": 811609120670954283
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12136835,
+    "tx_index": 115,
+    "log_index": 393,
+    "hash": "0x6767627a0a9d4db990c3ea8c0bc61e2a6c6220be8f89e06a350138987afc5e4a",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70400,
+      "tickUpper": -69200,
+      "amount": 2080419355314161611029,
+      "amount0": 1822881818512493002999,
+      "amount1": 2055286320700865536
+    },
+    "fee": 10000,
+    "lower_price": 1011.9698157455169,
+    "upper_price": 1140.9859356666273
+  },
+  {
+    "block": 12138317,
+    "tx_index": 63,
+    "log_index": 167,
+    "hash": "0x26444469686695a58bcc25844bc1eaeef46c085c30117d75e8009bb963145911",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70400,
+      "tickUpper": -69200,
+      "amount": 0,
+      "amount0": 0,
+      "amount1": 0
+    },
+    "fee": 10000,
+    "lower_price": 1011.9698157455169,
+    "upper_price": 1140.9859356666273
+  },
+  {
+    "block": 12138466,
+    "tx_index": 98,
+    "log_index": 199,
+    "hash": "0x78db8b96c7278e68d9d9c3a7a2ac4e0ceb351b748af7fb24f5b95bcf51ac0433",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70400,
+      "tickUpper": -69200,
+      "amount": 2080419355314161611029,
+      "amount0": 1029633298729277121698,
+      "amount1": 2806453711871390425
+    },
+    "fee": 10000,
+    "lower_price": 1011.9698157455169,
+    "upper_price": 1140.9859356666273
+  },
+  {
+    "block": 12138467,
+    "tx_index": 63,
+    "log_index": 98,
+    "hash": "0x46556e5a3c530e9d0b6ad1f5bc7bb160093e41a69f287d5cc0f4ce8ec39af65b",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2109128418450781276936,
+      "amount0": 2372335871432100068784,
+      "amount1": 1583873870317906944
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12138761,
+    "tx_index": 112,
+    "log_index": 187,
+    "hash": "0x35261bcfd5e8923e8e2972230e24b025329ce92b7df59013d15102e539712547",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2109128418450781276936,
+      "amount0": 3296864444900263412999,
+      "amount1": 709916136969453956
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12138762,
+    "tx_index": 62,
+    "log_index": 101,
+    "hash": "0xc251946a41a640c18f4f682b4c69fba0de94ff0015942c031c0651274bcd97bc",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70400,
+      "tickUpper": -69200,
+      "amount": 2090930698786323087801,
+      "amount0": 1951387204130863291360,
+      "amount1": 1954216192680026368
+    },
+    "fee": 10000,
+    "lower_price": 1011.9698157455169,
+    "upper_price": 1140.9859356666273
+  },
+  {
+    "block": 12139204,
+    "tx_index": 85,
+    "log_index": 185,
+    "hash": "0xc06d15fa0977fda631fcfff2b599da81839e68260c179104a31a2ad93a689100",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70400,
+      "tickUpper": -69200,
+      "amount": 2090930698786323087801,
+      "amount0": 867721475349199665640,
+      "amount1": 2981146969521833540
+    },
+    "fee": 10000,
+    "lower_price": 1011.9698157455169,
+    "upper_price": 1140.9859356666273
+  },
+  {
+    "block": 12139205,
+    "tx_index": 111,
+    "log_index": 205,
+    "hash": "0xbd793464045068caf6bfccac52714451c3362b5731274b07f1040902c79f8115",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2114963309040998611742,
+      "amount0": 2209864100713139416294,
+      "amount1": 1750614165969030656
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12140384,
+    "tx_index": 95,
+    "log_index": 173,
+    "hash": "0xa47b5a69c3241453f1b5c6ddacd7b3bde2450faae5abecb3f4df225489ca03dd",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2114963309040998611742,
+      "amount0": 873162392709860356173,
+      "amount1": 3063452029376531840
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12140385,
+    "tx_index": 106,
+    "log_index": 188,
+    "hash": "0x19a8db6acbd8f0adff3c794cca2f14e766f4b9b964ca601bfb5b1def8f6a76a6",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69600,
+      "tickUpper": -68400,
+      "amount": 2144035488730062559641,
+      "amount0": 2208906037299688812920,
+      "amount1": 1797478410013457152
+    },
+    "fee": 10000,
+    "lower_price": 934.1696153864627,
+    "upper_price": 1053.266980989772
+  },
+  {
+    "block": 12140683,
+    "tx_index": 73,
+    "log_index": 136,
+    "hash": "0xc818fdcae20a6414242bf33c56bf9dace73306f04f09058a1b3d1a551c7bf6f7",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69600,
+      "tickUpper": -68400,
+      "amount": 2144035488730062559641,
+      "amount0": 3229073715110391663692,
+      "amount1": 790643342019707501
+    },
+    "fee": 10000,
+    "lower_price": 934.1696153864627,
+    "upper_price": 1053.266980989772
+  },
+  {
+    "block": 12140684,
+    "tx_index": 14,
+    "log_index": 38,
+    "hash": "0xca54816067b067856afb41b71d919f9c8af1e37258ddb499e4a66453ed55c749",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2128943862896926801690,
+      "amount0": 1891921094694170419458,
+      "amount1": 2083954314914062592
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12142601,
+    "tx_index": 38,
+    "log_index": 75,
+    "hash": "0xc53352cf538c68e1d2ede34fe59c29098f8ccbeede349baa20990959caf06b80",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 0,
+      "amount0": 0,
+      "amount1": 0
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12143194,
+    "tx_index": 29,
+    "log_index": 38,
+    "hash": "0x96b4b4264fb340f41f0b1ec1b2d63fa180afc55ef234a9bf2b422755c2d5f8bc",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70010,
+      "tickUpper": -69000,
+      "amount": 3273984534584731224611,
+      "amount0": 305125919647224747071,
+      "amount1": 4812310163637426601
+    },
+    "fee": 500,
+    "lower_price": 991.9324626860824,
+    "upper_price": 1097.34617243372
+  },
+  {
+    "block": 12143196,
+    "tx_index": 58,
+    "log_index": 215,
+    "hash": "0x2c43d0a93e4efe8d155214b3beeee16334669ce1f01f26032c9e2485dc6c40fd",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69550,
+      "tickUpper": -68540,
+      "amount": 2747667872012535716904,
+      "amount0": 2223629556883917552191,
+      "amount1": 2108941256572378368
+    },
+    "fee": 500,
+    "lower_price": 947.3393042570353,
+    "upper_price": 1048.0140519924403
+  },
+  {
+    "block": 12143637,
+    "tx_index": 75,
+    "log_index": 191,
+    "hash": "0x973dc42d7956ef33f56bf8fba86233d240901990dacf04cb01b0dbcd2aec891a",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -70000,
+      "tickUpper": -68800,
+      "amount": 2128943862896926801690,
+      "amount0": 331392761022578251764,
+      "amount1": 3636728139105153910
+    },
+    "fee": 10000,
+    "lower_price": 972.2918561613582,
+    "upper_price": 1096.2494295603437
+  },
+  {
+    "block": 12143639,
+    "tx_index": 10,
+    "log_index": 21,
+    "hash": "0x770ddc96846f5b5b5ac47ef3cf521207e6348f01d13ba37780bdf552e76734de",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69400,
+      "tickUpper": -68200,
+      "amount": 2261348796816495770555,
+      "amount0": 2435858552769429975204,
+      "amount1": 1783004805491809792
+    },
+    "fee": 10000,
+    "lower_price": 915.6727332565299,
+    "upper_price": 1032.4119297465797
+  },
+  {
+    "block": 12144377,
+    "tx_index": 92,
+    "log_index": 197,
+    "hash": "0x20a1498dbb1e9344ff246f24897e7adce21b1c74b033a65d602334ddc34f11b9",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69550,
+      "tickUpper": -68540,
+      "amount": 2747667872012535716904,
+      "amount0": 89563126889105636211,
+      "amount1": 4301600702342138671
+    },
+    "fee": 500,
+    "lower_price": 947.3393042570353,
+    "upper_price": 1048.0140519924403
+  },
+  {
+    "block": 12144379,
+    "tx_index": 35,
+    "log_index": 116,
+    "hash": "0x6e21744d63d12e63e34a8fbcf76ee83ac0f72e1c383d1f2d17f084377fa76aa4",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69050,
+      "tickUpper": -68040,
+      "amount": 2262430558308017081576,
+      "amount0": 1501466261993935673883,
+      "amount1": 2081183450348413440
+    },
+    "fee": 500,
+    "lower_price": 901.139273890522,
+    "upper_price": 996.9042956369217
+  },
+  {
+    "block": 12145561,
+    "tx_index": 105,
+    "log_index": 215,
+    "hash": "0x40033dbadac577b691f1eae8bbe01ae9cfa73c80dd7f611927eb1e46b017a041",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69050,
+      "tickUpper": -68040,
+      "amount": 2262430558308017081576,
+      "amount0": 3462166570584277648431,
+      "amount1": 55697241148170510
+    },
+    "fee": 500,
+    "lower_price": 901.139273890522,
+    "upper_price": 996.9042956369217
+  },
+  {
+    "block": 12145562,
+    "tx_index": 16,
+    "log_index": 25,
+    "hash": "0x3863fccad2a375bdb30d21e46ce94b07bcaf93b5fcaecf8b2f4f7e8351eab8b0",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69530,
+      "tickUpper": -68520,
+      "amount": 2654050611507160465235,
+      "amount0": 2126299597929336010877,
+      "amount1": 2058631277237348864
+    },
+    "fee": 500,
+    "lower_price": 945.4466136029964,
+    "upper_price": 1045.9202231049505
+  },
+  {
+    "block": 12145983,
+    "tx_index": 16,
+    "log_index": 37,
+    "hash": "0xd0a14070adb9b3a989dbd674f61ee6206b768f8f25a13fd4590b596dfcd80b91",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69400,
+      "tickUpper": -68200,
+      "amount": 0,
+      "amount0": 0,
+      "amount1": 0
+    },
+    "fee": 10000,
+    "lower_price": 915.6727332565299,
+    "upper_price": 1032.4119297465797
+  },
+  {
+    "block": 12147780,
+    "tx_index": 52,
+    "log_index": 62,
+    "hash": "0x0997c3f679e37bf67a300c02d5d49c669d2c22f63c38c41b0dbba333004756fd",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69530,
+      "tickUpper": -68520,
+      "amount": 2654050611507160465235,
+      "amount0": 186995302608743616256,
+      "amount1": 4053177727423423112
+    },
+    "fee": 500,
+    "lower_price": 945.4466136029964,
+    "upper_price": 1045.9202231049505
+  },
+  {
+    "block": 12147781,
+    "tx_index": 28,
+    "log_index": 52,
+    "hash": "0x6d361fada09bdcef4010c966205704ff3840c0123ffd7314caae78c89edea7cd",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69060,
+      "tickUpper": -68050,
+      "amount": 2658335357089127542593,
+      "amount0": 2085670891387906191654,
+      "amount1": 2105294790300730624
+    },
+    "fee": 500,
+    "lower_price": 902.0408187852413,
+    "upper_price": 997.901648659141
+  },
+  {
+    "block": 12148371,
+    "tx_index": 74,
+    "log_index": 240,
+    "hash": "0x98d42c616d301cf1c09aad21b6c877778d7690fb4e9bda09fcce89c6138629f2",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69060,
+      "tickUpper": -68050,
+      "amount": 2658335357089127542593,
+      "amount0": 2088461395538040538257,
+      "amount1": 2102356850773547829
+    },
+    "fee": 500,
+    "lower_price": 902.0408187852413,
+    "upper_price": 997.901648659141
+  },
+  {
+    "block": 12148372,
+    "tx_index": 79,
+    "log_index": 202,
+    "hash": "0xf665cdff0f8f26b82eb45607031e90d3909bd813ed8d7c6312a7653bfee46dae",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69150,
+      "tickUpper": -67940,
+      "amount": 2233177891808596869561,
+      "amount0": 2122306943259410790087,
+      "amount1": 2083509288975887360
+    },
+    "fee": 500,
+    "lower_price": 892.1732343569271,
+    "upper_price": 1006.9228469470088
+  },
+  {
+    "block": 12149110,
+    "tx_index": 51,
+    "log_index": 115,
+    "hash": "0xdf205fb4081675b3fe9cd9e8eba33b39763f111d68abee4ed85b72e2adfde21b",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69400,
+      "tickUpper": -68200,
+      "amount": 0,
+      "amount0": 0,
+      "amount1": 0
+    },
+    "fee": 10000,
+    "lower_price": 915.6727332565299,
+    "upper_price": 1032.4119297465797
+  },
+  {
+    "block": 12152934,
+    "tx_index": 45,
+    "log_index": 79,
+    "hash": "0x7638fc62fecc172aabc8ac670e2af1b3d5bea0198d0f96f06878fcfc8489ccc2",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69400,
+      "tickUpper": -68200,
+      "amount": 0,
+      "amount0": 0,
+      "amount1": 0
+    },
+    "fee": 10000,
+    "lower_price": 915.6727332565299,
+    "upper_price": 1032.4119297465797
+  },
+  {
+    "block": 12154646,
+    "tx_index": 2,
+    "log_index": 4,
+    "hash": "0x31f33dfb6cdf69a9fc1d2a8f0300d34493881234d88318a0f5fc47ade3763399",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69920,
+      "tickUpper": -67910,
+      "amount": 1013448850173943840471,
+      "amount0": 1640037548891192506242,
+      "amount1": 1500000000000000000
+    },
+    "fee": 500,
+    "lower_price": 889.5008588378654,
+    "upper_price": 1087.5148557226412
+  },
+  {
+    "block": 12154843,
+    "tx_index": 4,
+    "log_index": 9,
+    "hash": "0xf98939389abd2a1c267316e7fdd61541773d3dd11dbfccdd903c395e2ad7ba8a",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -887270,
+      "tickUpper": 887270,
+      "amount": 252255947875934930409,
+      "amount0": 7931626913481296872666,
+      "amount1": 8022700000000000000
+    },
+    "fee": 500,
+    "lower_price": 2.939544628365392e-39,
+    "upper_price": 3.4018874568203963e+38
+  },
+  {
+    "block": 12156001,
+    "tx_index": 98,
+    "log_index": 167,
+    "hash": "0x22a5c8a5c0af33f89a4a44017ea1b4267fd78decf568e4048f74d606c2bc48de",
+    "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69150,
+      "tickUpper": -67940,
+      "amount": 2233177891808596869561,
+      "amount0": 4086262127482342212029,
+      "amount1": 73223509808693562
+    },
+    "fee": 500,
+    "lower_price": 892.1732343569271,
+    "upper_price": 1006.9228469470088
+  },
+  {
+    "block": 12156004,
+    "tx_index": 65,
+    "log_index": 104,
+    "hash": "0xfa612f4354eb3beabf5fa05d035e204da9c0308dd701b617ddede34f470cd0fc",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Burn",
+    "args": {
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69400,
+      "tickUpper": -68200,
+      "amount": 2261348796816495770555,
+      "amount0": 2864424256282536595369,
+      "amount1": 1349217406119942374
+    },
+    "fee": 10000,
+    "lower_price": 915.6727332565299,
+    "upper_price": 1032.4119297465797
+  },
+  {
+    "block": 12156005,
+    "tx_index": 23,
+    "log_index": 63,
+    "hash": "0xcdcf7589bc18a8b5b58ef5cd7045502952b61b79f752df29144366ee2d5a102b",
+    "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+    "event": "Mint",
+    "args": {
+      "sender": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "owner": "0x1238536071e1c677a632429e3655c799b22cda52",
+      "tickLower": -69600,
+      "tickUpper": -68400,
+      "amount": 5102521007222492531013,
+      "amount0": 4911608949304840363904,
+      "amount1": 4624418418232729600
+    },
+    "fee": 10000,
+    "lower_price": 934.1696153864627,
+    "upper_price": 1053.266980989772
+  }
+]

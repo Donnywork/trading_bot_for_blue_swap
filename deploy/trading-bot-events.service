@@ -1,0 +1,24 @@
+# Replace __USER__ and __PROJECT_DIR__; see docs/EVENT_STRATEGIES.md.
+[Unit]
+Description=BlueSwap Phase 2 event strategies (Sepolia)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/.venv/bin/python event_service.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGTERM
+TimeoutStopSec=240
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

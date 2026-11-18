@@ -1,0 +1,9 @@
+{
+  "block": 12157163,
+  "block_hash": "0x042815617d14269b9725cfeb738d475eaf43c6710de824dc3e1a07f2bfbef701",
+  "router": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+  "quoter": "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
+  "factory": "0x0227628f3f023bb0b980b67d528571c95c6dac1c",
+  "pool_registration_verified": true,
+  "both_token_decimals": 18
+}

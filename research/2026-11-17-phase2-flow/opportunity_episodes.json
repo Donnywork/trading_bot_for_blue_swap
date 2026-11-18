@@ -1,0 +1,283 @@
+[
+  {
+    "start_block": 12108478,
+    "start": 1794360336,
+    "peak_profit": 91.80244873127504,
+    "peak_block": 12108922,
+    "end": 1794424212,
+    "seconds": 63876
+  },
+  {
+    "start_block": 12113859,
+    "start": 1794426036,
+    "peak_profit": 50.879137734124015,
+    "peak_block": 12114255,
+    "end": 1794434496,
+    "seconds": 8460
+  },
+  {
+    "start_block": 12114899,
+    "start": 1794438636,
+    "peak_profit": 15.98886298946968,
+    "peak_block": 12114899,
+    "end": 1794438732,
+    "seconds": 96
+  },
+  {
+    "start_block": 12115245,
+    "start": 1794442836,
+    "peak_profit": 50.425373589734136,
+    "peak_block": 12116511,
+    "end": 1794463848,
+    "seconds": 21012
+  },
+  {
+    "start_block": 12117573,
+    "start": 1794471048,
+    "peak_profit": 27.129810813461518,
+    "peak_block": 12119429,
+    "end": 1794515148,
+    "seconds": 44100
+  },
+  {
+    "start_block": 12121573,
+    "start": 1794519648,
+    "peak_profit": 38.76156667265195,
+    "peak_block": 12121573,
+    "end": 1794527220,
+    "seconds": 7572
+  },
+  {
+    "start_block": 12122980,
+    "start": 1794536736,
+    "peak_profit": 11.420995997952332,
+    "peak_block": 12122980,
+    "end": 1794541248,
+    "seconds": 4512
+  },
+  {
+    "start_block": 12124093,
+    "start": 1794550236,
+    "peak_profit": 49.38994086306684,
+    "peak_block": 12124463,
+    "end": 1794560136,
+    "seconds": 9900
+  },
+  {
+    "start_block": 12124910,
+    "start": 1794560148,
+    "peak_profit": 0.030531655152998383,
+    "peak_block": 12124910,
+    "end": 1794563748,
+    "seconds": 3600
+  },
+  {
+    "start_block": 12125577,
+    "start": 1794568236,
+    "peak_profit": 44.58027428287596,
+    "peak_block": 12125875,
+    "end": 1794576348,
+    "seconds": 8112
+  },
+  {
+    "start_block": 12126695,
+    "start": 1794581748,
+    "peak_profit": 18.731531331184215,
+    "peak_block": 12126695,
+    "end": 1794583860,
+    "seconds": 2112
+  },
+  {
+    "start_block": 12127365,
+    "start": 1794589836,
+    "peak_profit": 0.7528614098671369,
+    "peak_block": 12127365,
+    "end": 1794589848,
+    "seconds": 12
+  },
+  {
+    "start_block": 12127512,
+    "start": 1794591660,
+    "peak_profit": 3.4715490361127195,
+    "peak_block": 12127809,
+    "end": 1794608736,
+    "seconds": 17076
+  },
+  {
+    "start_block": 12129223,
+    "start": 1794612336,
+    "peak_profit": 33.72915122018367,
+    "peak_block": 12129223,
+    "end": 1794615036,
+    "seconds": 2700
+  },
+  {
+    "start_block": 12129818,
+    "start": 1794619536,
+    "peak_profit": 1.1346840609377296,
+    "peak_block": 12129818,
+    "end": 1794619548,
+    "seconds": 12
+  },
+  {
+    "start_block": 12130988,
+    "start": 1794633648,
+    "peak_profit": 0.36803184192646654,
+    "peak_block": 12130988,
+    "end": 1794633660,
+    "seconds": 12
+  },
+  {
+    "start_block": 12131161,
+    "start": 1794635736,
+    "peak_profit": 54.59331571787152,
+    "peak_block": 12132053,
+    "end": 1794651936,
+    "seconds": 16200
+  },
+  {
+    "start_block": 12132941,
+    "start": 1794657336,
+    "peak_profit": 13.303724279051949,
+    "peak_block": 12132941,
+    "end": 1794666336,
+    "seconds": 9000
+  },
+  {
+    "start_block": 12134649,
+    "start": 1794678036,
+    "peak_profit": 46.62702808941913,
+    "peak_block": 12135393,
+    "end": 1794692436,
+    "seconds": 14400
+  },
+  {
+    "start_block": 12136584,
+    "start": 1794701436,
+    "peak_profit": 20.500399926081627,
+    "peak_block": 12136584,
+    "end": 1794707772,
+    "seconds": 6336
+  },
+  {
+    "start_block": 12137252,
+    "start": 1794709536,
+    "peak_profit": 33.902908658551496,
+    "peak_block": 12137776,
+    "end": 1794736536,
+    "seconds": 27000
+  },
+  {
+    "start_block": 12139868,
+    "start": 1794741348,
+    "peak_profit": 43.77789021500712,
+    "peak_block": 12140385,
+    "end": 1794749136,
+    "seconds": 7788
+  },
+  {
+    "start_block": 12141396,
+    "start": 1794759936,
+    "peak_profit": 35.115912889388255,
+    "peak_block": 12141396,
+    "end": 1794765336,
+    "seconds": 5400
+  },
+  {
+    "start_block": 12142305,
+    "start": 1794771036,
+    "peak_profit": 79.37350746525863,
+    "peak_block": 12142599,
+    "end": 1794778836,
+    "seconds": 7800
+  },
+  {
+    "start_block": 12143415,
+    "start": 1794784536,
+    "peak_profit": 21.088558580691824,
+    "peak_block": 12143415,
+    "end": 1794787272,
+    "seconds": 2736
+  },
+  {
+    "start_block": 12143883,
+    "start": 1794790248,
+    "peak_profit": 44.91462518105527,
+    "peak_block": 12144379,
+    "end": 1794796836,
+    "seconds": 6588
+  },
+  {
+    "start_block": 12144499,
+    "start": 1794797736,
+    "peak_profit": 3.142004064613161,
+    "peak_block": 12144577,
+    "end": 1794798708,
+    "seconds": 972
+  },
+  {
+    "start_block": 12144944,
+    "start": 1794803136,
+    "peak_profit": 32.65737214031378,
+    "peak_block": 12145387,
+    "end": 1794819648,
+    "seconds": 16512
+  },
+  {
+    "start_block": 12147266,
+    "start": 1794831336,
+    "peak_profit": 18.022395926702757,
+    "peak_block": 12147266,
+    "end": 1794835812,
+    "seconds": 4476
+  },
+  {
+    "start_block": 12148369,
+    "start": 1794844836,
+    "peak_profit": 38.538013476101696,
+    "peak_block": 12150114,
+    "end": 1794885936,
+    "seconds": 41100
+  },
+  {
+    "start_block": 12152808,
+    "start": 1794899148,
+    "peak_profit": 15.024552672267646,
+    "peak_block": 12153296,
+    "end": 1794910536,
+    "seconds": 11388
+  },
+  {
+    "start_block": 12153912,
+    "start": 1794912636,
+    "peak_profit": 1.7997383789785317,
+    "peak_block": 12153912,
+    "end": 1794925248,
+    "seconds": 12612
+  },
+  {
+    "start_block": 12155670,
+    "start": 1794933972,
+    "peak_profit": 0.01620613295602169,
+    "peak_block": 12155670,
+    "end": 1794933984,
+    "seconds": 12
+  },
+  {
+    "start_block": 12156175,
+    "start": 1794940116,
+    "peak_profit": 0.9571892470992793,
+    "peak_block": 12156242,
+    "end": 1794945336,
+    "seconds": 5220
+  },
+  {
+    "start_block": 12157197,
+    "start": 1794952536,
+    "peak_profit": 17.983537527890803,
+    "peak_block": 12157197,
+    "end": 1794953364,
+    "seconds": 828,
+    "right_censored": true
+  }
+]

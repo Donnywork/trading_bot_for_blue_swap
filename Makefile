@@ -1,4 +1,4 @@
-.PHONY: check format test run status dashboard
+.PHONY: check format test test-browser run status dashboard events
 
 check:
 	uv run ruff check --extend-exclude research .
@@ -11,6 +11,9 @@ format:
 test:
 	uv run pytest
 
+test-browser:
+	PHASE2_BROWSER_TESTS=1 uv run pytest tests/test_phase2_browser.py
+
 run:
 	uv run python main.py
 
@@ -19,3 +22,5 @@ status:
 
 dashboard:
 	uv run python dashboard.py
+
+events: run

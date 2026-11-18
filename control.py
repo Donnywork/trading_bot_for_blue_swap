@@ -5,6 +5,17 @@ import ledger
 import strategy
 
 CONTROL_FILE = ledger.LOG_DIR / "control.json"
+EVENT_FIELDS = (
+    "event_paused",
+    "event_backrun",
+    "event_frontrun",
+    "event_arbitrage",
+    "event_exit_request",
+    "event_scan_request",
+    "event_mode",
+    "event_mode_request",
+    "event_start_request",
+)
 
 # ------------------------------------
 # The settings a person can change while the bot runs: which strategy, take profit, stop loss and
@@ -34,5 +45,7 @@ def save(path, config):
         "paused": config.paused,
         "scan_request": config.scan_request,
         "liquidate_request": config.liquidate_request,
+        **{key: getattr(config, key) for key in EVENT_FIELDS},
     }
+    strategy.parse_config(data)
     ledger.atomic_write(path, json.dumps(data, indent=2))

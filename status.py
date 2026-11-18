@@ -4,15 +4,14 @@ import time
 import traceback
 from decimal import Decimal
 
-from dotenv import load_dotenv
-
 import bot_contract
 import config
 import control
 import ledger
 import strategy
-from main import HALT_FILE, HEARTBEAT_FILE, READ_ERRORS, redact
+from legacy_main import HALT_FILE, HEARTBEAT_FILE, READ_ERRORS, redact
 from pool_monitor import span
+from runtime import load_environment as load_dotenv
 
 STALE_AFTER_SECONDS = 300  # the bot ticks every POLL_SECONDS (30 by default)
 RECENT_TRADES = 5
@@ -26,12 +25,25 @@ def read_chain(w3):
     pool = w3.eth.contract(
         address=w3.to_checksum_address(os.environ["POOL_ADDRESS"]), abi=config.pool_abi
     )
-    base_address = pool.functions.token0().call()
-    quote_address = pool.functions.token1().call()
+    token0 = pool.functions.token0().call()
+    token1 = pool.functions.token1().call()
+    tokens = config.market_tokens()
+    base_address, quote_address = tokens["feth"], tokens["f564"]
+    if {token0.lower(), token1.lower()} != {
+        base_address.lower(),
+        quote_address.lower(),
+    }:
+        raise ValueError("Pool tokens do not match FETH_ADDRESS / F564_ADDRESS")
     base, base_decimals = config.read_token(w3, base_address)
     quote, quote_decimals = config.read_token(w3, quote_address)
     sqrt_price_x96 = pool.functions.slot0().call()[0]
-    price = (sqrt_price_x96 / 2**96) ** 2 * 10 ** (base_decimals - quote_decimals)
+    base_is_token0 = token0.lower() == base_address.lower()
+    decimals0, decimals1 = (
+        (base_decimals, quote_decimals)
+        if base_is_token0
+        else (quote_decimals, base_decimals)
+    )
+    price = config.quote_per_base(sqrt_price_x96, decimals0, decimals1, base_is_token0)
 
     bot = bot_contract.load_bot(w3, os.environ["BOT_CONTRACT_ADDRESS"])
 

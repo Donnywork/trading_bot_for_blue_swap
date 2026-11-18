@@ -1,0 +1,215 @@
+{
+  "start_utc": "2026-11-17T22:37:50.293816+00:00",
+  "scheduled_stop_utc": "2026-11-17T22:57:50.293816+00:00",
+  "seconds": 1200,
+  "observer_pid": 34373,
+  "output_file": "pending_observations-20261117T223346035819Z.jsonl",
+  "stop_utc": "2026-11-17T22:57:50.348498+00:00",
+  "stop_action": "sent_interrupt_to_original_observer",
+  "observer_state": "stopped",
+  "observer_still_running": false,
+  "requested_window": {
+    "notifications": 0,
+    "unique_pending": 0,
+    "unique_mined": 0,
+    "pending_by_signer": {},
+    "mined_by_signer": {},
+    "matched": [],
+    "target_notifications": 0,
+    "replacement_notifications": 0,
+    "removed_notifications": 0
+  },
+  "whole_session": {
+    "notifications": 10,
+    "unique_pending": 5,
+    "unique_mined": 5,
+    "pending_by_signer": {
+      "0x6011139d5f16689bde1d245c6247b088f9582026": 1,
+      "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef": 4
+    },
+    "mined_by_signer": {
+      "0x6011139d5f16689bde1d245c6247b088f9582026": 1,
+      "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef": 4
+    },
+    "matched": [
+      {
+        "hash": "0x33ee381022d378cc30b0061599b5e40a9aeb4d0e86c6c86af09bf60299f7468d",
+        "from": "0x6011139d5f16689bde1d245c6247b088f9582026",
+        "to": "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e",
+        "mined_notification_utc": "2026-11-17T22:35:36.498446+00:00",
+        "block_number": "0xb981d1",
+        "notification_lead_seconds": 1.2276299170043785,
+        "seen_pending_before_mined_notification": true
+      },
+      {
+        "hash": "0xddd6caf673dc38b2091dc1525fb76328446143018ae7f851f5c4bc8ba32273d1",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "to": "0x7e0c07c6d5262727b598e299a14b75acb3e5666f",
+        "mined_notification_utc": "2026-11-17T22:35:48.654137+00:00",
+        "block_number": "0xb981d2",
+        "notification_lead_seconds": 8.390140000003157,
+        "seen_pending_before_mined_notification": true
+      },
+      {
+        "hash": "0xbc843ceabaca79201ff82ce44275947004344b0f7deb7b186f3ab6aca0e96608",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "to": "0x7e0c07c6d5262727b598e299a14b75acb3e5666f",
+        "mined_notification_utc": "2026-11-17T22:35:48.655527+00:00",
+        "block_number": "0xb981d2",
+        "notification_lead_seconds": 8.390237709012581,
+        "seen_pending_before_mined_notification": true
+      },
+      {
+        "hash": "0x2986416e7491c38287af7b2e0a1adb03d9de9b5c91e2d1ebfb0dbe23013cd2b8",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "to": "0x7e0c07c6d5262727b598e299a14b75acb3e5666f",
+        "mined_notification_utc": "2026-11-17T22:37:00.400488+00:00",
+        "block_number": "0xb981d8",
+        "notification_lead_seconds": 5.181603375007398,
+        "seen_pending_before_mined_notification": true
+      },
+      {
+        "hash": "0x726d88ef1b0959b1b1fb388e37ce57f8571c074d7203ba9a2ee520dc865a3e7d",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "to": "0x7e0c07c6d5262727b598e299a14b75acb3e5666f",
+        "mined_notification_utc": "2026-11-17T22:37:00.401695+00:00",
+        "block_number": "0xb981d8",
+        "notification_lead_seconds": 5.181754249992082,
+        "seen_pending_before_mined_notification": true
+      }
+    ],
+    "target_notifications": 2,
+    "replacement_notifications": 0,
+    "removed_notifications": 0
+  },
+  "timing_caveat": "Lead measures local pending-to-mined notification arrival, not exact inclusion or submission time.",
+  "stop_confirmed_utc": "2026-11-17T23:00:59.573208+00:00",
+  "stop_note": "The initial two-second check preceded graceful shutdown completion; process exit and stopped state were subsequently confirmed.",
+  "receipt_validation": {
+    "transactions": [
+      {
+        "hash": "0x33ee381022d378cc30b0061599b5e40a9aeb4d0e86c6c86af09bf60299f7468d",
+        "from": "0x6011139d5f16689bde1d245c6247b088f9582026",
+        "successful": true,
+        "block": 12157393,
+        "priority_fee_wei": 2,
+        "gas_eth": 3.159396e-12,
+        "swaps": [
+          {
+            "fee": 10000,
+            "side": "buy",
+            "amount0_raw": "4433000000000000000000",
+            "amount1_raw": "-4224977951128283030",
+            "f564": 4433.0,
+            "feth": 4.224977951128283,
+            "price_after": 1051.2389970037107
+          }
+        ],
+        "router_call": {
+          "function": "exactInputSingle",
+          "params": {
+            "tokenIn": "0x21abd410c4240CCC170D004fEfB6405943e0d7Ff",
+            "tokenOut": "0x2238115a9B6469DEE6c004B00A0367fFba2Fd1BC",
+            "fee": 10000,
+            "recipient": "0x6011139d5F16689bDE1D245C6247b088F9582026",
+            "amountIn": 4433000000000000000000,
+            "amountOutMinimum": 4182728171617000199,
+            "sqrtPriceLimitX96": 0
+          }
+        }
+      },
+      {
+        "hash": "0xddd6caf673dc38b2091dc1525fb76328446143018ae7f851f5c4bc8ba32273d1",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "successful": true,
+        "block": 12157394,
+        "priority_fee_wei": 10200000000,
+        "gas_eth": 0.002084400603474001,
+        "swaps": [
+          {
+            "fee": 500,
+            "side": "buy",
+            "amount0_raw": "2806989521755099889664",
+            "amount1_raw": "-2763423383270303309",
+            "f564": 2806.9895217550998,
+            "feth": 2.763423383270303,
+            "price_after": 1018.3868901579104
+          }
+        ]
+      },
+      {
+        "hash": "0xbc843ceabaca79201ff82ce44275947004344b0f7deb7b186f3ab6aca0e96608",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "successful": true,
+        "block": 12157394,
+        "priority_fee_wei": 10200000000,
+        "gas_eth": 0.002423254804038758,
+        "swaps": [
+          {
+            "fee": 10000,
+            "side": "sell",
+            "amount0_raw": "-2853740038729155325904",
+            "amount1_raw": "2763423383270303309",
+            "f564": 2853.740038729155,
+            "feth": 2.763423383270303,
+            "price_after": 1035.051855932251
+          }
+        ]
+      },
+      {
+        "hash": "0x2986416e7491c38287af7b2e0a1adb03d9de9b5c91e2d1ebfb0dbe23013cd2b8",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "successful": true,
+        "block": 12157400,
+        "priority_fee_wei": 10200000000,
+        "gas_eth": 0.002428773004047955,
+        "swaps": [
+          {
+            "fee": 500,
+            "side": "buy",
+            "amount0_raw": "587943504698085670912",
+            "amount1_raw": "-576668391649927211",
+            "f564": 587.9435046980857,
+            "feth": 0.5766683916499271,
+            "price_after": 1019.6983009411994
+          }
+        ]
+      },
+      {
+        "hash": "0x726d88ef1b0959b1b1fb388e37ce57f8571c074d7203ba9a2ee520dc865a3e7d",
+        "from": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "successful": true,
+        "block": 12157400,
+        "priority_fee_wei": 10200000000,
+        "gas_eth": 0.00241005600401676,
+        "swaps": [
+          {
+            "fee": 10000,
+            "side": "sell",
+            "amount0_raw": "-589961342030000027432",
+            "amount1_raw": "576668391649927211",
+            "f564": 589.9613420300001,
+            "feth": 0.5766683916499271,
+            "price_after": 1031.7211109349278
+          }
+        ]
+      }
+    ],
+    "cross_pool_pairs": [
+      {
+        "block": 12157394,
+        "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "net_f564_from_pools": 46.75051697405543,
+        "net_feth_raw": "0",
+        "gas_eth": 0.004507655407512759
+      },
+      {
+        "block": 12157400,
+        "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "net_f564_from_pools": 2.0178373319143565,
+        "net_feth_raw": "0",
+        "gas_eth": 0.004838829008064715
+      }
+    ]
+  }
+}

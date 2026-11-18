@@ -16,7 +16,7 @@ import config
 import control
 import history
 import ledger
-import main as bot_main
+import legacy_main as bot_main
 import state
 import strategy
 import v3pool
@@ -1537,8 +1537,8 @@ def test_a_scan_that_does_not_fit_this_pool_is_refused(make, tmp_path):
     io = FakeIO([100.0])
     io.depth_scan = {
         **scan_result(9),
-        "fee": 500,
-    }  # another fee tier: the maths is not for it
+        "fee": 12345,
+    }  # an unsupported fee tier
     saved = tmp_path / "logs" / "pool_profile.json"
     runner = make(io, depth=v3pool.load_profile(), depth_file=saved)
     control_with(tmp_path, scan_request=1)

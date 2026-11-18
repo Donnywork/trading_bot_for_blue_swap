@@ -37,10 +37,13 @@ def percentile(values, share):
     return ordered[min(len(ordered) - 1, int(share * len(ordered)))]
 
 
-def replay(points, cfg, start_ts, cooldown, size, depth=None):
+def replay(
+    points, cfg, start_ts, cooldown, size, depth=None, fee_pct=strategy.POOL_FEE_PCT
+):
     # points: [(unix time, price)], oldest first. Prices before `start_ts` only warm the history
     # up (as the bot's own history is warm); trades start from `start_ts`.
-    fee, impact = strategy.POOL_FEE_PCT / 100, strategy.IMPACT_PCT / 100
+    fee = depth["fee"] / 1_000_000 if depth is not None else fee_pct / 100
+    impact = strategy.IMPACT_PCT / 100
     cost = fee + impact  # per leg, when there is no `depth`
     prices = deque(maxlen=strategy.HISTORY)
     entry = opened = last_trade = None
@@ -63,7 +66,7 @@ def replay(points, cfg, start_ts, cooldown, size, depth=None):
                 paid = moved - net
                 # the fee is 0.3% of what each leg trades (the sell's is taken in base: valued in
                 # quote here)
-                fee_paid = size * v3pool.FEE + back / (1 - v3pool.FEE) * v3pool.FEE
+                fee_paid = size * fee + back / (1 - fee) * fee
                 return net, paid, min(paid, fee_paid)
         net = size * (ratio * (1 - cost) ** 2 - 1)
         paid = moved - net
@@ -164,7 +167,7 @@ def step_stats(points):
     }
 
 
-def advice(cfg, result, stats, friction=None):
+def advice(cfg, result, stats, friction=None, fee_pct=strategy.POOL_FEE_PCT):
     # ------------------------------------
     # Warnings for one strategy's settings. `result` is that strategy's replay under `cfg`;
     # `stats` is step_stats() (or None); `friction` is what a round trip costs, in percent (the
@@ -179,8 +182,8 @@ def advice(cfg, result, stats, friction=None):
         out.append({"level": level, "text": text})
 
     if friction is None:
-        friction = strategy.FRICTION_PCT
-    impact_rt = round(max(0.0, friction - 2 * strategy.POOL_FEE_PCT), 2)
+        friction = 2 * (fee_pct + strategy.IMPACT_PCT)
+    impact_rt = round(max(0.0, friction - 2 * fee_pct), 2)
     tp, sl = cfg.take_profit_pct, cfg.stop_loss_pct
     if (
         tp <= friction
@@ -193,7 +196,7 @@ def advice(cfg, result, stats, friction=None):
     net_win, net_loss = tp - friction, sl + friction
     breakeven = net_loss / (net_win + net_loss) * 100
     text = (
-        f"After the pool fee ({strategy.POOL_FEE_PCT:g}% each way) and about "
+        f"After the pool fee ({fee_pct:g}% each way) and about "
         f"{impact_rt:g}% price impact, a take profit nets about "
         f"+{net_win:.2f}% and a stop loss about -{net_loss:.2f}%: it has to win "
         f"{breakeven:.0f}% of its trades to break even."
@@ -304,31 +307,53 @@ def advice(cfg, result, stats, friction=None):
     return out
 
 
-def friction_pct(depth, points, size):
+def friction_pct(depth, points, size, fee_pct=strategy.POOL_FEE_PCT):
     # What a round trip of `size` costs at the latest price, in percent of it: both pool fees and
     # the price impact of both legs. The fixed strategy.FRICTION_PCT without a `depth`.
+    fee_pct = depth["fee"] / 10_000 if depth is not None else fee_pct
+    fallback = 2 * (fee_pct + strategy.IMPACT_PCT)
     if depth is None or not points or float(size) <= 0:
-        return strategy.FRICTION_PCT
+        return fallback
     try:
         loss = v3pool.loss_at_stop(depth, points[-1][1], 0, float(size))
     except ValueError:
-        return strategy.FRICTION_PCT
+        return fallback
     return loss / float(size) * 100
 
 
-def compare(points, cfg, start_ts, cooldown, size, stats=None, depth=None):
+def compare(
+    points,
+    cfg,
+    start_ts,
+    cooldown,
+    size,
+    stats=None,
+    depth=None,
+    fee_pct=strategy.POOL_FEE_PCT,
+):
     # one row per strategy, in the order the strategies are declared, with its warnings
-    friction = friction_pct(depth, points, size)
+    fee_pct = depth["fee"] / 10_000 if depth is not None else fee_pct
+    friction = friction_pct(depth, points, size, fee_pct)
     rows = []
     for name, strat in strategy.STRATEGIES.items():
         own = replace(cfg, strategy=name)
-        result = replay(points, own, start_ts, cooldown, size, depth)
+        result = replay(points, own, start_ts, cooldown, size, depth, fee_pct)
         rows.append(
             {
                 "strategy": name,
                 "label": strat.label,
                 **result,
-                "warnings": advice(own, result, stats, friction),
+                "warnings": advice(own, result, stats, friction, fee_pct)
+                + (
+                    [
+                        {
+                            "level": "warn",
+                            "text": "No matching liquidity scan: price impact uses a Phase 1 estimate; scan this pool before relying on these results.",
+                        }
+                    ]
+                    if depth is None
+                    else []
+                ),
             }
         )
     return rows

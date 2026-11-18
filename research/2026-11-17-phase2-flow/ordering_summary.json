@@ -1,0 +1,49 @@
+{
+  "same_block_cross_pool_groups": 89,
+  "by_signer": {
+    "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef": 89
+  },
+  "near_base_neutral_groups": 89,
+  "positive_base_neutral_groups": 89,
+  "same_pool_same_block_target_brackets": 0,
+  "bracket_signers": {},
+  "example_cross_pool_groups": [
+    {
+      "block": 12153300,
+      "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+      "transactions": [
+        "0x3a4ada44cb4a730ad65df87cf9a05ae4386e525521ef66446c8b950b393eb02d",
+        "0x71a3d63e05f02ff427fd71c8e642bddec62203f5a380cf71644a42308cae3af7"
+      ],
+      "f564_pool_flow": 14.380709562518177,
+      "feth_pool_flow": 0.0,
+      "near_base_neutral": true,
+      "gas_eth": 0.00133212000710464
+    },
+    {
+      "block": 12153913,
+      "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+      "transactions": [
+        "0x44d6188c322e90420cd467ade0ed7ae09ad47f37133aed32893977a65fc9c760",
+        "0xead745f95156612698f86251823879c020db73ed83aba0d6041a0b5d220e1933"
+      ],
+      "f564_pool_flow": 1.7265421286920741,
+      "feth_pool_flow": 0.0,
+      "near_base_neutral": true,
+      "gas_eth": 0.001325391007068752
+    },
+    {
+      "block": 12157200,
+      "signer": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+      "transactions": [
+        "0x29a039fa700f354b916e4cd7544fab1b60f9876e78e3500222232d022a0a8ebf",
+        "0x94d9aab7cc28ea668c33102b440fd63fa9ce1db9f2948032a1729a490a5c2df7"
+      ],
+      "f564_pool_flow": 17.213511743215577,
+      "feth_pool_flow": 0.0,
+      "near_base_neutral": true,
+      "gas_eth": 0.004497047407495079
+    }
+  ],
+  "example_brackets": []
+}

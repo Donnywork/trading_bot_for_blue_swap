@@ -1,0 +1,160 @@
+"""Event-service configuration. Loading this module never loads dotenv or keys."""
+
+import os
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, localcontext
+
+import event_market as market
+from runtime import ConfigurationError
+
+
+def token_amount(value):
+    try:
+        with localcontext() as context:
+            context.prec = max(100, len(str(value)) + 20)
+            number = Decimal(str(value)) * market.UNIT
+        if (
+            not number.is_finite()
+            or number <= 0
+            or number != number.to_integral_value()
+            or number >= 2**256
+        ):
+            raise ValueError("invalid token amount")
+        return int(number)
+    except InvalidOperation as exc:
+        raise ValueError("invalid token amount") from exc
+
+
+def bounded(env, name, default, lo, hi):
+    try:
+        number = int(env.get(name, str(default)))
+    except (TypeError, ValueError):
+        raise ConfigurationError(f"{name} must be an integer in {lo}..{hi}") from None
+    if not lo <= number <= hi:
+        raise ConfigurationError(f"{name} must be {lo}..{hi}")
+    return number
+
+
+@dataclass(frozen=True)
+class EventSettings:
+    mode: str = "paper"
+    live_enabled: bool = False
+    quote_cap: int = 1000 * market.UNIT
+    base_cap: int = 10 * market.UNIT
+    min_profit: int = market.UNIT
+    slippage_bps: int = 20
+    move_bps: int = 100
+    exit_seconds: int = 60
+    cooldown: int = 10
+    max_gas: int = 1_500_000
+    priority_wei: int = 2_000_000_000
+    max_fee_wei: int = 20_000_000_000
+    bot_address: str = ""
+    owner: str = ""
+    market_bots: tuple = (market.MARKET_BOT,)
+    competitors: tuple = (
+        "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+        "0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7",
+    )
+
+    @property
+    def limits(self):
+        return {
+            "max_quote_raw": self.quote_cap,
+            "max_base_raw": self.base_cap,
+            "min_profit_raw": self.min_profit,
+        }
+
+    @classmethod
+    def from_env(cls, env=None):
+        env = os.environ if env is None else env
+        requested = env.get("EVENT_EXECUTION_MODE", "paper")
+        if requested not in ("paper", "simulate", "live"):
+            raise ConfigurationError(
+                "EVENT_EXECUTION_MODE must be paper, simulate or live"
+            )
+
+        def actors(name, default):
+            try:
+                return tuple(
+                    dict.fromkeys(
+                        market.hex_value(a.strip(), 20)
+                        for a in env.get(name, ",".join(default)).split(",")
+                        if a.strip()
+                    )
+                )
+            except ValueError:
+                raise ConfigurationError(
+                    f"{name} must contain Ethereum addresses"
+                ) from None
+
+        def amount(name, default):
+            try:
+                return token_amount(env.get(name, default))
+            except ValueError:
+                raise ConfigurationError(
+                    f"{name} must be a positive token amount with at most 18 decimals"
+                ) from None
+
+        bots, rivals = (
+            actors("EVENT_MARKET_BOTS", cls.market_bots),
+            actors("EVENT_COMPETITORS", cls.competitors),
+        )
+        if not bots or set(bots) & set(rivals):
+            raise ConfigurationError(
+                "market-bot signers must be nonempty and distinct from competitors"
+            )
+        if any(
+            env.get(key, "").strip()
+            for key in ("ARBITRAGE_VAULT_ADDRESS", "EVENT_FRONT_VAULT_ADDRESS")
+        ):
+            raise ConfigurationError(
+                "split-vault settings are obsolete; use one Phase2TradingBot BOT_CONTRACT_ADDRESS"
+            )
+        addresses = [
+            env.get(n, "").strip().lower()
+            for n in (
+                "BOT_CONTRACT_ADDRESS",
+                "OWNER_ADDRESS",
+            )
+        ]
+        for name, address in zip(
+            ("BOT_CONTRACT_ADDRESS", "OWNER_ADDRESS"), addresses, strict=True
+        ):
+            if address:
+                try:
+                    market.hex_value(address, 20)
+                except ValueError:
+                    raise ConfigurationError(
+                        f"{name} must be an Ethereum address"
+                    ) from None
+                if int(address, 16) == 0:
+                    raise ConfigurationError(f"{name} must be nonzero")
+        if addresses[0] and not addresses[1]:
+            raise ConfigurationError(
+                "simulation/live requires OWNER_ADDRESS and a Phase2TradingBot BOT_CONTRACT_ADDRESS"
+            )
+        priority = bounded(
+            env, "EVENT_PRIORITY_FEE_WEI", 2_000_000_000, 1, 100_000_000_000
+        )
+        max_fee = bounded(env, "EVENT_MAX_FEE_WEI", 20_000_000_000, 1, 200_000_000_000)
+        if priority > max_fee:
+            raise ConfigurationError("priority fee exceeds maximum fee")
+        return cls(
+            mode="simulate" if addresses[0] else "paper",
+            live_enabled=env.get("DRY_RUN", "true").lower() == "false",
+            quote_cap=amount("EVENT_QUOTE_CAP", "1000"),
+            base_cap=amount("EVENT_BASE_CAP", "10"),
+            min_profit=amount("EVENT_MIN_PROFIT", "1"),
+            slippage_bps=bounded(env, "EVENT_SLIPPAGE_BPS", 20, 0, 500),
+            move_bps=bounded(env, "EVENT_MOVE_BPS", 100, 1, 500),
+            exit_seconds=bounded(env, "EVENT_EXIT_SECONDS", 60, 5, 300),
+            cooldown=bounded(env, "EVENT_COOLDOWN_SECONDS", 10, 1, 300),
+            max_gas=bounded(env, "EVENT_MAX_GAS", 1_500_000, 100_000, 5_000_000),
+            priority_wei=priority,
+            max_fee_wei=max_fee,
+            bot_address=addresses[0],
+            owner=addresses[1],
+            market_bots=bots,
+            competitors=rivals,
+        )

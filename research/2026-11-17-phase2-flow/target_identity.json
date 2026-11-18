@@ -1,0 +1,56 @@
+{
+  "target": "0x6011139d5f16689bde1d245c6247b088f9582026",
+  "matched_transactions": 104,
+  "from_counts": {
+    "0x6011139d5f16689bde1d245c6247b088f9582026": 104
+  },
+  "to_counts": {
+    "0x3bfa4769fb09eefc5a80d6e87c3b9c650f7ae48e": 104
+  },
+  "selectors": {
+    "0x5ae401dc": 104
+  },
+  "all_top_signers": [
+    [
+      "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+      263
+    ],
+    [
+      "0x6011139d5f16689bde1d245c6247b088f9582026",
+      104
+    ],
+    [
+      "0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7",
+      53
+    ],
+    [
+      "0x2885f394be3a5c36a0ce67701bfb6c49bb1fb8db",
+      14
+    ],
+    [
+      "0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17",
+      12
+    ],
+    [
+      "0xb6bf0ba3f43d4386216df037dca1a1203038e135",
+      4
+    ],
+    [
+      "0x24ff22d754d5c0cfdbd6ad3c30ee8af487abe694",
+      3
+    ],
+    [
+      "0xa9169a32c2a4b28d0d3c14a4c5510aee32ef466c",
+      3
+    ],
+    [
+      "0xa353f08d51bc94ab0f16beb85a362ea897f26728",
+      2
+    ],
+    [
+      "0x357b12245881cac9d9d62e740e298dccb8b83c0a",
+      2
+    ]
+  ],
+  "target_code_bytes_at_end": 0
+}

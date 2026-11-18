@@ -43,6 +43,28 @@ def test_the_round_trip_cost_is_taken_off_every_trade():
 DEPTH = v3pool.load_profile()
 
 
+@pytest.mark.parametrize("with_depth", [False, True])
+def test_phase2_fee_is_used_in_profit_and_advice(with_depth):
+    points = sawtooth(4)
+    rows = []
+    for fee in (500, 10000):
+        depth = {**DEPTH, "fee": fee} if with_depth else None
+        result = compare.replay(
+            points, NO_GUARD, points[0][0], 0, 1000, depth, fee / 10000
+        )
+        assert result["trades"] > 0
+        assert result["profit"] == pytest.approx(
+            result["gross"] - result["fees"] - result["impact"]
+        )
+        advice = compare.advice(NO_GUARD, result, None, fee_pct=fee / 10000)
+        assert any(
+            f"{fee / 10000:g}% each way" in warning["text"] for warning in advice
+        )
+        rows.append(result)
+    assert rows[0]["profit"] > rows[1]["profit"]
+    assert rows[0]["fees"] < rows[1]["fees"]
+
+
 def test_with_the_pool_depth_a_big_trade_pays_what_its_size_really_costs():
     points = sawtooth(4)
     fixed = compare.replay(points, NO_GUARD, points[0][0], cooldown=0, size=15000)

@@ -1,11 +1,20 @@
+import os
+
 import pytest
 import solcx
 from web3 import EthereumTesterProvider, Web3
 
 import bot_contract
+import phase2_contract
 
 A = 10**18
 FEES = [3000, 500]
+
+
+@pytest.fixture(autouse=True)
+def isolated_configuration(monkeypatch):
+    # CLI tests must never load an operator's real environment file.
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
 
 
 def _compile_mocks():
@@ -72,3 +81,70 @@ class Env:
 @pytest.fixture
 def env(compiled):
     return Env(compiled)
+
+
+@pytest.fixture(scope="module")
+def combined_artifacts():
+    build = phase2_contract.standard_json_input()
+    mutation = os.environ.get("PHASE2_TEST_MUTATION")
+    if mutation:
+        path = (
+            phase2_contract.SOURCE
+            if mutation == "single_operator"
+            else "contracts/ArbitrageVault.sol"
+        )
+        if mutation not in ("single_operator", "cycle_operator"):
+            raise ValueError("unknown TEST-ONLY mutation")
+        build["sources"][path]["content"] = build["sources"][path]["content"].replace(
+            'require(msg.sender == operator || msg.sender == owner, "not operator");',
+            "",
+        )
+    for path in ("contracts/mocks/Mocks.sol", "contracts/mocks/ArbitrageMocks.sol"):
+        build["sources"][path] = {"content": (bot_contract.ROOT / path).read_text()}
+    out = solcx.compile_standard(build, solc_version=bot_contract.SOLC_VERSION)
+    return {
+        name: {"abi": item["abi"], "bin": item["evm"]["bytecode"]["object"]}
+        for source in out["contracts"].values()
+        for name, item in source.items()
+    }
+
+
+@pytest.fixture
+def combined(combined_artifacts):
+    from types import SimpleNamespace
+
+    w3 = Web3(EthereumTesterProvider())
+    owner, operator, stranger = w3.eth.accounts[:3]
+    w3.eth.default_account = owner
+
+    def deploy(name, *args):
+        item = combined_artifacts[name]
+        return _deploy(w3, item["abi"], item["bin"], *args)
+
+    a, b = deploy("MockToken"), deploy("MockToken")
+    factory = deploy("MockArbFactory")
+    router = deploy("MockArbRouter", factory.address)
+    pools = [
+        deploy("MockArbPool", a.address, b.address, fee, factory.address)
+        for fee in (500, 10000)
+    ]
+    for fee, pool in zip((500, 10000), pools, strict=True):
+        factory.functions.setPool(a.address, b.address, fee, pool.address).transact()
+        for token in (a, b):
+            router.functions.setRoute(
+                token.address, fee, (1, 1, 10**30, 0, False)
+            ).transact()
+    args = [
+        owner,
+        operator,
+        router.address,
+        a.address,
+        b.address,
+        [p.address for p in pools],
+        [1000 * A, 10 * A, A // 10],
+    ]
+    bot = deploy("Phase2TradingBot", *args)
+    a.functions.mint(bot.address, 5000 * A).transact()
+    b.functions.mint(bot.address, 3 * A).transact()
+    bot.functions.setPaused(False).transact()
+    return SimpleNamespace(**locals())
