@@ -21,7 +21,7 @@ import event_snapshot
 import operator_lock
 import rpc_metrics as rpc
 import strategy
-from event_execution import Executor, sizes
+from event_execution import Executor, sizes, sizes_near
 from event_feed import Feed, endpoint
 from event_service import Service
 from event_settings import EventSettings, token_amount
@@ -70,6 +70,23 @@ def test_execution_ladder_covers_small_and_narrow_optima():
         # everywhere else adjacent rungs stay within 1.5x (high*2 <= low*3).
         assert high * 2 <= (low * 4 if index == 0 else low * 3) + 2
     assert sizes(1) == [1] and sizes(2) == [1, 2]
+
+
+def test_priority_ladder_orders_rungs_by_the_paper_optimum_only():
+    # The float hint decides which integer rungs are quoted first in a race;
+    # every returned size is still a configuration-derived integer rung.
+    cap = 10000 * 10**18
+    ladder = sizes(cap)
+    optimum = 4593 * 10**18  # the observed 04:50 paper optimum
+    priority, rest = sizes_near(cap, optimum)
+    assert all(type(n) is int for n in priority + rest)
+    assert sorted(priority + rest) == ladder  # nothing lost, nothing invented
+    # Distance ordering: every priority rung is nearer the optimum than any rest rung.
+    assert max(abs(n - optimum) for n in priority) < min(abs(n - optimum) for n in rest)
+    assert len(priority) == 3
+    assert sizes_near(cap, 0) == (ladder, [])
+    assert sizes_near(cap, None) == (ladder, [])
+    assert sizes_near(cap, "bad") == (ladder, [])
 
 
 @pytest.mark.parametrize(

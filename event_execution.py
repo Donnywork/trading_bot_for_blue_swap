@@ -29,6 +29,21 @@ def sizes(cap):
     )
 
 
+def sizes_near(cap, optimum_raw):
+    # ------------------------------------
+    # Entry races are won in seconds (a 92 f564 window was lost to a 17 s quote
+    # ladder). Split the ladder into the three rungs nearest the paper optimum and
+    # the rest. The paper float only ORDERS configuration-derived integer rungs:
+    # every calldata amount stays a rung, never a model float. A missing or
+    # invalid hint degrades to the whole ladder in rung order.
+    # ------------------------------------
+    ladder = sizes(cap)
+    if type(optimum_raw) is not int or optimum_raw <= 0:
+        return ladder, []
+    ordered = sorted(ladder, key=lambda n: abs(n - optimum_raw))
+    return ordered[:3], ordered[3:]
+
+
 class Executor:
     def __init__(self, w3, pools, settings, store, account=None, clock=time.time):
         self.w3, self.pools, self.settings, self.store = w3, pools, settings, store
@@ -155,7 +170,7 @@ class Executor:
         if self.bot is None:
             raise ValueError("Phase 2 bot not configured")
         best = None
-        for amount in sizes(self.settings.quote_cap):
+        for amount in self.quote_ladder(candidate, action):
             try:
                 row = arbitrage.quote_cycle(
                     self.pools[candidate["backrun"]["buy_fee"]],
@@ -187,6 +202,15 @@ class Executor:
             timing=timing,
         )
 
+    def quote_ladder(self, candidate, action):
+        # Time-critical backruns quote only the rungs nearest the paper optimum:
+        # every skipped rung saves about five reads inside the inclusion race.
+        # Standing cross-pool arbitrage keeps the whole ladder in full breadth.
+        plan = candidate.get("backrun") or {}
+        hint = int((plan.get("input_f564") or 0) * market.UNIT)
+        priority, rest = sizes_near(self.settings.quote_cap, hint)
+        return priority if action == "backrun" else priority + rest
+
     def enter(self, candidate, snapshot):
         timing = self.start_attempt(candidate, "entry")
         plan, swap = candidate["frontrun"], candidate["swap"]
@@ -207,7 +231,10 @@ class Executor:
         if swap["deadline"] and swap["deadline"] <= self.clock() + 2:
             raise ConfigurationError("target is expiring")
         pools = market.models(snapshot, self.clock())
-        best = None
+        # The model pass is free (pure math over the snapshot); only single() exact
+        # quotes cost reads. Rank every rung by modeled profit, then quote the best
+        # three: a 12-rung quote ladder costs ~60 reads and loses inclusion races.
+        ranked = []
         for amount in sizes(self.settings.quote_cap):
             try:
                 estimate = frontrun.evaluate(
@@ -218,16 +245,22 @@ class Executor:
                     plan["sell_fee"],
                     self.settings.base_cap / market.UNIT,
                 )
-                if (
-                    estimate["profit_f564"] < self.settings.min_profit / market.UNIT
-                    or estimate["target_contribution_f564"] <= 0
-                ):
-                    continue
+            except ValueError:
+                continue
+            if (
+                estimate["profit_f564"] < self.settings.min_profit / market.UNIT
+                or estimate["target_contribution_f564"] <= 0
+            ):
+                continue
+            ranked.append((estimate["profit_f564"], amount))
+        best = None
+        for _, amount in sorted(ranked, reverse=True)[:3]:
+            try:
                 fn, output, minimum = self.single(
                     plan["buy_fee"], amount, True, snapshot["block"]
                 )
-                if best is None or estimate["profit_f564"] > best[0]:
-                    best = (estimate["profit_f564"], fn, amount, output, minimum)
+                if best is None:
+                    best = (fn, amount, output, minimum)
             except ValueError:
                 continue
         if best is None:
@@ -235,10 +268,10 @@ class Executor:
         self.current(snapshot["block"], snapshot["block_hash"])
         return self.perform(
             "entry:" + candidate["hash"],
-            best[1],
+            best[0],
             "entry",
-            best[2],
-            best[4],
+            best[1],
+            best[3],
             candidate,
             timing=timing,
         )
