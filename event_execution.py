@@ -270,10 +270,15 @@ class Executor:
                 fn, output, minimum = self.single(
                     plan["buy_fee"], amount, True, snapshot["block"]
                 )
-                if best is None:
-                    best = (fn, amount, output, minimum)
             except ValueError:
                 continue
+            # Ranked descending by modeled profit, so the first rung that
+            # passes exact validation IS the selection; quoting the remaining
+            # bracket rungs could never change it and burns ~6-7 reads each
+            # inside the tightest race (the target must still be pending at
+            # broadcast, re-checked in perform()).
+            best = (fn, amount, output, minimum)
+            break
         if best is None:
             raise ConfigurationError("no bounded front-run entry passes validation")
         self.current(snapshot["block"], snapshot["block_hash"])
@@ -297,8 +302,10 @@ class Executor:
         fn, _, minimum = self.single(
             position["exit_fee"], position["base_raw"], False, header["number"]
         )
-        # Fresh attempts are allowed only after a definite pre-send failure or confirmed revert.
-        key = f"exit:{position['target']}:{len(self.store.data['attempts'])}"
+        # Fresh attempts are allowed only after a definite pre-send failure or
+        # confirmed revert. The persisted sequence number keeps retry keys
+        # unique even though attempts are trimmed in the store.
+        key = f"exit:{position['target']}:{self.store.reserve_seq()}"
         return self.perform(
             key,
             fn,

@@ -203,11 +203,25 @@ class EventStore:
         with path.open("a") as stream:
             stream.write(redact(json.dumps(value, allow_nan=False)) + "\n")
 
+    def reserve_seq(self):
+        # Exit retries need fresh keys after a definite pre-send failure, and
+        # len(attempts) stops being unique once attempts are trimmed. A
+        # persisted monotonic counter never repeats; an unpersisted increment
+        # (reserve without a begin) merely skips a number.
+        self.data["attempt_seq"] = self.data.get("attempt_seq", 0) + 1
+        return self.data["attempt_seq"]
+
     def begin(self, key, details):
         if key in self.data["attempts"] or self.data["intent"] is not None:
             raise ValueError("execution already attempted")
         self.data["intent"] = {"key": key, "at": self.clock(), **details}
         self.data["attempts"][key] = "inflight"
+        # attempts gate duplicate sends only; keep the ledger bounded like
+        # trades so the pre-broadcast save stays fast as days accumulate.
+        # The fresh intent key is always last and can never be trimmed away.
+        if len(self.data["attempts"]) > 1000:
+            kept = dict(list(self.data["attempts"].items())[-1000:])
+            self.data["attempts"] = kept
         self.save()  # durable BEFORE any possible broadcast
 
     def finish(self, key, status, position, row):

@@ -1191,10 +1191,11 @@ def test_execution_failure_diagnostic_preserves_reason_and_cooldown(tmp_path, sn
         raise ConfigurationError("operator ETH below maximum transaction cost")
 
     svc.executor.backrun = reject
-    with pytest.raises(ConfigurationError, match="operator ETH"):
-        svc.maybe_execute(
-            {"status": "paper_revalidated", "backrun": {"buy_fee": 500}, "hash": HASH}
-        )
+    # Expected per-candidate verdicts are recorded and swallowed: the engine,
+    # sibling candidates and the loop must survive every model-vs-exact miss.
+    svc.maybe_execute(
+        {"status": "paper_revalidated", "backrun": {"buy_fee": 500}, "hash": HASH}
+    )
     svc.publish()
     view = dashboard_view(svc.store.directory / "state.json", svc.clock())
     assert view["last_execution"]["status"] == "execution_rejected"
@@ -1204,6 +1205,121 @@ def test_execution_failure_diagnostic_preserves_reason_and_cooldown(tmp_path, sn
     )
     assert view["cooldown_until"] > svc.clock()
     assert svc.store.data["intent"] is None and not svc.store.data["attempts"]
+    # Transport failures still propagate for run()'s reset-and-backoff.
+    svc.executor.backrun = lambda *a, **k: (_ for _ in ()).throw(
+        ConnectionError("provider body")
+    )
+    svc.next_attempt = 0
+    with pytest.raises(ConnectionError):
+        svc.maybe_execute(
+            {
+                "status": "paper_revalidated",
+                "backrun": {"buy_fee": 500},
+                "hash": "0x" + "ee" * 32,
+            }
+        )
+    assert "provider body" not in json.dumps(svc.store.data)
+
+
+def test_queued_feed_work_no_longer_blocks_execution(tmp_path, snapshot):
+    # Nov 19 15:11: sibling notifications (head/mined bursts, rivals'
+    # pendings) arrive exactly when a window is contested. The old
+    # queue-emptiness veto refused the send and reset the engine through
+    # run()'s transport handler while competitors took the window.
+    svc = service(tmp_path, snapshot)
+    svc.settings = replace(svc.settings, mode="simulate")
+    control.save(
+        svc.control_file,
+        replace(strategy.DEFAULT, event_paused=False, event_start_request=1),
+    )
+    svc.read_controls()
+    svc.feed.queue.put({"kind": "head", "generation": svc.generation})
+    svc.feed.queue.put(
+        {"kind": "pending", "generation": svc.generation, "received": svc.clock()}
+    )
+    calls = []
+
+    def backrun(decision, action="backrun"):
+        calls.append(action)
+        return {"kind": "execution", "status": "simulated"}
+
+    svc.executor.backrun = backrun
+    svc.maybe_execute(
+        {"status": "paper_revalidated", "backrun": {"buy_fee": 500}, "hash": HASH}
+    )
+    assert calls == ["backrun"] and svc.feed.queue.qsize() == 2
+    assert svc.last_execution["status"] == "simulated"
+
+
+def test_removed_signer_event_keeps_pinned_snapshot(tmp_path, snapshot):
+    # The mined subscription watches signers, not pools: a reorged-out signer
+    # transaction that never touched our pools must not park the service in
+    # awaiting_scan until a manual ~700-read scan. The pinned block's own
+    # ancestry check still parks on a genuine pinned-block reorganization.
+    svc = service(tmp_path, snapshot)
+    svc.refresh()
+    pinned = {"block": snapshot["block"], "block_hash": snapshot["block_hash"]}
+    svc.snapshots.snapshot = pinned
+    svc.handle({"kind": "mined", "removed": True, "generation": svc.generation})
+    assert svc.snapshots.snapshot is pinned
+    assert svc.feed.gap.is_set() and svc.engine.snapshot is None
+
+
+def test_entry_quotes_stop_at_first_passing_rung(tmp_path, monkeypatch):
+    # Ranked descending by modeled profit, the first exactly-validated rung
+    # is the selection; the remaining bracket quotes could never change the
+    # outcome and burn ~6-7 reads each inside the pending-nonce race.
+    ex, _ = fake_executor(tmp_path)
+    ex.bot = SimpleNamespace(
+        address=ex.bot.address,
+        functions=SimpleNamespace(feeAllowed=lambda fee: Call(True)),
+    )
+    monkeypatch.setattr("event_execution.market.models", lambda *a: object())
+    monkeypatch.setattr(
+        "event_execution.frontrun.evaluate",
+        lambda pools, swap, size, buy_fee, sell_fee, base_cap: {
+            "profit_f564": 20.0,
+            "target_contribution_f564": 1.0,
+        },
+    )
+    quotes = []
+
+    def single(fee, amount, buy, block):
+        quotes.append(amount)
+        return ("fn", amount, amount + A)
+
+    ex.single = single
+    sent = []
+    ex.perform = lambda key, fn, action, amount, minimum, cand, **k: (
+        sent.append(amount) or {"status": "simulated"}
+    )
+    plan = candidate() | {"frontrun": {"buy_fee": 500, "sell_fee": 500}}
+    ex.enter(plan, {"block": 7, "block_hash": HASH})
+    assert len(quotes) == 1 and sent == [quotes[0]]
+
+
+def test_attempts_are_bounded_and_exit_retry_keys_survive_trim(tmp_path):
+    ex, _ = fake_executor(tmp_path)
+    for i in range(1200):
+        ex.store.data["attempts"][f"cycle:{i}"] = "confirmed"
+    ex.store.begin("cycle:new", {})
+    assert len(ex.store.data["attempts"]) == 1000
+    assert "cycle:new" in ex.store.data["attempts"]
+    ex.store.finish("cycle:new", "not_sent", None, {"status": "not_sent"})
+    # A retried exit must get a fresh key even after attempts trimming.
+    ex.store.data["position"] = restored_position(ex.clock())
+    ex.w3.eth.get_block = lambda n: {
+        "number": 7,
+        "hash": bytes.fromhex("ab" * 32),
+        "timestamp": 99,
+    }
+    ex.single = lambda fee, amount, buy, block: ("fn", amount, amount // 2)
+    keys = []
+    ex.perform = lambda key, *a, **k: keys.append(key) or {"status": "not_sent"}
+    ex.exit("time_limit")
+    ex.exit("time_limit")
+    assert len(keys) == 2 and keys[0] != keys[1]
+    assert all(k.startswith("exit:" + HASH) for k in keys)
 
 
 def test_stale_or_old_generation_pending_never_plans(tmp_path, snapshot):

@@ -195,14 +195,20 @@ class Service:
         ):
             raise ValueError("event entries paused or feed changed")
         if action and (
-            not self.feed.queue.empty()
-            or (action == "entry" and not self.controls.event_frontrun)
+            (action == "entry" and not self.controls.event_frontrun)
             or (action == "backrun" and not self.controls.event_backrun)
             or (action == "arbitrage" and not self.controls.event_arbitrage)
         ):
-            raise ValueError(
-                "pending work or module control changed during preparation"
-            )
+            raise ValueError("module control changed during preparation")
+        # A non-empty feed queue must NOT veto the send. Sibling notifications
+        # (head/mined for the same block, rivals' pendings) arrive in bursts
+        # exactly when a window is contested — the valuable moments — and a
+        # refusal here used to reach run()'s transport handler, resetting the
+        # engine and backing off while competitors took the window. Real
+        # invalidation is proven against chain state at broadcast time by the
+        # executor's own final guards: the pinned current() freshness check,
+        # the target-mined and target-nonce re-checks, and block-pinned
+        # exact quotes with their ancestry re-check.
 
     def refresh(self, scan=False):
         if self.store.data["position"] is not None:
@@ -309,7 +315,9 @@ class Service:
                     if action in ("backrun", "arbitrage")
                     else self.executor.enter(decision, self.engine.snapshot)
                 )
-        except (OSError, Web3Exception, ValueError) as exc:
+        except (OSError, Web3Exception) as exc:
+            # Transport failures leave snapshot/feed state genuinely unknown:
+            # run()'s reset-and-backoff handler owns these.
             self.record(
                 {
                     "kind": "execution",
@@ -321,6 +329,25 @@ class Service:
                 }
             )
             raise
+        except ValueError as exc:
+            # Expected per-candidate verdicts end here (no exact profitable
+            # cycle, snapshot advanced past the candidate, target no longer
+            # pending, guard refusal): the candidate is dead, but the engine
+            # and every sibling candidate are fine. Re-raising these used to
+            # land in run()'s transport handler, resetting the engine and
+            # backing off on every model-vs-exact miss — collateral loss of
+            # concurrent windows (observed Nov 19 15:11, three times).
+            self.record(
+                {
+                    "kind": "execution",
+                    "status": "execution_rejected",
+                    "action": action,
+                    "hash": decision["hash"],
+                    "reason": error_summary(exc),
+                    "diagnostics": getattr(self.executor, "attempt", {}),
+                }
+            )
+            return
         self.read_controls()
         self.process_mode(busy=True)
         self.record(result)
@@ -460,7 +487,13 @@ class Service:
             if self.observer:
                 self.observer.invalidate()
             self.engine.handle({"kind": "reorg", "now": self.clock()})
-            self.snapshots.snapshot = None
+            # The pinned snapshot survives a removed notification: the mined
+            # subscription watches signers, so a reorged-out signer tx that
+            # never touched our pools must not park the service in
+            # awaiting_scan until a manual ~700-read scan. Catch-up replay
+            # from a still-canonical pin recovers automatically; when the
+            # pinned block itself was reorganized, Snapshots.update()'s own
+            # ancestry check still parks conservatively.
             self.feed.gap.set()
             return
         if self.observer and event.get("transaction"):
