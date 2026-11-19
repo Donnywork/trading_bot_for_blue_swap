@@ -313,12 +313,21 @@ class PaperEngine:
                 )
                 self.snapshot = None
                 return copy.deepcopy(candidate)
-            if self.snapshot is None or (
-                self.snapshot["block"] != market.integer(receipt["blockNumber"])
-                or self.snapshot["block_hash"].lower()
+            block = market.integer(receipt["blockNumber"])
+            if self.snapshot is None or self.snapshot["block"] < block:
+                raise ValueError("inclusion-block snapshot still required")
+            if self.snapshot["block"] == block and (
+                self.snapshot["block_hash"].lower()
                 != market.hex_value(receipt["blockHash"], 32)
             ):
                 raise ValueError("exact inclusion-block snapshot required")
+            # A snapshot AHEAD of the receipt block is valid revalidation
+            # state: cumulative block state already includes the target's
+            # effects, and the receipt proves its inclusion. Sepolia can
+            # advance past the receipt while the feed burst is still being
+            # processed; the old exact-block equality dead-ended those
+            # candidates until TTL. Exact block-pinned quotes at send time
+            # keep every real guarantee - the paper plan is only a hint.
             pools = self.pools(now)
             # Do not apply the target again: the refreshed end-of-block state already includes it.
             plan = backrun.best_cycle(pools, self.limits)

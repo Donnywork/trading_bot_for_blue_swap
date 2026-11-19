@@ -24,6 +24,37 @@ def test_the_saved_layout_loads_and_is_for_the_fee_tier_the_maths_assumes():
     assert PROFILE["ticks"]
 
 
+# ------------------------------------------------------- layout validation
+
+
+def test_check_profile_rejects_corrupt_cumulative_liquidity():
+    # A well-typed but corrupt layout must be refused: negative mid-range
+    # running liquidity would understate loss_at_stop (optimistic sizing),
+    # and nets that do not sum to zero mean the scan missed positions.
+    def profile(ticks):
+        return {
+            "d0": 18,
+            "d1": 18,
+            "fee": 500,
+            "block": 7,
+            "base_is_token0": True,
+            "ticks": ticks,
+        }
+
+    good = [{"tick": -100, "net": 5}, {"tick": 100, "net": -5}]
+    v3pool.check_profile(profile(good), "test")
+    negative_mid = [
+        {"tick": -100, "net": 5},
+        {"tick": 0, "net": -7},
+        {"tick": 100, "net": 2},
+    ]
+    with pytest.raises(ValueError, match="negative cumulative"):
+        v3pool.check_profile(profile(negative_mid), "test")
+    nonzero_sum = [{"tick": -100, "net": 5}, {"tick": 100, "net": -4}]
+    with pytest.raises(ValueError, match="sum to zero"):
+        v3pool.check_profile(profile(nonzero_sum), "test")
+
+
 def test_a_layout_for_an_unsupported_fee_tier_is_refused(tmp_path):
     other = tmp_path / "other.json"
     other.write_text(json.dumps({**PROFILE, "fee": 12345}))

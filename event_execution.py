@@ -3,7 +3,7 @@
 import time
 
 from web3 import Web3
-from web3.exceptions import BlockNotFound, Web3Exception
+from web3.exceptions import Web3Exception
 
 import arbitrage
 import bot_contract
@@ -153,9 +153,14 @@ class Executor:
         minimum = output * (10000 - self.settings.slippage_bps) // 10000
         if minimum <= 0:
             raise ValueError("zero output minimum")
-        fn = self.bot.functions.swap(
-            (buy, fee, amount, minimum, header["timestamp"] + 30, limit)
+        # The deadline must hold at SEND time, not at the pinned quote block:
+        # current() admits snapshots up to 30 s stale, so a pinned timestamp
+        # +30 could already be expired when the transaction lands - a
+        # guaranteed revert on an entry that passed every simulation.
+        deadline = (
+            max(header["timestamp"], self.w3.eth.get_block("latest")["timestamp"]) + 30
         )
+        fn = self.bot.functions.swap((buy, fee, amount, minimum, deadline, limit))
         actual = fn.call({"from": self.operator}, block_identifier=block)
         if actual < minimum:
             raise ValueError("single swap simulation failed")
@@ -579,10 +584,11 @@ class Executor:
             ):
                 continue
             if block not in hashes:
-                try:
-                    hashes[block] = hexstr(self.w3.eth.get_block(block)["hash"])
-                except BlockNotFound:
-                    hashes[block] = None
+                # A missing block is a provider gap, not reorg evidence: let
+                # the read error propagate so run() backs off and retries,
+                # instead of accusing good inventory of reorganization and
+                # forcing a manual reconciliation of verified trades.
+                hashes[block] = hexstr(self.w3.eth.get_block(block)["hash"])
             if hashes[block] != row["block_hash"]:
                 self.live_history.data["canonical_invalid"] = True
                 self.live_history.save()

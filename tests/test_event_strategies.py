@@ -206,6 +206,25 @@ def test_optimize_finds_narrow_profit_bands_a_plain_ternary_search_walks_past(
     assert row and row["profit_f564"] > 0.98
 
 
+@pytest.mark.parametrize(
+    "low,high",
+    [(0.482, 0.487), (0.318, 0.3225), (0.615, 0.6195)],
+)
+def test_optimize_finds_sub_grid_bands_between_grid_points(low, high):
+    # Bands narrower than one 3.125% grid step AND between grid points: the
+    # coarse grid cannot see them, and the ternary's all-infeasible
+    # comparisons always keep the left third, stepping straight over them.
+    # Dyadic midpoint refinement (spacing down to 0.78% of the cap) must
+    # catch each band at its level-1 or level-2 midpoint.
+    def evaluate(size):
+        if low < size < high:
+            return {"profit_f564": 1.0 - abs(size - (low + high) / 2)}
+        raise ValueError("infeasible")
+
+    row = backrun.optimize(evaluate, 1.0)
+    assert row and row["profit_f564"] > 0.98
+
+
 def test_both_strategies_include_impact_and_preserve_canonical_pools(snapshot):
     now = snapshot["timestamp"]
     pools = market.models(snapshot, now)
@@ -388,6 +407,33 @@ def test_mined_notice_requires_receipt_and_fresh_exact_block_snapshot(snapshot):
     assert result["backrun"] == expected
     assert result["frontrun"] is None
     assert result["backrun"]["exact_validation_required"]
+
+
+def test_mined_revalidation_survives_snapshot_ahead_of_receipt(snapshot):
+    # Sepolia can advance past the receipt while the feed burst is still being
+    # processed; the old exact-block equality dead-ended these candidates
+    # until TTL. Cumulative state at N+1 already includes the target's
+    # effects, and exact send-time quotes carry the guarantees.
+    e, now = engine(snapshot), snapshot["timestamp"]
+    tx = transaction(snapshot)
+    e.handle({"kind": "pending", "transaction": tx, "now": now + 1})
+    after, _ = market.apply_target(
+        market.models(snapshot, now), market.decode_swap(tx, now)
+    )
+    ahead = after_snapshot(snapshot, after)  # block N+1, post-target state
+    e.handle({"kind": "snapshot", "snapshot": ahead, "now": now + 13})
+    result = e.handle(
+        {
+            "kind": "mined",
+            "transaction": tx,
+            "receipt": receipt(tx, snapshot),  # mined in block N
+            "now": now + 14,
+        }
+    )
+    assert result["status"] == "paper_revalidated"
+    assert result["backrun"] == backrun.best_cycle(
+        market.models(ahead, now + 14), LIMITS
+    )
 
 
 def test_competitor_consumed_edge_revalidated_as_no_opportunity(snapshot):

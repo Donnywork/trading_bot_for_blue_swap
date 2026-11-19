@@ -443,8 +443,13 @@ class Service:
             return
         if (
             self.engine.snapshot is None
-            or receipt["blockNumber"] != self.engine.snapshot["block"]
+            or receipt["blockNumber"] > self.engine.snapshot["block"]
         ):
+            # Behind the receipt: the next refresh catches up and the engine
+            # retries via pending_transactions. (Ahead of the receipt is now
+            # valid revalidation state in the engine - cumulative state
+            # includes the target, and exact send-time quotes carry the
+            # guarantees.)
             return
         self.fees.confirm(tx, receipt, self.engine.snapshot)
         decision = self.engine.handle(
@@ -657,6 +662,36 @@ class Service:
             }
         )
 
+    def next_event(self, timeout):
+        """Dequeue the most perishable event first.
+
+        Pendings carry a 2 s freshness budget, and the loop spends 2-4 s per
+        head/mined sibling in a synchronous snapshot catch-up; queued behind
+        one, they used to be discarded as stale without ever becoming a
+        candidate. Removals stay immediate; everything else keeps FIFO order.
+        """
+        first = self.feed.queue.get(timeout=timeout)
+        if first.get("kind") == "pending" or first.get("removed"):
+            return first
+        held = [first]
+        picked = None
+        while len(held) < 32:
+            try:
+                item = self.feed.queue.get_nowait()
+            except queue.Empty:
+                break
+            if picked is None and item.get("kind") == "pending":
+                picked = item
+            else:
+                held.append(item)
+        if picked is None:
+            for item in held[1:]:
+                self.feed.queue.put(item)
+            return held[0]
+        for item in held:
+            self.feed.queue.put(item)
+        return picked
+
     def run(self, stop, seconds=None):
         started = self.clock()
         failures = 0
@@ -669,7 +704,7 @@ class Service:
                 try:
                     self.maintain()
                     try:
-                        event = self.feed.queue.get(timeout=1)
+                        event = self.next_event(1)
                     except queue.Empty:
                         event = None
                     if event:

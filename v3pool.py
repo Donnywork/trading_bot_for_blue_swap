@@ -27,7 +27,6 @@ PROFILE_FILE = Path(__file__).parent / "pool_profile.json"
 LIVE_PROFILE_FILE = Path(__file__).parent / "logs" / "pool_profile.json"
 TICK_BASE = 1.0001
 MAX_TICK = 887272
-FEE = 0.003
 LEGACY_POOL = "0x6a8bcbc98ff2485582049e67299fb16ad900728b"
 log = logging.getLogger("bot")
 
@@ -70,6 +69,17 @@ def check_profile(profile, where):
         raise ValueError(
             f"{where}: the pool profile's block, decimals or ticks are malformed"
         )
+    # A well-typed but corrupt layout must be refused too: negative mid-range
+    # running liquidity would understate loss_at_stop (optimistic risk
+    # sizing). The event path re-validates every snapshot; this guards the
+    # legacy saved profile.
+    running = 0
+    for t in ticks:
+        running += t["net"]
+        if running < 0:
+            raise ValueError(f"{where}: negative cumulative liquidity in profile")
+    if running != 0:
+        raise ValueError(f"{where}: liquidity nets do not sum to zero")
     return profile
 
 

@@ -926,12 +926,19 @@ def test_old_restored_entry_is_validated_before_any_exit(
 
     ex.w3.eth.get_block = get_block
     ex.exit = lambda reason: pytest.fail("exit attempted before entry validation")
-    with pytest.raises(ConnectionError if failure == "read" else Halt):
+    # A missing block is a provider gap, not reorg evidence: like a read
+    # failure it must propagate and retry, never halt on verified inventory.
+    expected = (
+        (ConnectionError if failure == "read" else BlockNotFound)
+        if failure != "changed"
+        else Halt
+    )
+    with pytest.raises(expected):
         svc.maintain()
     assert reads == [7] and not ex.history_verified
     assert ex.store.data["position"] == position
-    assert ex.store.halt_path.exists() == (failure != "read")
-    assert bool(ex.store.data.get("canonical_invalid")) == (failure != "read")
+    assert ex.store.halt_path.exists() == (failure == "changed")
+    assert bool(ex.store.data.get("canonical_invalid")) == (failure == "changed")
 
 
 def test_canonical_old_position_can_exit_after_restart(tmp_path, snapshot):
@@ -1320,6 +1327,89 @@ def test_attempts_are_bounded_and_exit_retry_keys_survive_trim(tmp_path):
     ex.exit("time_limit")
     assert len(keys) == 2 and keys[0] != keys[1]
     assert all(k.startswith("exit:" + HASH) for k in keys)
+
+
+def test_pendings_dequeue_ahead_of_head_refresh_work(tmp_path, snapshot):
+    # Pendings carry a 2 s freshness budget; queued behind a head/mined
+    # sibling that spends seconds in a synchronous catch-up, they used to be
+    # discarded as stale without ever becoming a candidate.
+    svc = service(tmp_path, snapshot)
+    svc.feed.queue.put({"kind": "head", "generation": svc.generation})
+    svc.feed.queue.put({"kind": "mined", "generation": svc.generation})
+    svc.feed.queue.put({"kind": "pending", "generation": svc.generation, "received": 1})
+    svc.feed.queue.put({"kind": "head", "generation": svc.generation})
+    assert svc.next_event(0.1)["kind"] == "pending"
+    order = [svc.feed.queue.get_nowait()["kind"] for _ in range(3)]
+    assert order == ["head", "mined", "head"]
+    # Without a pending waiting, FIFO order is untouched.
+    svc.feed.queue.put({"kind": "head", "generation": svc.generation})
+    svc.feed.queue.put({"kind": "mined", "generation": svc.generation})
+    assert svc.next_event(0.1)["kind"] == "head"
+    assert svc.feed.queue.get_nowait()["kind"] == "mined"
+    assert svc.feed.queue.empty()
+
+
+def test_single_deadline_uses_freshest_chain_time(tmp_path, monkeypatch):
+    # current() admits snapshots up to 30 s stale; a deadline anchored to the
+    # pinned quote block could already be expired when the transaction lands
+    # (a guaranteed revert on an entry that passed every simulation).
+    ex, _ = fake_executor(tmp_path)
+    monkeypatch.setattr(market, "QUOTE", "0x" + "22" * 20)
+    monkeypatch.setattr(market, "BASE", "0x" + "44" * 20)
+    captured = {}
+
+    def swap(args):
+        captured.update(args=args)
+        return SimpleNamespace(call=lambda *a, **k: A)
+
+    ex.bot = SimpleNamespace(
+        address=ex.bot.address,
+        functions=SimpleNamespace(
+            feeAllowed=lambda fee: Call(True),
+            tokenCap=lambda token: Call(2**200),
+            maxBaseIn=lambda: Call(2**200),
+            swap=swap,
+        ),
+    )
+    ex.pools = {
+        500: {
+            "pool": SimpleNamespace(
+                functions=SimpleNamespace(slot0=lambda: Call((2**96, 0)))
+            ),
+            "quoter": SimpleNamespace(
+                functions=SimpleNamespace(
+                    quoteExactInputSingle=lambda params: Call((A, 2**96 + 1, 0, 100000))
+                )
+            ),
+        }
+    }
+
+    def get_block(selector):
+        if selector == "latest":
+            return {
+                "number": 8,
+                "hash": bytes.fromhex("ef" * 32),
+                "timestamp": 110,
+            }
+        return {"number": 7, "hash": bytes.fromhex("ab" * 32), "timestamp": 99}
+
+    ex.w3.eth.get_block = get_block
+    ex.single(500, A, True, 7)
+    assert captured["args"][4] == 110 + 30  # max(pinned, latest) + 30
+
+
+def test_verify_recent_missing_block_stays_pending_without_halt(tmp_path):
+    # Absence of a block is not evidence of reorganization: a provider that
+    # lags archive state must fail like a read (propagate, retry) instead of
+    # accusing good inventory and forcing a manual reconciliation.
+    ex, _ = fake_executor(tmp_path)
+    ex.store.data["trades"] = [{"status": "confirmed", "block": 7, "block_hash": HASH}]
+    ex.w3.eth.block_number = 1000
+    ex.w3.eth.get_block = lambda n: (_ for _ in ()).throw(BlockNotFound("lag"))
+    with pytest.raises(BlockNotFound):
+        ex.verify_recent()
+    assert not ex.history_verified and not ex.store.halt_path.exists()
+    assert not ex.store.data.get("canonical_invalid")
 
 
 def test_stale_or_old_generation_pending_never_plans(tmp_path, snapshot):

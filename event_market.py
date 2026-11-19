@@ -174,6 +174,10 @@ def apply_target(pools, swap):
     )
     minimum = swap["minimum_out"] / UNIT
     # Float estimates need a margin at exact contract limits. Never round them into calldata.
-    if not math.isfinite(output) or output <= minimum + max(1e-12, abs(output) * 1e-10):
+    # The margin must exceed the model's demonstrated relative error (~1e-9 on
+    # recorded quoter outputs), not just float64 noise, or targets clearing
+    # their minimum by a hair get mispredicted - and a front-run entry would
+    # premise itself on a reverting target.
+    if not math.isfinite(output) or output <= minimum + max(1e-12, abs(output) * 1e-8):
         raise PredictionRejected("target minimum output not safely met")
     return result, output

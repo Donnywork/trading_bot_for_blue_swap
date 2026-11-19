@@ -60,12 +60,25 @@ def optimize(evaluate, ceiling):
         return gain
 
     lo, hi = 0.0, ceiling
-    for n in range(1, 33):
-        score(ceiling * n / 32)
-    score(ceiling)
+    points = [ceiling * n / 32 for n in range(1, 33)]
+    for size in points:
+        score(size)
+    # Dyadic refinement: liquidity is lumpy, so a profitable band can be far
+    # narrower than one 3.125% grid step, and the ternary below steps straight
+    # over such bands (both-infeasible comparisons always keep the left
+    # third, and probes near a point are ~33% apart). Two midpoint halvings
+    # take the spacing to 0.78% of the cap - finer than the coarsest 2x
+    # ladder-rung gap - for ~100 free paper evaluations.
+    for _ in range(2):
+        previous, mids = 0.0, []
+        for point in points:
+            mids.append((previous + point) / 2)
+            previous = point
+        for size in mids:
+            score(size)
+        points = sorted(points + mids)
     if best_size is not None:
-        # Refine inside the grid bracket around the winner; the bracket is one grid
-        # step wide, so a band that caught a grid point cannot hide from refinement.
+        # Polish inside the bracket around the winner.
         step = ceiling / 32
         lo, hi = max(0.0, best_size - step), min(ceiling, best_size + step)
     for _ in range(64):
@@ -75,7 +88,6 @@ def optimize(evaluate, ceiling):
         else:
             hi = y
     score(hi)
-    score(ceiling)
     return best
 
 
