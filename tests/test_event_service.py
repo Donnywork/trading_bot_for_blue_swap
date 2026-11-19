@@ -776,6 +776,71 @@ def test_entry_receipt_is_persisted_and_exit_uses_receipt_profit(tmp_path, monke
     assert ex.store.data["position"] is None
 
 
+@pytest.mark.parametrize("failures,degraded,reads", [(1, False, 2), (5, True, 3)])
+def test_confirmed_fill_never_halts_on_header_read_failures(
+    tmp_path, monkeypatch, failures, degraded, reads
+):
+    # Nov 19 15:41: a mined +22.98 f564 cycle halted because the single
+    # get_block after the send hit a transient provider error inside the
+    # accounting catch-all. The receipt alone proves the fill; the header is
+    # metadata, so the read is retried and then degraded, never halted.
+    ex, fn = fake_executor(tmp_path)
+    header = {
+        "number": 7,
+        "hash": bytes.fromhex("ab" * 32),
+        "timestamp": 99,
+        "baseFeePerGas": 1,
+    }
+    counted = {"failed": 0, "total": 0}
+
+    def get_block(selector):
+        # Only the post-send accounting read uses an integer block number;
+        # freshness checks keep reading "latest" and must not fail.
+        if isinstance(selector, int):
+            counted["total"] += 1
+            if counted["failed"] < failures:
+                counted["failed"] += 1
+                raise OSError("provider unavailable")
+        return header
+
+    ex.w3.eth.get_block = get_block
+    monkeypatch.setattr("event_execution.time.sleep", lambda seconds: None)
+
+    def receipt(value):
+        return {
+            "blockNumber": 7,
+            "blockHash": bytes.fromhex("ab" * 32),
+            "transactionHash": bytes.fromhex("cd" * 32),
+            "gasUsed": 50000,
+            "effectiveGasPrice": 10,
+            "logs": [
+                {
+                    "address": market.BASE,
+                    "topics": [
+                        Web3.keccak(text="Transfer(address,address,uint256)"),
+                        bytes(32),
+                        bytes.fromhex("00" * 12 + "33" * 20),
+                    ],
+                    "data": value.to_bytes(32, "big"),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(bot_contract, "send_tx", lambda *a, **k: receipt(2 * A))
+    result = ex.perform("entry:" + HASH, fn, "entry", 1000 * A, A, candidate())
+    assert result["status"] == "confirmed" and counted["total"] == reads
+    assert not ex.store.halt_path.exists() and ex.store.data["intent"] is None
+    position = ex.store.data["position"]
+    assert position["base_raw"] == 2 * A
+    if degraded:
+        assert result["block_time"] is None
+        assert result["inclusion_error"] == "Confirmed block metadata unavailable."
+        assert position["entry_time"] is None
+    else:
+        assert result["block_time"] == 99 and "inclusion_error" not in result
+        assert position["entry_time"] == 99
+
+
 def test_feed_change_during_preparation_prevents_send(tmp_path, monkeypatch):
     ex, fn = fake_executor(tmp_path)
 

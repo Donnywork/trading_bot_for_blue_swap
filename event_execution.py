@@ -3,7 +3,7 @@
 import time
 
 from web3 import Web3
-from web3.exceptions import BlockNotFound
+from web3.exceptions import BlockNotFound, Web3Exception
 
 import arbitrage
 import bot_contract
@@ -449,11 +449,26 @@ class Executor:
             self.halt_uncertain()
         except Exception:  # noqa: BLE001 — any uncertainty after intent must halt
             self.halt_uncertain()
+        # The receipt itself proves the fill; the block header is enrichment
+        # metadata. A transient provider failure on that one read must not
+        # halt a confirmed trade (Nov 19 15:41: a +22.98 f564 fill halted on
+        # a single failed get_block right after the send). Retry like every
+        # other read, then degrade to metadata-unavailable exactly like the
+        # known-revert path above; verify_recent() revalidates the block on
+        # the next startup. The reorg and minimum checks below still halt
+        # whenever the evidence is present to justify it.
+        header = None
+        for attempt in range(3):
+            try:
+                with rpc.purpose(rpc.RECEIPTS):
+                    header = self.w3.eth.get_block(receipt["blockNumber"])
+                break
+            except (OSError, Web3Exception):
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+        if header is not None and header["hash"] != receipt["blockHash"]:
+            self.store.halt("execution receipt reorganized")
         try:
-            with rpc.purpose(rpc.RECEIPTS):
-                header = self.w3.eth.get_block(receipt["blockNumber"])
-            if header["hash"] != receipt["blockHash"]:
-                self.store.halt("execution receipt reorganized")
             output_token = market.BASE if action == "entry" else market.QUOTE
             received = received_from_receipt(receipt, output_token, self.bot.address)
             if received < minimum:
@@ -464,17 +479,22 @@ class Executor:
                 block_hash=hexstr(receipt["blockHash"]),
                 received_raw=received,
                 gas_wei=receipt["gasUsed"] * receipt["effectiveGasPrice"],
-                block_time=header["timestamp"],
+                block_time=header["timestamp"] if header is not None else None,
                 transaction_index=receipt.get("transactionIndex"),
                 inclusion=self.inclusion(receipt, header, candidate, decision),
             )
-            try:
-                row["legs"] = event_activity.receipt_legs(receipt, header["timestamp"])
-            except (ValueError, KeyError, TypeError):
-                row["legs"] = []
-                row["legs_error"] = (
-                    "Pool log metadata unavailable; receipt accounting retained."
-                )
+            if header is None:
+                row["inclusion_error"] = "Confirmed block metadata unavailable."
+            else:
+                try:
+                    row["legs"] = event_activity.receipt_legs(
+                        receipt, header["timestamp"]
+                    )
+                except (ValueError, KeyError, TypeError):
+                    row["legs"] = []
+                    row["legs_error"] = (
+                        "Pool log metadata unavailable; receipt accounting retained."
+                    )
             if action == "entry":
                 row["position_id"] = row["tx_hash"]
                 swap = candidate["swap"]
