@@ -226,6 +226,11 @@ class Snapshots:
                     swaps.extend((fee, e) for e in events if e["event"] == "Swap")
                     self.swaps_dropped += max(0, len(swaps) - 2000)
                     swaps = swaps[-2000:]
+                    if end - start + 1 >= self.log_chunk:
+                        # Quiet ranges pay one getLogs per chunk: grow toward the
+                        # provider's ceiling instead of re-reading 100 blocks a
+                        # call forever. A range rejection above halves it again.
+                        self.log_chunk = min(800, self.log_chunk * 2)
                     start = end + 1
             if scan:
                 sqrt, tick, liquidity = (

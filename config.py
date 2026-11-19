@@ -101,6 +101,56 @@ def rpc_rate():
     return rate or None
 
 
+# Alchemy meters throughput in compute units, not requests: one eth_getLogs costs as
+# much as three eth_calls. A request-count cap alone lets a getLogs-heavy burst blow
+# past the plan's CU/s ceiling (observed 560/300 CU/s on Sepolia = the 429 storms).
+# Published EVM costs: https://www.alchemy.com/docs/reference/compute-unit-costs
+CU_COSTS = {
+    "eth_getLogs": 60,
+    "eth_call": 26,
+    "eth_sendRawTransaction": 40,
+    "eth_callMany": 20,
+    "eth_estimateGas": 20,
+    "eth_gasPrice": 20,
+    "eth_getBalance": 20,
+    "eth_getBlockByHash": 20,
+    "eth_getBlockByNumber": 20,
+    "eth_getCode": 20,
+    "eth_getStorageAt": 20,
+    "eth_getTransactionByHash": 20,
+    "eth_getTransactionCount": 20,
+    "eth_getTransactionReceipt": 20,
+    "alchemy_getTokenBalances": 20,
+    "eth_feeHistory": 10,
+    "eth_blockNumber": 10,
+    "eth_maxPriorityFeePerGas": 10,
+    "eth_chainId": 0,
+}
+DEFAULT_CU = 20  # unknown methods: a mid-weight read, never a free pass
+
+
+def cu_rate():
+    # ------------------------------------
+    # MAX_COMPUTE_UNITS_PER_SECOND: pace the bot under the provider's compute-unit
+    # throughput ceiling (Alchemy free tier is 300 CU/s; ~250 leaves headroom for
+    # the dashboard and manual commands). 0 or unset means no CU pacing, and
+    # MAX_RPC_PER_SECOND keeps applying on its own. Each request reserves its
+    # methods' published CU cost: a getLogs at 250 CU/s paces the next call 0.24 s
+    # out, a blockNumber only 0.04 s.
+    # ------------------------------------
+
+    try:
+        rate = Decimal(os.environ.get("MAX_COMPUTE_UNITS_PER_SECOND", "0"))
+    except InvalidOperation:
+        rate = Decimal("nan")
+    if not rate.is_finite() or rate < 0:
+        raise SystemExit(
+            "MAX_COMPUTE_UNITS_PER_SECOND must be a positive number of compute units"
+            " per second, or 0 (no cap)"
+        )
+    return rate or None
+
+
 def fallback_urls():
     # ------------------------------------
     # RPC_FALLBACK_URLS from the environment: optional comma-separated URLs used when the
@@ -114,19 +164,24 @@ def fallback_urls():
 class RpcAdapter(requests.adapters.HTTPAdapter):
     """Pace and count every HTTP attempt, underneath Web3's cache and retry loop."""
 
-    def __init__(self, rate, metrics):
+    def __init__(self, rate, metrics, cu_rate=None):
         super().__init__(max_retries=0)
         self.interval = float(1 / rate) if rate else 0.0
+        self.cu_budget = float(cu_rate) if cu_rate else 0.0
         self.metrics = metrics
         self.next_at = 0.0
+        self.last_at = 0.0
+        self.cu_next_at = 0.0
         self.pacing_lock = threading.Lock()
 
     def send(self, request, **kwargs):
         if request.method != "POST":
             return super().send(request, **kwargs)
-        body = request.body
-        batch = body.startswith(b"[")
-        count = len(json.loads(body)) if batch else 1
+        payload = json.loads(request.body)
+        batch = isinstance(payload, list)
+        calls = payload if batch else [payload]
+        count = len(calls)
+        cost = sum(CU_COSTS.get(c.get("method", ""), DEFAULT_CU) for c in calls)
         # Diagnostic reads share the quota with execution. Lock only pacing;
         # a slow diagnostic HTTP response must never hold the execution thread.
         with self.pacing_lock:
@@ -135,15 +190,21 @@ class RpcAdapter(requests.adapters.HTTPAdapter):
             if self.interval and count > 1 and self.next_at:
                 # Start a fresh quota window for a batch, including after scalar reads.
                 wait = max(wait, self.last_at + 1 - now)
+            if self.cu_budget and self.cu_next_at:
+                # Every request reserves its compute units before it is sent, so a
+                # burst of heavy methods cannot pass the provider's CU/s ceiling.
+                wait = max(wait, self.cu_next_at - now)
             if wait > 0:
                 time.sleep(wait)
             self.last_at = time.monotonic()
             self.next_at = self.last_at + (
                 1 if count > 1 and self.interval else self.interval
             )
+            if self.cu_budget:
+                self.cu_next_at = self.last_at + cost / self.cu_budget
         if self.metrics is not None:
             self.metrics.attempt(
-                count, method=None if batch else json.loads(body)["method"]
+                count, method=None if batch else calls[0].get("method")
             )
         return super().send(request, **kwargs)
 
@@ -156,9 +217,9 @@ class ThrottledProvider(Web3.HTTPProvider):
     # is shared by execution and background diagnostics; None means no throttling.
     # ------------------------------------
 
-    def __init__(self, url, rate=None, metrics=None, **kwargs):
+    def __init__(self, url, rate=None, metrics=None, cu_rate=None, **kwargs):
         session = requests.Session()
-        adapter = RpcAdapter(rate, metrics)
+        adapter = RpcAdapter(rate, metrics, cu_rate)
         for scheme in ("http://", "https://"):
             session.mount(scheme, adapter)
         super().__init__(url, session=session, **kwargs)
@@ -291,7 +352,8 @@ def rpc_provider(url, metrics=None):
     # ------------------------------------
 
     providers = [
-        ThrottledProvider(u, rpc_rate(), metrics) for u in [url] + fallback_urls()
+        ThrottledProvider(u, rpc_rate(), metrics, cu_rate())
+        for u in [url] + fallback_urls()
     ]
     if len(providers) == 1:
         return providers[0]

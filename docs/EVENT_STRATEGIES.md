@@ -191,6 +191,8 @@ Reproduce the counts with `uv run pytest -qs tests/test_phase2_rpc.py`.
 | `EVENT_MOVE_BPS` | `100` | Single-swap and atomic cycle pool price limits, 1–500 bps |
 | `EVENT_EXIT_SECONDS` | `60` | Front-run inventory exit timer, 5–300 seconds |
 | `EVENT_COOLDOWN_SECONDS` | `10` | Delay after execution attempts/failures, 1–300 seconds |
+| `EVENT_OBSERVER_SECONDS` | `15` | Diagnostic-worker cadence, 5–600 seconds; slower saves compute units |
+| `MAX_COMPUTE_UNITS_PER_SECOND` | `0` | Per-provider compute-unit pacing (Alchemy free tier ceiling: 300 CU/s; try 250), 0 = off |
 | `EVENT_MAX_GAS` | `1500000` | Maximum gas limit including the 2× estimate buffer |
 | `EVENT_PRIORITY_FEE_WEI` | `2000000000` | Fixed-mode exact priority fee, integer wei/gas |
 | `EVENT_MAX_FEE_WEI` | `20000000000` | Fixed-mode exact maximum fee, integer wei/gas |

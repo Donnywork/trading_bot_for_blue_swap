@@ -46,6 +46,16 @@ def test_event_settings_default_and_live_interlocks():
     assert all(type(n) is int for n in sizes(123456789123456789123456789))
 
 
+def test_observer_interval_is_configurable_and_bounded():
+    # The observer is pure CU spend; a slower plan needs a slower cadence.
+    assert EventSettings.from_env({}).observer_seconds == 15
+    assert (
+        EventSettings.from_env({"EVENT_OBSERVER_SECONDS": "60"}).observer_seconds == 60
+    )
+    with pytest.raises(ValueError):
+        EventSettings.from_env({"EVENT_OBSERVER_SECONDS": "1"})
+
+
 def test_execution_ladder_covers_small_and_narrow_optima():
     # Thin pools peak at small sizes (observed ~3% of cap); the ladder must reach
     # cap/64 and keep adjacent rungs close so narrow peaks stay bracketed.
@@ -1601,10 +1611,37 @@ def test_rpc_quota_auth_errors_preserve_catchup_range(
     w3.eth.get_logs = recover
     for p in snapshot["profiles"]:
         pool = pools[p["fee"]]["pool"]
-        pool.functions.slot0 = lambda p=p: Call((p["sqrt" + "PriceX96"], p["tick"]))
+        pool.functions.slot0 = lambda p=p: Call((p["sqrtPriceX96"], p["tick"]))
         pool.functions.liquidity = lambda p=p: Call(p["liquidity"])
     assert adapter.refresh()["block"] == snapshot["block"] + 100
-    assert reads == [100, 100, 100] and adapter.log_chunk == 100
+    # The first pool's full 100-block chunk grew the ceiling for the next quiet range.
+    assert reads == [100, 100, 100] and adapter.log_chunk == 200
+
+
+def test_quiet_catchup_grows_log_chunks_instead_of_re_reading(
+    snapshot, tmp_path, forbid_depth
+):
+    # One getLogs per quiet chunk: after a 350-block gap the adapter must read
+    # 100 + 200 + 50 blocks for the first pool and one 350-block chunk for the
+    # second, instead of four fixed 100-block calls per pool.
+    saved = tmp_path / "snapshot.json"
+    saved.write_text(json.dumps(snapshot))
+    w3, pools, calls = snapshot_chain(snapshot)
+    header = w3.eth.get_block
+    gap = 350
+    w3.eth.get_block = lambda n: (
+        header(n)
+        | {"number": snapshot["block"] + (0 if n == snapshot["block"] else gap)}
+    )
+    for p in snapshot["profiles"]:
+        pool = pools[p["fee"]]["pool"]
+        pool.functions.slot0 = lambda p=p: Call((p["sqrtPriceX96"], p["tick"]))
+        pool.functions.liquidity = lambda p=p: Call(p["liquidity"])
+    adapter = Snapshots(w3, pools, saved)
+    assert adapter.refresh()["block"] == snapshot["block"] + gap
+    reads = [c["toBlock"] - c["fromBlock"] + 1 for c in calls]
+    assert reads == [100, 200, 50, 350]
+    assert adapter.log_chunk == 400
 
 
 def test_controls_and_status_are_file_only(tmp_path, snapshot):

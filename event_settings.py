@@ -46,6 +46,7 @@ class EventSettings:
     move_bps: int = 100
     exit_seconds: int = 60
     cooldown: int = 10
+    observer_seconds: int = 15
     max_gas: int = 1_500_000
     priority_wei: int = 2_000_000_000
     max_fee_wei: int = 20_000_000_000
@@ -176,6 +177,7 @@ class EventSettings:
             move_bps=bounded(env, "EVENT_MOVE_BPS", 100, 1, 500),
             exit_seconds=bounded(env, "EVENT_EXIT_SECONDS", 60, 5, 300),
             cooldown=bounded(env, "EVENT_COOLDOWN_SECONDS", 10, 1, 300),
+            observer_seconds=bounded(env, "EVENT_OBSERVER_SECONDS", 15, 5, 600),
             max_gas=bounded(env, "EVENT_MAX_GAS", 1_500_000, 100_000, 5_000_000),
             priority_wei=priority,
             max_fee_wei=max_fee,

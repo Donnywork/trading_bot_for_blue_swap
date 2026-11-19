@@ -83,6 +83,9 @@ class Observer:
             settings,
             clock,
         )
+        # The interval is CU spend: every pass costs a handful of reads, and the
+        # dashboard stays useful at a slower cadence on a rate-limited plan.
+        self.interval = getattr(settings, "observer_seconds", None) or INTERVAL
         self.lock = threading.Lock()
         self.thread, self.next_run = None, 0
         self.pending, self.senders = {}, {}
@@ -153,7 +156,7 @@ class Observer:
     def schedule(self, executor, snapshot, position):
         if self.clock() < self.next_run or (self.thread and self.thread.is_alive()):
             return
-        self.next_run = self.clock() + INTERVAL
+        self.next_run = self.clock() + self.interval
         # Copies prevent mode changes and receipt accounting from racing diagnostics.
         live = getattr(executor, "live_history", None)
         trades = copy.deepcopy(live.data["trades"]) if live else []

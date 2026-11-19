@@ -7,3 +7,5 @@ build/
 .DS_Store
 drafts/
 abis/trading_bot.json
+.agents/
+skills-lock.json

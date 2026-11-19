@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 
 import pytest
@@ -26,6 +27,25 @@ def test_bad_rate_stops_the_program(monkeypatch, value):
     monkeypatch.setenv("MAX_RPC_PER_SECOND", value)
     with pytest.raises(SystemExit):
         config.rpc_rate()
+
+
+def test_no_cu_cap_when_unset_or_zero(monkeypatch):
+    monkeypatch.delenv("MAX_COMPUTE_UNITS_PER_SECOND", raising=False)
+    assert config.cu_rate() is None
+    monkeypatch.setenv("MAX_COMPUTE_UNITS_PER_SECOND", "0")
+    assert config.cu_rate() is None
+
+
+def test_cu_cap_reads_a_number(monkeypatch):
+    monkeypatch.setenv("MAX_COMPUTE_UNITS_PER_SECOND", "250")
+    assert config.cu_rate() == Decimal(250)
+
+
+@pytest.mark.parametrize("value", ["-1", "abc", "", "nan"])
+def test_bad_cu_cap_stops_the_program(monkeypatch, value):
+    monkeypatch.setenv("MAX_COMPUTE_UNITS_PER_SECOND", value)
+    with pytest.raises(SystemExit):
+        config.cu_rate()
 
 
 def fake_clock(monkeypatch):
@@ -85,6 +105,53 @@ def test_provider_without_rate_never_sleeps(monkeypatch):
 def test_provider_takes_the_cap_from_env(monkeypatch):
     monkeypatch.setenv("MAX_RPC_PER_SECOND", "4")
     assert config.rpc_provider("http://rpc.test").batch_size == 4
+
+
+def test_compute_units_space_heavy_calls_more_than_cheap_ones(monkeypatch):
+    # Alchemy meters throughput in CU: a getLogs (60) must pace the next call
+    # 6x further out than a blockNumber (10) at the same CU budget.
+    sleeps = fake_clock(monkeypatch)
+    calls = stub_responses(monkeypatch)
+    provider = config.ThrottledProvider("http://rpc.test", cu_rate=Decimal(250))
+    provider.make_request("eth_getLogs", [])
+    provider.make_request("eth_blockNumber", [])
+    provider.make_request("eth_getLogs", [])
+    assert calls == ["eth_getLogs", "eth_blockNumber", "eth_getLogs"]
+    assert sleeps == pytest.approx([60 / 250, 10 / 250], abs=1e-9)
+
+
+def test_batches_reserve_the_sum_of_their_compute_units(monkeypatch):
+    sleeps = fake_clock(monkeypatch)
+
+    def send(self, req, **kwargs):
+        import json
+
+        payload = json.loads(req.body)
+        reply = requests.Response()
+        reply.status_code = 200
+        single = {"jsonrpc": "2.0", "id": 1, "result": "0x1"}
+        reply._content = json.dumps(
+            [single] * len(payload) if isinstance(payload, list) else single
+        ).encode()
+        return reply
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+    adapter = config.RpcAdapter(None, None, Decimal(250))
+    batch = [
+        {"jsonrpc": "2.0", "id": i, "method": "eth_call", "params": []}
+        for i in range(10)
+    ]
+    for payload in (
+        batch,
+        {"jsonrpc": "2.0", "id": 1, "method": "eth_getLogs", "params": []},
+    ):
+        adapter.send(
+            requests.Request(
+                "POST", "http://rpc.test", data=json.dumps(payload)
+            ).prepare()
+        )
+    # 10 eth_calls reserve 260 CU = 1.04 s at 250 CU/s before the next request.
+    assert sleeps == pytest.approx([260 / 250], abs=1e-9)
 
 
 # ---------------------------------------------------------------- failover
