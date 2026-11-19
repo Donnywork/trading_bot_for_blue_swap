@@ -3,7 +3,7 @@ import importlib
 import sys
 
 import pytest
-from web3.exceptions import Web3RPCError
+from web3.exceptions import ContractLogicError, Web3RPCError
 
 import event_replay
 import event_service
@@ -101,6 +101,23 @@ def test_diagnostics_keep_location_without_provider_body():
         "https://provider.invalid" not in message
         and "private-credential" not in message
     )
+
+
+def test_contract_revert_reason_is_published_bounded_and_normalized():
+    try:
+        raise ContractLogicError(
+            "execution reverted: VM Exception while processing transaction:\n\n"
+            "revert   insufficient profit"
+        )
+    except ContractLogicError as exc:
+        message = runtime.error_summary(exc)
+    assert "ContractLogicError" in message and "test_runtime.py:" in message
+    assert "revert insufficient profit" in message
+    assert "\n" not in message and len(message) < 300
+    try:
+        raise ContractLogicError("x" * 500)
+    except ContractLogicError as exc:
+        assert len(runtime.error_summary(exc).rsplit(": ", 1)[1]) <= 160
 
 
 @pytest.mark.parametrize(

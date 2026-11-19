@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from requests import HTTPError
-from web3.exceptions import Web3RPCError
+from web3.exceptions import ContractLogicError, Web3RPCError
 
 ENV_FILE = Path(__file__).resolve().parent / ".env"
 
@@ -98,4 +98,9 @@ def error_summary(exc):
         frame = tb.tb_frame
         location = f" at {Path(frame.f_code.co_filename).name}:{tb.tb_lineno} ({frame.f_code.co_name})"
         tb = tb.tb_next
-    return f"{error_kind(exc)}{location}"
+    detail = ""
+    if isinstance(exc, ContractLogicError):
+        # The revert reason is on-chain contract data, not a provider body: publish it
+        # (whitespace-normalized and bounded) so execution_rejected records name the require.
+        detail = f": {' '.join(str(exc).split())[:160]}"
+    return f"{error_kind(exc)}{location}{detail}"
