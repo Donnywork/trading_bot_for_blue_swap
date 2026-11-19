@@ -186,6 +186,26 @@ def test_snapshot_cycle_matches_recorded_quoter_outputs(snapshot):
     assert backrun.best_cycle(pools, LIMITS) is None
 
 
+@pytest.mark.parametrize(
+    "low,high",
+    [(0.30, 0.32), (0.45, 0.47), (0.62, 0.66), (0.71, 0.73), (0.09, 0.11)],
+)
+def test_optimize_finds_narrow_profit_bands_a_plain_ternary_search_walks_past(
+    low, high
+):
+    # Lumpy liquidity (discrete positions at discrete ticks) can leave a ~2%-of-range
+    # profitable band. A pure ternary search missed four of these five windows in
+    # development; the coarse grid sweep plus bracket refinement must catch each.
+
+    def evaluate(size):
+        if low < size < high:
+            return {"profit_f564": 1.0 - abs(size - (low + high) / 2)}
+        raise ValueError("infeasible")
+
+    row = backrun.optimize(evaluate, 1.0)
+    assert row and row["profit_f564"] > 0.98
+
+
 def test_both_strategies_include_impact_and_preserve_canonical_pools(snapshot):
     now = snapshot["timestamp"]
     pools = market.models(snapshot, now)

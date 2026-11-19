@@ -21,7 +21,12 @@ from runtime import ConfigurationError
 
 def sizes(cap):
     # Calldata sizes are derived exclusively from integer configuration, never model floats.
-    return sorted({max(1, cap * n // 16) for n in (1, 2, 4, 8, 12, 16)})
+    # Dense low rungs: thin pools peak at small sizes (observed ~3% of cap on Sepolia),
+    # and a six-rung ladder spaced 2x cannot express that optimum. Adjacent rungs stay
+    # within 1.5x — except the smallest step, which integer rungs cannot split below 2x.
+    return sorted(
+        {max(1, cap * n // 64) for n in (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64)}
+    )
 
 
 class Executor:

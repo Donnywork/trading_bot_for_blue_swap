@@ -2,6 +2,7 @@ import copy
 import json
 import threading
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,6 +44,22 @@ def test_event_settings_default_and_live_interlocks():
         EventSettings.from_env({"EVENT_MAX_FEE_WEI": "1"})
     assert token_amount("123456789.123456789123456789") == 123456789123456789123456789
     assert all(type(n) is int for n in sizes(123456789123456789123456789))
+
+
+def test_execution_ladder_covers_small_and_narrow_optima():
+    # Thin pools peak at small sizes (observed ~3% of cap); the ladder must reach
+    # cap/64 and keep adjacent rungs close so narrow peaks stay bracketed.
+    cap = 10000 * 10**18
+    ladder = sizes(cap)
+    assert all(type(n) is int for n in ladder)
+    assert ladder[0] == cap // 64  # a ~3%-of-cap optimum has a rung beside it
+    assert ladder[-1] == cap
+    assert len(ladder) == 12
+    for index, (low, high) in enumerate(pairwise(ladder)):
+        # Integer rungs cannot split the first (cap/64 -> cap/32) step below 2x;
+        # everywhere else adjacent rungs stay within 1.5x (high*2 <= low*3).
+        assert high * 2 <= (low * 4 if index == 0 else low * 3) + 2
+    assert sizes(1) == [1] and sizes(2) == [1, 2]
 
 
 @pytest.mark.parametrize(

@@ -35,12 +35,17 @@ def cycle(pools, buy_fee, quote, max_base):
 
 
 def optimize(evaluate, ceiling):
-    # Standard V3 cross-pool marginal output decreases with input. A rejected cap or
-    # target minimum creates an infeasible upper tail. Keep zero as a valid no-trade choice.
+    # Cross-pool marginal output decreases with input, but lumpy liquidity (discrete
+    # positions at discrete ticks) can leave narrow profitable bands that a plain
+    # ternary search walks past. Sweep a coarse grid first, remember the best feasible
+    # point seen anywhere, then refine ternary inside the bracket around it. A rejected
+    # cap or target minimum creates an infeasible upper tail. Keep zero as a valid
+    # no-trade choice; infeasible sizes score -inf.
     best = None
+    best_size = None
 
     def score(size):
-        nonlocal best
+        nonlocal best, best_size
         try:
             row = evaluate(size)
         except (ValueError, ZeroDivisionError, OverflowError):
@@ -51,10 +56,18 @@ def optimize(evaluate, ceiling):
             and gain > 0
             and (best is None or gain > best["profit_f564"])
         ):
-            best = row
+            best, best_size = row, size
         return gain
 
     lo, hi = 0.0, ceiling
+    for n in range(1, 33):
+        score(ceiling * n / 32)
+    score(ceiling)
+    if best_size is not None:
+        # Refine inside the grid bracket around the winner; the bracket is one grid
+        # step wide, so a band that caught a grid point cannot hide from refinement.
+        step = ceiling / 32
+        lo, hi = max(0.0, best_size - step), min(ceiling, best_size + step)
     for _ in range(64):
         x, y = lo + (hi - lo) / 3, hi - (hi - lo) / 3
         if score(x) < score(y):
