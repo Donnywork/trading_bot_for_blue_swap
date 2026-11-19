@@ -169,23 +169,35 @@ class Executor:
             raise ValueError("unsupported cycle action")
         if self.bot is None:
             raise ValueError("Phase 2 bot not configured")
+
+        def quote(amount):
+            return arbitrage.quote_cycle(
+                self.pools[candidate["backrun"]["buy_fee"]],
+                self.pools[candidate["backrun"]["sell_fee"]],
+                amount,
+                self.settings.min_profit,
+                self.settings.base_cap,
+                self.settings.slippage_bps,
+                self.settings.move_bps,
+                ttl=30,
+            )
+
+        # A profitable bracket quote is sent immediately: every extra rung risks
+        # the window (three 25.97 f564 plans died to 18 s full-ladder quotes on
+        # Nov 19 while competitors swept in). The remaining rungs are quoted only
+        # when the bracket found nothing — no race to lose in a quiet market.
         best = None
-        for amount in self.quote_ladder(candidate, action):
-            try:
-                row = arbitrage.quote_cycle(
-                    self.pools[candidate["backrun"]["buy_fee"]],
-                    self.pools[candidate["backrun"]["sell_fee"]],
-                    amount,
-                    self.settings.min_profit,
-                    self.settings.base_cap,
-                    self.settings.slippage_bps,
-                    self.settings.move_bps,
-                    ttl=30,
-                )
+        priority, rest = self.quote_ladder(candidate, action)
+        for rung in (priority, rest):
+            for amount in rung:
+                try:
+                    row = quote(amount)
+                except ValueError:
+                    continue
                 if best is None or row["profit"] > best["profit"]:
                     best = row
-            except ValueError:
-                continue
+            if best is not None:
+                break
         if best is None:
             raise ConfigurationError("no exact profitable bounded cycle")
         if best["block"] != candidate["snapshot_block"]:
@@ -202,14 +214,13 @@ class Executor:
             timing=timing,
         )
 
-    def quote_ladder(self, candidate, action):
-        # Time-critical backruns quote only the rungs nearest the paper optimum:
-        # every skipped rung saves about five reads inside the inclusion race.
-        # Standing cross-pool arbitrage keeps the whole ladder in full breadth.
+    def quote_ladder(self, candidate, action=None):
+        # Both cycle actions quote the bracket around the paper optimum first;
+        # event-chaos arbitrage windows are races too. The float hint only
+        # ORDERS configuration-derived integer rungs (never calldata amounts).
         plan = candidate.get("backrun") or {}
         hint = int((plan.get("input_f564") or 0) * market.UNIT)
-        priority, rest = sizes_near(self.settings.quote_cap, hint)
-        return priority if action == "backrun" else priority + rest
+        return sizes_near(self.settings.quote_cap, hint)
 
     def enter(self, candidate, snapshot):
         timing = self.start_attempt(candidate, "entry")
