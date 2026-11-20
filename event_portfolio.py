@@ -72,11 +72,20 @@ def performance(data):
     ]
     mined = [r for r in rows if r.get("status") in ("confirmed", "reverted")]
     complete = len(rows) == len(data["attempts"])
+    # Reconciled older rows may lack display timestamps while retaining exact
+    # receipt accounting. Withhold the date range, not valid profit/gas totals.
+    times = [r["at"] for r in rows if r.get("at") is not None]
+    if any(
+        type(at) not in (int, float) or not math.isfinite(at) or at < 0 for at in times
+    ):
+        raise ValueError("invalid accounting timestamp")
+    timestamps_missing = len(rows) - len(times)
     # An empty *existing ledger* establishes no executions in this ledger, not lifetime zero.
     return {
         "basis": "Retained execution ledger (at most 200 attempts); excludes gas and external flows.",
-        "from": min((r["at"] for r in rows), default=None),
-        "to": max((r["at"] for r in rows), default=None),
+        "from": min(times, default=None) if not timestamps_missing else None,
+        "to": max(times, default=None) if not timestamps_missing else None,
+        "timestamps_missing": timestamps_missing,
         "attempts": len(rows),
         "completed": len(closed),
         "earlier_history_missing": not complete,
@@ -124,6 +133,7 @@ def view(directory, runtime, now):
         "performance": None,
         "performance_error": "",
         "position": None,
+        "position_verified": False,
         "baseline": "Unavailable — baseline not established.",
         "flow_note": "Deposits and withdrawals are included in holdings, never in trading P/L. External flows are not reconciled; no flow-adjusted portfolio return is available.",
     }
@@ -183,6 +193,7 @@ def view(directory, runtime, now):
             and data.get("position") == runtime.get("position")
         )
         result["performance"] = performance(data)
+        result["position_verified"] = position_verified
     except FileNotFoundError:
         result["performance_error"] = (
             "Confirmed live accounting is unavailable; no live ledger recorded."

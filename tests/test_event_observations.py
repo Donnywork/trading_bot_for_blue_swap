@@ -428,6 +428,133 @@ def test_realized_and_gas_coverage_missing_data_and_failed_transactions():
         portfolio.performance(data)
 
 
+@pytest.fixture
+def retained_live_ledger(tmp_path):
+    data = {
+        "version": 1,
+        "identity": event_history.IDENTITY | {"bot_address": VAULT},
+        "position": None,
+        "attempts": {"exit": "confirmed", "cycle": "confirmed", "failed": "reverted"},
+        "trades": [
+            {
+                "at": 100,
+                "action": "exit",
+                "status": "confirmed",
+                "profit_raw": -A + 1,
+                "gas_wei": 10,
+            },
+            {
+                "at": 200.5,
+                "action": "arbitrage",
+                "status": "confirmed",
+                "profit_raw": 3 * A + 2,
+                "gas_wei": 20,
+            },
+            {"at": 300, "action": "entry", "status": "reverted", "gas_wei": 40},
+        ],
+    }
+    path = tmp_path / "execution_live.json"
+    path.write_text(json.dumps(data))
+    return path, data
+
+
+@pytest.mark.parametrize("missing", ["absent", "null", "mixed", "none"])
+def test_file_backed_performance_keeps_exact_totals_without_dates(
+    tmp_path, retained_live_ledger, missing
+):
+    path, data = retained_live_ledger
+    if missing in ("absent", "mixed"):
+        del data["trades"][0]["at"]
+    elif missing == "null":
+        data["trades"][0]["at"] = None
+    if missing == "mixed":
+        data["trades"][2]["at"] = None
+    path.write_text(json.dumps(data))
+    before = path.read_bytes()
+    result = portfolio.view(tmp_path, runtime(execution_verified=True), NOW)
+    perf = result["performance"]
+    assert result["performance_error"] == ""
+    assert result["position_verified"] is True and result["position"] is None
+    assert perf["realized_f564"] == "2.000000000000000003"
+    assert perf["gas_eth"] == "7E-17"
+    assert perf["attempts"] == 3 and perf["completed"] == 2
+    assert perf["gas_missing"] == 0 and not perf["earlier_history_missing"]
+    assert (
+        perf["timestamps_missing"]
+        == {"absent": 1, "null": 1, "mixed": 2, "none": 0}[missing]
+    )
+    if missing == "none":
+        assert (perf["from"], perf["to"]) == (100, 300)
+    else:
+        assert perf["from"] is None and perf["to"] is None
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "invalid", [True, False, "100", -1, float("nan"), float("inf"), [], {}]
+)
+def test_supplied_invalid_timestamp_rejects_accounting_and_flat_verification(
+    tmp_path, retained_live_ledger, invalid
+):
+    path, data = retained_live_ledger
+    # Missing data in another row must not hide an explicitly malformed timestamp.
+    del data["trades"][0]["at"]
+    data["trades"][1]["at"] = invalid
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="invalid accounting timestamp"):
+        portfolio.performance(data)
+    result = portfolio.view(tmp_path, runtime(execution_verified=True), NOW)
+    assert result["performance"] is None
+    assert "reconcile" in result["performance_error"]
+    assert result["position_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "guard",
+    ["canonical_invalid", "halted", "contract", "unverified", "pending", "position"],
+)
+def test_flat_verification_requires_canonical_matching_runtime(
+    tmp_path, retained_live_ledger, guard
+):
+    path, data = retained_live_ledger
+    state = runtime(execution_verified=True)
+    if guard == "canonical_invalid":
+        data["canonical_invalid"] = True
+    elif guard == "halted":
+        state["health"] = "halted"
+    elif guard == "contract":
+        data["identity"]["bot_address"] = OPERATOR
+    elif guard == "unverified":
+        del state["execution_verified"]
+    elif guard == "pending":
+        state["intent_pending"] = True
+    else:
+        data["position"] = {"base_raw": A, "quote_raw": 3 * A, "opened": NOW - 20}
+    path.write_text(json.dumps(data))
+    result = portfolio.view(tmp_path, state, NOW)
+    assert result["position_verified"] is False
+    assert result["position"] is None
+    if guard in ("canonical_invalid", "halted", "contract"):
+        assert result["performance"] is None and result["performance_error"]
+    else:
+        assert result["performance"]["realized_f564"] == "2.000000000000000003"
+
+
+def test_existing_empty_ledger_is_distinct_from_missing_accounting(tmp_path):
+    state = runtime(execution_verified=True)
+    absent = portfolio.view(tmp_path, state, NOW)
+    assert absent["performance"] is None and not absent["position_verified"]
+    EventStore(tmp_path, event_history.IDENTITY | {"bot_address": VAULT}, "live")
+    empty = portfolio.view(tmp_path, state, NOW)
+    assert empty["position_verified"] is True
+    assert empty["performance"]["attempts"] == 0
+    assert empty["performance"]["timestamps_missing"] == 0
+    assert empty["performance"]["from"] is None
+    assert empty["performance"]["to"] is None
+    assert empty["performance"]["realized_f564"] == "0"
+    assert empty["performance"]["gas_eth"] == "0"
+
+
 def test_diagnostics_do_not_block_execution_thread(tmp_path, monkeypatch):
     obs, _ = observer(tmp_path, monkeypatch)
     entered, release = threading.Event(), threading.Event()

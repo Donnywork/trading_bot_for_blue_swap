@@ -1054,11 +1054,19 @@
             perf?.realized_f564,
             "f564",
           ),
-          metric(
-            "Open-position unrealized P/L" + (pf.stale ? " · stale mark" : ""),
-            pos?.unrealized_f564,
-            "f564",
-          ),
+          !pos && pf.position_verified
+            ? el(
+                "div",
+                { class: "metric" },
+                el("span", {}, "Open-position unrealized P/L"),
+                el("p", {}, "No open position"),
+              )
+            : metric(
+                "Open-position unrealized P/L" +
+                  (pf.stale && pos?.unrealized_f564 != null ? " · stale mark" : ""),
+                pos?.unrealized_f564,
+                "f564",
+              ),
           metric("Execution gas spent · retained live", perf?.gas_eth, "ETH"),
         );
         $("pnl-metrics").append(
@@ -1074,7 +1082,7 @@
           ),
         );
         $("pnl-basis").textContent = perf
-          ? `${perf.basis} ${perf.attempts} retained attempts; ${perf.completed} completed trades/cycles. Coverage: ${perf.from == null ? "existing ledger has no executions" : stamp(perf.from) + " to " + stamp(perf.to)}. ${perf.earlier_history_missing ? "Earlier attempts are outside retained coverage. " : ""}${perf.gas_missing ? "Some mined gas records are missing; gas total unavailable." : ""}`
+          ? `${perf.basis} ${perf.attempts} retained attempts; ${perf.completed} completed trades/cycles. Coverage: ${perf.timestamps_missing ? "date range unavailable — " + perf.timestamps_missing + " retained attempt(s) missing timestamps" : perf.from == null ? "existing ledger has no executions" : stamp(perf.from) + " to " + stamp(perf.to)}. ${perf.earlier_history_missing ? "Earlier attempts are outside retained coverage. " : ""}${perf.gas_missing ? "Some mined gas records are missing; gas total unavailable." : ""}`
           : pf.performance_error || "Live performance unavailable.";
         $("flows").textContent = pf.flow_note || "";
         $("position").replaceChildren(
@@ -1098,7 +1106,7 @@
                 el(
                   "p",
                   {},
-                  `Marked value ${fmt(pos.marked_value)} f564 · unrealized ${fmt(pos.unrealized_f564)} f564${pf.stale ? " (stale mark)" : ""}`,
+                  `Marked value ${fmt(pos.marked_value)} f564 · unrealized ${fmt(pos.unrealized_f564)} f564${pf.stale && pos.unrealized_f564 != null ? " (stale mark)" : ""}`,
                 ),
                 el("p", {}, pos.exit_rule),
               ]

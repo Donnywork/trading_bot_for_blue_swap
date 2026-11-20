@@ -320,6 +320,124 @@ def test_chart_interactions_annotations_and_decision_pages(browser_dashboard):
     print("Desktop browser screenshot:", tmp / "desktop.png")
 
 
+@pytest.mark.parametrize("missing_at", ["absent", "null"])
+def test_stale_holdings_flat_inventory_and_incomplete_ledger_dates(
+    browser_dashboard, missing_at
+):
+    page, value, save, tmp, _, _ = browser_dashboard
+    now = value["updated"]
+    value.update(mode="live", execution_verified=True)
+    save()
+    (tmp / "events/portfolio.json").write_text(
+        json.dumps(
+            {
+                "identity": event_history.IDENTITY,
+                "contract": VAULT,
+                "observation": {
+                    "quote_raw": str(1024 * 10**18),
+                    "base_raw": str(2 * 10**18),
+                    "gas_wei": str(10**18),
+                    "block": 300,
+                    "block_hash": "0x" + "ab" * 32,
+                    "timestamp": now - 120,
+                    "observed": now - 120,
+                    "price": "400",
+                    "pool": market.POOLS[500],
+                    "fee": 500,
+                    "operator": ACTOR,
+                },
+            }
+        )
+    )
+    execution = {
+        "version": 1,
+        "identity": event_history.IDENTITY | {"bot_address": VAULT},
+        "position": None,
+        "attempts": {"first": "confirmed", "second": "confirmed"},
+        "trades": [
+            {
+                "action": "arbitrage",
+                "status": "confirmed",
+                "profit_raw": 2298 * 10**16,
+                "gas_wei": 2 * 10**15,
+            },
+            {
+                "at": now - 60,
+                "action": "backrun",
+                "status": "confirmed",
+                "profit_raw": 125 * 10**16,
+                "gas_wei": 15 * 10**14,
+            },
+        ],
+    }
+    if missing_at == "null":
+        execution["trades"][0]["at"] = None
+    path = tmp / "events/execution_live.json"
+    path.write_text(json.dumps(execution))
+    before = path.read_bytes()
+    refresh(page)
+    assert page.evaluate("status.portfolio.stale") is True
+    assert page.evaluate("status.portfolio.position_verified") is True
+    expect(page.locator("#holdings-time")).to_contain_text("STALE / last successful")
+    pnl = page.locator("#pnl-metrics")
+    expect(
+        pnl.locator(".metric").filter(has_text="Realized trading P/L")
+    ).to_contain_text("24.23 f564")
+    expect(pnl.locator(".metric").filter(has_text="Execution gas")).to_contain_text(
+        "0.0035 ETH"
+    )
+    unrealized = pnl.locator(".metric").filter(has_text="Open-position unrealized")
+    expect(unrealized).to_contain_text("No open position")
+    expect(pnl).not_to_contain_text("stale mark")
+    expect(page.locator("#position")).not_to_contain_text("stale mark")
+    expect(page.locator("#pnl-basis")).to_contain_text(
+        "2 retained attempts; 2 completed"
+    )
+    expect(page.locator("#pnl-basis")).to_contain_text(
+        "date range unavailable — 1 retained attempt(s) missing timestamps"
+    )
+    expect(page.locator("#pnl-basis")).not_to_contain_text("ledger has no executions")
+    assert path.read_bytes() == before
+
+    # A real position may carry a stale mark, but an unverified position may not.
+    position = {
+        "base_raw": 10**18,
+        "quote_raw": 390 * 10**18,
+        "opened": now - 180,
+        "entry_block": 299,
+    }
+    execution["position"] = value["position"] = position
+    path.write_text(json.dumps(execution))
+    save()
+    refresh(page)
+    expect(unrealized).to_contain_text("stale mark")
+    expect(unrealized).to_contain_text("10 f564")
+    expect(page.locator("#position")).to_contain_text("(stale mark)")
+    value["execution_verified"] = False
+    save()
+    refresh(page)
+    expect(unrealized).not_to_contain_text("stale mark")
+    expect(unrealized).not_to_contain_text("No open position")
+    expect(page.locator("#position")).not_to_contain_text("stale mark")
+
+    # Empty accounting has different coverage copy from reconciled rows lacking dates.
+    value.update(position=None, execution_verified=True)
+    execution.update(position=None, attempts={}, trades=[])
+    path.write_text(json.dumps(execution))
+    save()
+    refresh(page)
+    expect(unrealized).to_contain_text("No open position")
+    expect(page.locator("#pnl-basis")).to_contain_text(
+        "existing ledger has no executions"
+    )
+    expect(page.locator("#pnl-basis")).not_to_contain_text("missing timestamps")
+    execution["canonical_invalid"] = True
+    path.write_text(json.dumps(execution))
+    refresh(page)
+    expect(unrealized).not_to_contain_text("No open position")
+    expect(page.locator("#pnl-basis")).to_contain_text("reconcile the execution ledger")
+
+
 def test_mobile_empty_stale_and_read_error_states(browser_dashboard):
     page, value, save, tmp, _, _ = browser_dashboard
     page.set_viewport_size({"width": 390, "height": 844})
