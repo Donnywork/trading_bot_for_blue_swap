@@ -261,6 +261,7 @@ class Executor:
             best["min_quote_out"],
             candidate,
             timing=timing,
+            cycle_deadline=best["deadline"],
         )
 
     def quote_ladder(self, candidate, action=None):
@@ -365,7 +366,18 @@ class Executor:
             timing=timing,
         )
 
-    def perform(self, key, fn, action, amount, minimum, candidate, *, timing=None):
+    def perform(
+        self,
+        key,
+        fn,
+        action,
+        amount,
+        minimum,
+        candidate,
+        *,
+        timing=None,
+        cycle_deadline=None,
+    ):
         if key in self.store.data["attempts"]:
             raise ValueError("candidate already attempted")
         s = self.settings
@@ -407,24 +419,36 @@ class Executor:
         row["position_id"] = (
             position.get("entry_tx") if action == "exit" and position else None
         )
-        # The actual single-swap function carries its route; never infer it from
-        # the valuation pool. Old records may have no recoverable entry route.
-        args = getattr(fn, "arguments", ()) or ()
-        single = (
-            next(iter(args.values()), None)
-            if isinstance(args, dict)
-            else args[0]
-            if len(args) == 1
-            else None
-        )
+        # Read the route and own deadline from the actual swap calldata, not
+        # the valuation pool or the target transaction's separate deadline.
+        single_deadline = None
         if action in ("entry", "exit"):
-            row["fee"] = (
-                single[1]
-                if isinstance(single, (list, tuple)) and len(single) == 6
-                else position["exit_fee"]
-                if action == "exit" and position
-                else candidate.get("frontrun", {}).get("buy_fee")
-            )
+            args = getattr(fn, "arguments", None)
+            single = None
+            if isinstance(args, (dict, list, tuple)) and len(args) == 1:
+                single = (
+                    next(iter(args.values())) if isinstance(args, dict) else args[0]
+                )
+            if isinstance(single, dict) and set(single) == {
+                "buyBase",
+                "fee",
+                "amountIn",
+                "amountOutMinimum",
+                "deadline",
+                "sqrtPriceLimitX96",
+            }:
+                fee, single_deadline = single["fee"], single["deadline"]
+            elif isinstance(single, (list, tuple)) and len(single) == 6:
+                fee, single_deadline = single[1], single[4]
+            else:
+                fee = None
+            if (
+                type(fee) is not int
+                or type(single_deadline) is not int
+                or single_deadline <= 0
+            ):
+                raise ConfigurationError("single swap deadline metadata invalid")
+            row["fee"] = fee
         if s.mode not in ("simulate", "live"):
             raise ValueError("paper execution cannot send")
         tx = None
@@ -474,6 +498,12 @@ class Executor:
             row.update(operator=self.operator, nonce=nonce)
         if action != "exit":
             self.entry_guard(action)
+        # Blocking preparation and the final control guard can consume the
+        # inclusion margin. Recheck before recording intent or signing.
+        if cycle_deadline is not None and cycle_deadline <= self.clock() + 13:
+            raise ConfigurationError("cycle deadline cannot cover inclusion")
+        if single_deadline is not None and single_deadline <= self.clock() + 13:
+            raise ConfigurationError("single swap deadline cannot cover inclusion")
         timing.mark("validation_complete")
         if s.mode == "simulate":
             self.store.begin(key, row)

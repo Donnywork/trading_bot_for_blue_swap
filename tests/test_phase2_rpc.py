@@ -4,6 +4,7 @@ import json
 import runpy
 import sys
 import time
+from collections import Counter
 from dataclasses import replace
 
 import pytest
@@ -14,13 +15,17 @@ from web3 import Web3
 
 import config
 import control
+import event_execution
 import event_market as market
 import event_modes
 import event_service
 import event_snapshot as layout
+import phase2_contract
 import rpc_metrics as rpc
 import runtime
 import strategy
+from event_store import EventStore
+from rpc_validation import EventValidationMiddleware
 
 
 class PoolTransport:
@@ -29,6 +34,7 @@ class PoolTransport:
         self.profiles = {p["pool_address"].lower(): p for p in self.seed["profiles"]}
         self.head = self.seed["block"] + 1
         self.http = self.items = self.bitmap = 0
+        self.methods = []
         self.abi = {
             function_abi_to_4byte_selector(fn): fn
             for abi in (
@@ -47,6 +53,7 @@ class PoolTransport:
 
         def answer(req):
             self.items += 1
+            self.methods.append(req["method"])
             return {
                 "id": req["id"],
                 "jsonrpc": "2.0",
@@ -128,12 +135,15 @@ def offline_http(monkeypatch):
     return transport
 
 
-def test_pool_request_cost(tmp_path, monkeypatch, offline_http):
+@pytest.mark.parametrize("optimized", [False, True])
+def test_pool_request_cost(tmp_path, monkeypatch, offline_http, optimized):
     transport = offline_http
     sleeps = []
     monkeypatch.setattr(config.time, "sleep", sleeps.append)
     metrics = rpc.RpcMetrics()
     w3 = Web3(config.ThrottledProvider("http://offline.invalid", metrics=metrics))
+    if optimized:
+        w3.middleware_onion.replace("validation", EventValidationMiddleware)
     pools = layout.markets(w3)
     snapshots = layout.Snapshots(w3, pools, tmp_path / "snapshot.json")
     with rpc.purpose(rpc.SNAPSHOT):
@@ -162,9 +172,174 @@ def test_pool_request_cost(tmp_path, monkeypatch, offline_http):
         repeated,
         transport.items - before,
         transport.http - http,
-    ) == (56, 17, 1, 778, 65)
+    ) == ((23, 8, 1, 762, 49) if optimized else (55, 16, 1, 778, 65))
     assert not sleeps
     print("Full scan, fake HTTP transport (seconds):", time.perf_counter() - start)
+
+
+def cycle_http(tmp_path, monkeypatch, offline_http, optimized):
+    """Set up a real Web3 executor with synthetic HTTP chain responses."""
+    transport = offline_http
+    unit, sqrt = 10**18, 2**96
+    settings = replace(
+        event_service.EventSettings(),
+        mode="simulate",
+        bot_address="0x" + "33" * 20,
+        owner="0x" + "22" * 20,
+        quote_cap=640 * unit,
+        min_profit=unit // 100,
+    )
+    transport.abi.update(
+        {
+            function_abi_to_4byte_selector(fn): fn
+            for fn in phase2_contract.load_abi()
+            if fn["type"] == "function"
+        }
+    )
+    original = transport.result
+
+    def result(method, params):
+        if method == "eth_getBlockByNumber":
+            return original(method, params) | {"baseFeePerGas": "0x1"}
+        if method == "eth_getCode":
+            return "0x01"
+        if method == "eth_getBalance":
+            return hex(10**20)
+        if method == "eth_estimateGas":
+            return hex(100_000)
+        if method != "eth_call":
+            return original(method, params)
+        data = bytes.fromhex(params[0]["data"][2:])
+        fn = transport.abi[data[:4]]
+        name = fn["name"]
+        if name == "quoteExactInputSingle":
+            token_in, _, amount, _, limit = decode(
+                ["address", "address", "uint256", "uint24", "uint160"], data[4:]
+            )
+            output = amount // 1000 if token_in == market.QUOTE else amount * 1100
+            values = [output, (sqrt + limit) // 2, 0, 90_000]
+        elif name == "slot0":
+            values = [sqrt, 0, 0, 0, 0, 0, True]
+        else:
+            metadata = {
+                "contractVersion": 2,
+                "owner": settings.owner,
+                "operator": "0x" + "11" * 20,
+                "router": market.ROUTER,
+                "quoteToken": market.QUOTE,
+                "baseToken": market.BASE,
+                "pool0": market.POOLS[500],
+                "pool1": market.POOLS[10000],
+                "maxQuoteIn": settings.quote_cap,
+                "maxBaseIn": settings.base_cap,
+                "minProfitFloor": settings.min_profit,
+                "execute": unit,
+            }
+            if name not in metadata:
+                return original(method, params)
+            values = [metadata[name]]
+        return "0x" + encode([v["type"] for v in fn["outputs"]], values).hex()
+
+    monkeypatch.setattr(transport, "result", result)
+    metrics = rpc.RpcMetrics()
+    w3 = Web3(config.ThrottledProvider("http://offline.invalid", metrics=metrics))
+    if optimized:
+        w3.middleware_onion.replace("validation", EventValidationMiddleware)
+    pools = layout.markets(w3)
+    store = EventStore(tmp_path, {}, "simulate")
+    executor = event_execution.Executor(
+        w3, pools, settings, store, clock=lambda: transport.seed["timestamp"] + 13
+    )
+    candidate = {
+        "hash": "0x" + "ab" * 32,
+        "snapshot_block": transport.head,
+        "snapshot_hash": "0x" + f"{transport.head:064x}",
+        "backrun": {"buy_fee": 500, "sell_fee": 10000, "input_f564": 100},
+    }
+    return executor, candidate, metrics
+
+
+@pytest.mark.parametrize("optimized", [False, True])
+def test_simulated_cycle_http_cost(tmp_path, monkeypatch, offline_http, optimized):
+    """Count one three-rung cycle after market/executor startup, before any send.
+
+    Real Web3 contracts perform encoding, middleware, decoding and HTTP requests;
+    only chain responses are synthetic. No receipt, worker or startup reads count.
+    """
+    executor, candidate, metrics = cycle_http(
+        tmp_path, monkeypatch, offline_http, optimized
+    )
+    transport = offline_http
+    before = transport.items
+    outcome = executor.backrun(candidate)
+    counts = Counter(transport.methods[before:])
+    assert outcome["status"] == "simulated" and outcome["quote_rungs"] == 3
+    assert outcome["gas_limit"] == 2 * outcome["estimated_gas"] == 200_000
+    assert counts == {
+        "eth_chainId": 2 if optimized else 28,
+        "eth_call": 12,
+        "eth_getBlockByNumber": 6,
+        "eth_estimateGas": 1,
+        "eth_getBalance": 1,
+    }
+    assert transport.items - before == (22 if optimized else 48)
+    assert transport.http == metrics.snapshot()["http_attempts"] == transport.items
+
+
+def test_optimized_market_startup_refuses_wrong_chain(monkeypatch, offline_http):
+    original = offline_http.result
+    monkeypatch.setattr(
+        offline_http,
+        "result",
+        lambda method, params: (
+            "0x1" if method == "eth_chainId" else original(method, params)
+        ),
+    )
+    w3 = Web3(config.ThrottledProvider("http://offline.invalid"))
+    w3.middleware_onion.replace("validation", EventValidationMiddleware)
+    with pytest.raises(ValueError, match="event service requires Sepolia"):
+        layout.markets(w3)
+    # No untagged metadata calls, quotes, estimates or sends reach HTTP.
+    assert offline_http.methods == ["eth_chainId"]
+
+
+@pytest.mark.parametrize("guard", ["executor_startup", "cycle"])
+def test_optimized_executor_refuses_chain_change_after_setup(
+    tmp_path, monkeypatch, offline_http, guard
+):
+    executor, candidate, metrics = cycle_http(
+        tmp_path, monkeypatch, offline_http, optimized=True
+    )
+    original = offline_http.result
+    monkeypatch.setattr(
+        offline_http,
+        "result",
+        lambda method, params: (
+            "0x1" if method == "eth_chainId" else original(method, params)
+        ),
+    )
+    before = offline_http.items
+    if guard == "executor_startup":
+        with pytest.raises(
+            runtime.ConfigurationError, match="execution requires Sepolia"
+        ):
+            event_execution.Executor(
+                executor.w3, executor.pools, executor.settings, executor.store
+            )
+        assert offline_http.methods[before:] == ["eth_chainId"]
+    else:
+        with pytest.raises(runtime.ConfigurationError, match="no exact profitable"):
+            executor.backrun(candidate)
+        methods = offline_http.methods[before:]
+        # Each rung's explicit guard refuses the changed network before any
+        # untagged slot0/quote call. The ladder reports no executable cycle.
+        assert methods[0] == "eth_getBlockByNumber"
+        assert methods[1:] and set(methods[1:]) == {"eth_chainId"}
+    assert executor.store.data["intent"] is None
+    assert executor.store.data["attempts"] == {}
+    assert (
+        offline_http.http == metrics.snapshot()["http_attempts"] == offline_http.items
+    )
 
 
 def test_metrics_count_retry_failover_and_batch(monkeypatch):
@@ -232,8 +407,9 @@ def test_catchup_http_rejections(tmp_path, monkeypatch, caplog, fallback_status)
             elif end - start + 1 > 10 or fallback_status not in (400, 413, 422):
                 response.status_code = fallback_status
             else:
-                (address,) = params["address"]
-                accepted.append((address.lower(), start, end))
+                accepted.extend(
+                    (address.lower(), start, end) for address in params["address"]
+                )
         response._content = (
             b"private-body"
             if response.status_code != 200
@@ -304,6 +480,10 @@ def test_zero_argument_start_mode_changes_and_reconnect(
         def __init__(self, w3, pools, settings, store, account):
             self.w3, self.settings, self.store = w3, settings, store
             assert (account is not None) == (settings.mode == "live")
+            assert w3.middleware_onion["validation"] is EventValidationMiddleware
+            assert (
+                Web3().middleware_onion["validation"] is not EventValidationMiddleware
+            )
 
         def verify_recent(self):
             pass

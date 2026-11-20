@@ -430,7 +430,9 @@ def test_incremental_snapshot_pinned_and_reorg_rejected(
     monkeypatch.setattr(
         event_snapshot,
         "pool_logs",
-        lambda pool, start, end: ranges.append((start, end)) or [],
+        lambda pools, start, end: (
+            ranges.append((start, end)) or {fee: [] for fee in pools}
+        ),
     )
 
     for p in snapshot["profiles"]:
@@ -446,7 +448,7 @@ def test_incremental_snapshot_pinned_and_reorg_rejected(
     adapter = Snapshots(SimpleNamespace(eth=eth), pools, saved)
     result = adapter.refresh()
     assert result["block"] == old_block + 1
-    assert ranges == [(old_block + 1, old_block + 1)] * 2
+    assert ranges == [(old_block + 1, old_block + 1)]
     # Change the canonical hash of the adapter's latest block.
     eth.get_block = lambda n: header(n) | {"hash": bytes.fromhex("ef" * 32)}
     with pytest.raises(SnapshotUnavailable, match="validation"):
@@ -477,9 +479,14 @@ def snapshot_chain(snapshot, events=(), target=None):
     def get_logs(params):
         assert params["topics"] == [list(topics.values())]
         calls.append(params)
+        addresses = params["address"]
+        if isinstance(addresses, str):
+            addresses = [addresses]
         return [
-            e | {"topics": [Web3.to_bytes(hexstr=topics[e["event"]])]}
-            for e in by_address[params["address"]]
+            e
+            | {"address": address, "topics": [Web3.to_bytes(hexstr=topics[e["event"]])]}
+            for address in addresses
+            for e in by_address[address.lower()]
         ]
 
     w3 = SimpleNamespace(eth=SimpleNamespace(get_block=header, get_logs=get_logs))
@@ -539,7 +546,7 @@ def test_startup_uses_valid_cache_or_research(snapshot, tmp_path, forbid_depth, 
     result = adapter.refresh()
     assert result["block"] == snapshot["block"] + 1
     assert json.loads(saved.read_text()) == result
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert all(r["fromBlock"] == r["toBlock"] == snapshot["block"] + 1 for r in calls)
     if cache != "valid":
         assert json.loads(seed.read_text()) == snapshot
@@ -680,6 +687,7 @@ def fake_executor(tmp_path, mode="live"):
     )
     ex.fees = event_fees.FeeCache(ex.w3, ex.settings, ex.clock)
     fn = SimpleNamespace(
+        arguments=((True, 500, A, A // 2, header["timestamp"] + 30, 2**96),),
         estimate_gas=lambda _: 100_000,
         build_transaction=lambda tx: tx,
         call=lambda *a, **k: A,
@@ -1847,7 +1855,7 @@ def test_snapshot_catchup_adapts_provider_log_range(snapshot, tmp_path, forbid_d
         blocks = [
             b
             for r in accepted
-            if r["address"] == market.POOLS[fee]
+            if market.POOLS[fee] in r["address"]
             for b in range(r["fromBlock"], r["toBlock"] + 1)
         ]
         assert blocks == list(range(snapshot["block"] + 1, snapshot["block"] + 26))
@@ -1906,16 +1914,15 @@ def test_rpc_quota_auth_errors_preserve_catchup_range(
         pool.functions.slot0 = lambda p=p: Call((p["sqrtPriceX96"], p["tick"]))
         pool.functions.liquidity = lambda p=p: Call(p["liquidity"])
     assert adapter.refresh()["block"] == snapshot["block"] + 100
-    # The first pool's full 100-block chunk grew the ceiling for the next quiet range.
-    assert reads == [100, 100, 100] and adapter.log_chunk == 200
+    # The shared full 100-block chunk grows the ceiling for both pools.
+    assert reads == [100, 100] and adapter.log_chunk == 200
 
 
 def test_quiet_catchup_grows_log_chunks_instead_of_re_reading(
     snapshot, tmp_path, forbid_depth
 ):
     # One getLogs per quiet chunk: after a 350-block gap the adapter must read
-    # 100 + 200 + 50 blocks for the first pool and one 350-block chunk for the
-    # second, instead of four fixed 100-block calls per pool.
+    # 100 + 200 + 50 blocks shared by both pools, instead of separate ranges.
     saved = tmp_path / "snapshot.json"
     saved.write_text(json.dumps(snapshot))
     w3, pools, calls = snapshot_chain(snapshot)
@@ -1932,7 +1939,7 @@ def test_quiet_catchup_grows_log_chunks_instead_of_re_reading(
     adapter = Snapshots(w3, pools, saved)
     assert adapter.refresh()["block"] == snapshot["block"] + gap
     reads = [c["toBlock"] - c["fromBlock"] + 1 for c in calls]
-    assert reads == [100, 200, 50, 350]
+    assert reads == [100, 200, 50]
     assert adapter.log_chunk == 400
 
 

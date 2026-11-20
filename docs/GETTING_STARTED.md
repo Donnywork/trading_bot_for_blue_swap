@@ -49,6 +49,7 @@
 | Prices or entry references withheld after recovery | Invalidated prices stay excluded even after a higher-block scan succeeds. An open-entry reference requires verified execution and activity; its recorded position remains visible for reconciliation. |
 | Missing transaction markers | Coverage begins with recorded logs/receipts; signer/time enrichment is bounded. Unverified or reorganized markers are withheld. Inspect the transaction table, which also lists swaps without a known time. |
 | Portfolio return unavailable | No valid portfolio baseline exists. Do not use deposits, recent trades, or a restart as invented starting capital. |
+| Deadline cannot cover inclusion | Preparation consumed the swap's inclusion margin. This is a pre-send refusal; no transaction was broadcast for this attempt. Review validation timing and RPC delays. |
 | `configured fee ceiling is too low` | Inspect `execution_attempt.fee_decision` and its reference base fee. Fixed mode needs max ≥ base + fixed priority; competitive mode needs room for a positive tip under its own ceilings. The attempt was not signed. |
 | `network_missing`, `network_stale`, `network_zero_samples` | Competitive mode uses its baseline and any eligible competitor evidence, with a fresh base-fee check. Inspect the fee-refresh RPC category/error; stale evidence is excluded. |
 | `priority_ceiling` / `max_fee_ceiling_reduced_tip` | The selected bid is below the desired bid. Read both fields; do not interpret the desired bid as submitted or as proof of outbidding. |

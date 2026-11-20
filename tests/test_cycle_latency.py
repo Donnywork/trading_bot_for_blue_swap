@@ -81,6 +81,8 @@ def cycle_executor(tmp_path, monkeypatch):
             return 100_000
 
         def build_transaction(self, tx):
+            if "build" in hooks:
+                hooks["build"]()
             return tx
 
     def quote(params):
@@ -251,6 +253,90 @@ def test_cycle_deadline_must_cover_send_plus_next_block(cycle_executor):
     with pytest.raises(ConfigurationError, match="deadline cannot cover inclusion"):
         f.ex.backrun(f.decision)
     assert f.ex.store.data["intent"] is None
+
+
+@pytest.mark.parametrize("action", ["backrun", "arbitrage"])
+@pytest.mark.parametrize(
+    "mode,stage",
+    [
+        ("live", "estimate"),
+        ("simulate", "estimate"),
+        ("live", "guard"),
+        ("simulate", "guard"),
+        ("live", "build"),
+    ],
+)
+@pytest.mark.parametrize("now", [116, 125])
+def test_cycle_deadline_rechecked_after_blocking_preparation(
+    cycle_executor, action, mode, stage, now, monkeypatch
+):
+    f = cycle_executor
+    f.ex.settings = replace(f.ex.settings, mode=mode)
+    guards = []
+
+    def advance():
+        # Exact selected deadline is 99 + 30 = 129. Even equality at the
+        # 13-second margin must fail while the pinned header is still fresh.
+        f.ex.clock = lambda: now
+
+    def guard(actual_action):
+        guards.append(actual_action)
+        if stage == "guard":
+            advance()
+
+    f.ex.entry_guard = guard
+    if stage != "guard":
+        f.hooks[stage] = advance
+    monkeypatch.setattr(
+        f.ex.store, "begin", lambda *a: pytest.fail("unexpected durable intent")
+    )
+    with pytest.raises(ConfigurationError, match="deadline cannot cover inclusion"):
+        f.ex.backrun(f.decision, action)
+    assert guards == [action]
+    assert Counter(row[0] for row in f.calls)["estimate"] == 1
+    assert f.ex.attempt["stage"] == "final_guards"
+    assert f.ex.store.data["intent"] is None
+    assert f.ex.store.data["attempts"] == {}
+    assert f.ex.store.data["trades"] == []
+
+
+@pytest.mark.parametrize("action", ["backrun", "arbitrage"])
+@pytest.mark.parametrize("mode", ["live", "simulate"])
+def test_cycle_selected_deadline_allows_margin_above_boundary(
+    cycle_executor, action, mode, monkeypatch
+):
+    f = cycle_executor
+    f.ex.settings = replace(f.ex.settings, mode=mode)
+    perform = f.ex.perform
+    deadlines = []
+
+    def checked_perform(*args, **kwargs):
+        deadline = kwargs["cycle_deadline"]
+        assert type(deadline) is int
+        assert deadline == args[1].arguments[0][5] == 129
+        deadlines.append(deadline)
+        return perform(*args, **kwargs)
+
+    monkeypatch.setattr(f.ex, "perform", checked_perform)
+
+    def guard(actual_action):
+        assert actual_action == action
+        f.ex.clock = lambda: 115  # 14 seconds remain after the final guard.
+
+    f.ex.entry_guard = guard
+    sends = []
+
+    def send(*args, **kwargs):
+        assert f.ex.store.data["intent"] is not None
+        assert kwargs["gas_buffer"] == 2.0
+        sends.append(True)
+        raise bot_contract.NotSent("test pre-send refusal")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    result = f.ex.backrun(f.decision, action)
+    assert deadlines == [129]
+    assert result["status"] == ("not_sent" if mode == "live" else "simulated")
+    assert sends == ([True] if mode == "live" else [])
 
 
 def test_empty_bracket_keeps_full_ladder_breadth_without_duplicate_pool_reads(

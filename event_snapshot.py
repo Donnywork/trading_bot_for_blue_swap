@@ -72,22 +72,41 @@ def markets(w3):
     return result
 
 
-def pool_logs(pool, start, end):
-    decoders = {
-        event.topic: event
-        for event in (pool.events.Mint(), pool.events.Burn(), pool.events.Swap())
-    }
+def pool_logs(pools, start, end):
+    if set(pools) != set(market.POOLS):
+        raise ValueError("snapshot needs both official pools")
+    decoders, addresses = {}, []
+    for fee, item in pools.items():
+        pool = item["pool"]
+        address = market.hex_value(pool.address, 20)
+        if address != market.POOLS[fee]:
+            raise ValueError("snapshot pool identity mismatch")
+        addresses.append(pool.address)
+        decoders[address] = {
+            event.topic: event
+            for event in (pool.events.Mint(), pool.events.Burn(), pool.events.Swap())
+        }
     logs = pool.w3.eth.get_logs(
         {
-            "address": pool.address,
+            "address": addresses,
             "fromBlock": start,
             "toBlock": end,
-            "topics": [list(decoders)],
+            "topics": [list(decoders[address])],
         }
     )
-    if any(row.get("removed") for row in logs):
-        raise ValueError("removed pool log")
-    return [decoders[hexstr(row["topics"][0])].process_log(row) for row in logs]
+    events = {fee: [] for fee in pools}
+    fees = {address: fee for fee, address in market.POOLS.items()}
+    for row in logs:
+        if row.get("removed"):
+            raise ValueError("removed pool log")
+        address = market.hex_value(row.get("address"), 20)
+        if address not in decoders:
+            raise ValueError("unexpected pool log address")
+        if not start <= row["blockNumber"] <= end:
+            raise ValueError("pool log outside requested range")
+        event = decoders[address][hexstr(row["topics"][0])].process_log(row)
+        events[fees[address]].append(event)
+    return events
 
 
 def apply_logs(profile, events):
@@ -183,7 +202,41 @@ class Snapshots:
         if same_block and previous["block_hash"] == self.reconciled_hash:
             return copy.deepcopy(previous)
         profiles = []
-        swaps = []
+        swaps, swaps_dropped = [], 0
+        if previous:
+            replayed = {p["fee"]: copy.deepcopy(p) for p in previous["profiles"]}
+            # Both pools share bounded ranges and advance only after the whole read.
+            start = previous["block"] + 1
+            while start <= number:
+                if self.stop():
+                    raise InterruptedError("snapshot stopped")
+                end = min(number, start + self.log_chunk - 1)
+                try:
+                    events = pool_logs(self.pools, start, end)
+                except (Web3RPCError, OSError) as exc:
+                    narrower = rejected_log_range(exc) or rejected_log_range(
+                        exc.__cause__
+                    )
+                    if end == start or not narrower:
+                        raise
+                    # Retry reads only; a rejection narrows the range for both pools.
+                    self.log_chunk = max(1, (end - start + 1) // 2)
+                    continue
+                chunk_swaps = []
+                for fee, rows in events.items():
+                    apply_logs(replayed[fee], rows)
+                    chunk_swaps.extend((fee, e) for e in rows if e["event"] == "Swap")
+                swaps.extend(
+                    sorted(
+                        chunk_swaps,
+                        key=lambda row: (row[1]["blockNumber"], row[1]["logIndex"]),
+                    )
+                )
+                swaps_dropped += max(0, len(swaps) - 2000)
+                swaps = swaps[-2000:]
+                if end - start + 1 >= self.log_chunk:
+                    self.log_chunk = min(800, self.log_chunk * 2)
+                start = end + 1
         for fee, item in self.pools.items():
             pool = item["pool"]
             if scan:
@@ -202,36 +255,7 @@ class Snapshots:
                     base_is_token0=False,
                 )
             else:
-                p = copy.deepcopy(
-                    next(p for p in previous["profiles"] if p["fee"] == fee)
-                )
-                # Bounded RPC ranges; complete layouts survive quiet ranges and restarts.
-                start = previous["block"] + 1
-                while start <= number:
-                    if self.stop():
-                        raise InterruptedError("snapshot stopped")
-                    end = min(number, start + self.log_chunk - 1)
-                    try:
-                        events = pool_logs(pool, start, end)
-                    except (Web3RPCError, OSError) as exc:
-                        narrower = rejected_log_range(exc) or rejected_log_range(
-                            exc.__cause__
-                        )
-                        if end == start or not narrower:
-                            raise
-                        # Provider plans impose different getLogs limits. Retry reads only.
-                        self.log_chunk = max(1, (end - start + 1) // 2)
-                        continue
-                    apply_logs(p, events)
-                    swaps.extend((fee, e) for e in events if e["event"] == "Swap")
-                    self.swaps_dropped += max(0, len(swaps) - 2000)
-                    swaps = swaps[-2000:]
-                    if end - start + 1 >= self.log_chunk:
-                        # Quiet ranges pay one getLogs per chunk: grow toward the
-                        # provider's ceiling instead of re-reading 100 blocks a
-                        # call forever. A range rejection above halves it again.
-                        self.log_chunk = min(800, self.log_chunk * 2)
-                    start = end + 1
+                p = replayed[fee]
             if scan:
                 sqrt, tick, liquidity = (
                     p["sqrt" + "PriceX96"],
@@ -263,4 +287,5 @@ class Snapshots:
         self.snapshot = value
         self.reconciled_hash = value["block_hash"]
         self.swaps = swaps
+        self.swaps_dropped = swaps_dropped
         return copy.deepcopy(value)

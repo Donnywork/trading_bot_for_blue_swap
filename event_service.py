@@ -810,7 +810,10 @@ def main():
     settings = EventSettings.from_env()
     uri = endpoint()
     metrics = rpc.RpcMetrics()
+    from rpc_validation import EventValidationMiddleware
+
     w3 = Web3(config.rpc_provider(required("RPC_URL"), metrics))
+    w3.middleware_onion.replace("validation", EventValidationMiddleware)
     pools = markets(w3)
     identity = {
         "chain_id": 11155111,
