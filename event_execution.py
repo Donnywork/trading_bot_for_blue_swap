@@ -115,6 +115,26 @@ class Executor:
             raise ConfigurationError("execution snapshot is no longer current")
         return header
 
+    def pending_header(self, block, block_hash, window=2):
+        # A pending target waits in the pool while the head keeps advancing,
+        # so current()'s strict pinned==latest equality refuses almost every
+        # window (observed 2026-11-20 16:20: rejected 16 ms into a +21.7 f564
+        # plan because the head had moved one block past the pin). The pending
+        # cycle carries no exact quotes to invalidate: require a fresh head,
+        # the pinned snapshot within a bounded block window behind it, and
+        # the pinned block still canonical. Drift across the window is held
+        # by the price limits and the on-chain floor - a stale cycle simply
+        # reverts both legs.
+        header = self.w3.eth.get_block("latest")
+        if not 0 <= self.clock() - header["timestamp"] <= 30:
+            raise ConfigurationError("pending submission head is not fresh")
+        if not 0 <= header["number"] - block <= window:
+            raise ConfigurationError("pending snapshot outside the submission window")
+        pinned = self.w3.eth.get_block(block)
+        if hexstr(pinned["hash"]) != block_hash:
+            raise ConfigurationError("pending snapshot block was reorganized")
+        return header
+
     def start_attempt(self, candidate, action):
         timing = event_submission.Timing(
             self.fees.first_seen(candidate["hash"]), self.clock
@@ -302,9 +322,11 @@ class Executor:
             quote_rungs=0,
             snapshot_block=candidate["snapshot_block"],
         )
-        # The pinned snapshot must still BE the latest block: a newer head
-        # means the pending window moved and the pre-target cycle is stale.
-        header = self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
+        # The head normally advances while the target sits pending: use the
+        # bounded-window freshness check, not strict pinned==latest equality.
+        header = self.pending_header(
+            candidate["snapshot_block"], candidate["snapshot_hash"]
+        )
         if {plan["buy_fee"], plan["sell_fee"]} != set(market.POOLS) or {
             p.get("fee") for p in snapshot.get("profiles", [])
         } != set(market.POOLS):
@@ -352,6 +374,7 @@ class Executor:
             timing=timing,
             cycle_deadline=deadline,
             gas_override=self.settings.max_gas,
+            fee_header=header,
         )
 
     def quote_ladder(self, candidate, action=None):
@@ -468,6 +491,7 @@ class Executor:
         timing=None,
         cycle_deadline=None,
         gas_override=None,
+        fee_header=None,
     ):
         if key in self.store.data["attempts"]:
             raise ValueError("candidate already attempted")
@@ -562,9 +586,15 @@ class Executor:
             else None
         )
         if action != "exit":
-            header = self.current(
-                candidate["snapshot_block"], candidate["snapshot_hash"]
-            )
+            if fee_header is not None:
+                # Pending submission: pending_header() validated freshness
+                # against the bounded window moments earlier; re-reading only
+                # adds latency to a race decided in hundreds of milliseconds.
+                header = fee_header
+            else:
+                header = self.current(
+                    candidate["snapshot_block"], candidate["snapshot_hash"]
+                )
             if action == "entry":
                 target = self.w3.eth.get_transaction(candidate["hash"])
                 if target.get("blockNumber") is not None:

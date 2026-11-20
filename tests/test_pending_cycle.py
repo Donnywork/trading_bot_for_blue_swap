@@ -163,8 +163,9 @@ def test_pending_cycle_submits_bracket_rung_with_snapshot_limits(pending_env):
     )
     assert f.ex.store.data["position"] is None
     assert f.ex.store.data["attempts"] == {"backrun_pending:" + HASH: "simulated"}
-    # Read budget: freshness (pending_cycle) + chain + balance + final
-    # freshness (perform). Simulate skips the operator nonce read.
+    # Read budget: latest head + canonical pinned block (pending_header) +
+    # chain + balance. Simulate skips the operator nonce read; perform()
+    # reuses the pending header instead of re-reading freshness.
     counts = Counter(row[0] for row in f.calls)
     assert counts == {"chain": 1, "header": 2, "balance": 1}
 
@@ -463,3 +464,99 @@ def test_pending_backrun_flag_parses_and_fails_closed():
         ).pending_backrun
     with pytest.raises(ValueError, match="EVENT_PENDING_BACKRUN"):
         EventSettings.from_env({"EVENT_PENDING_BACKRUN": "yes"})
+
+
+def test_pending_submission_survives_head_advance(pending_env):
+    # 2026-11-20 16:20 regression: the head moved past the pin while the
+    # target sat pending and strict pinned==latest equality refused a
+    # +21.7 f564 plan 16 ms in. A bounded window (here two blocks) must
+    # accept the advanced head, and the deadline must follow the NEWER
+    # head timestamp rather than the pinned snapshot.
+    f = pending_env
+    f.ex.clock = lambda: 110
+    # The fee cache bound the fixture's original clock at construction; keep
+    # it in sync with the executor clock the test controls.
+    f.ex.fees = event_fees.FeeCache(f.ex.w3, f.ex.settings, f.ex.clock)
+    original = f.ex.w3.eth.get_block
+
+    def advanced(block):
+        if block == "latest":
+            f.calls.append(("header", "latest"))
+            return {
+                "number": 9,
+                "hash": bytes.fromhex("ef" * 32),
+                "timestamp": 108,
+                "baseFeePerGas": 1,
+            }
+        assert block == 7
+        return original(block)
+
+    f.ex.w3.eth.get_block = advanced
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["status"] == "simulated"
+    assert f.built["args"][5] == 108 + 30
+    counts = Counter(row[0] for row in f.calls)
+    assert counts == {"chain": 1, "header": 2, "balance": 1}
+
+
+def test_pending_submission_rejects_head_beyond_window(pending_env):
+    f = pending_env
+    f.ex.clock = lambda: 110
+    original = f.ex.w3.eth.get_block
+
+    def beyond(block):
+        if block == "latest":
+            return {
+                "number": 10,
+                "hash": bytes.fromhex("ef" * 32),
+                "timestamp": 110,
+                "baseFeePerGas": 1,
+            }
+        return original(block)
+
+    f.ex.w3.eth.get_block = beyond
+    with pytest.raises(ConfigurationError, match="outside the submission window"):
+        f.ex.pending_cycle(f.decision, f.pinned)
+    assert f.ex.store.data["intent"] is None
+    assert f.ex.store.data["attempts"] == {}
+
+
+def test_pending_submission_rejects_reorganized_pin(pending_env):
+    f = pending_env
+    f.ex.clock = lambda: 110
+    original = f.ex.w3.eth.get_block
+
+    def reorganized(block):
+        if block == 7:  # canonical chain no longer carries the pinned hash
+            return {
+                "number": 7,
+                "hash": bytes.fromhex("cd" * 32),
+                "timestamp": 95,
+                "baseFeePerGas": 1,
+            }
+        return original(block)
+
+    f.ex.w3.eth.get_block = reorganized
+    with pytest.raises(ConfigurationError, match="reorganized"):
+        f.ex.pending_cycle(f.decision, f.pinned)
+    assert f.ex.store.data["intent"] is None
+
+
+def test_pending_submission_rejects_stale_head(pending_env):
+    f = pending_env
+    f.ex.clock = lambda: 140  # latest header timestamp 99 is 41 s old
+
+    def stale(block):
+        return {
+            "number": 7 if block != "latest" else 8,
+            "hash": bytes.fromhex("ab" * 32)
+            if block != "latest"
+            else bytes.fromhex("ef" * 32),
+            "timestamp": 99,
+            "baseFeePerGas": 1,
+        }
+
+    f.ex.w3.eth.get_block = stale
+    with pytest.raises(ConfigurationError, match="not fresh"):
+        f.ex.pending_cycle(f.decision, f.pinned)
+    assert f.ex.store.data["intent"] is None
