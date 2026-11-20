@@ -11,7 +11,7 @@ from contextlib import closing
 from dataclasses import replace
 
 from web3 import Web3
-from web3.exceptions import TransactionNotFound, Web3Exception
+from web3.exceptions import ContractLogicError, TransactionNotFound, Web3Exception
 
 import backrun
 import config
@@ -192,6 +192,7 @@ class Service:
             or not self.feed.ready.is_set()
             or self.feed.gap.is_set()
             or self.generation != self.feed.generation
+            or self.feed.queue.has_removal()
         ):
             raise ValueError("event entries paused or feed changed")
         if action and (
@@ -200,15 +201,9 @@ class Service:
             or (action == "arbitrage" and not self.controls.event_arbitrage)
         ):
             raise ValueError("module control changed during preparation")
-        # A non-empty feed queue must NOT veto the send. Sibling notifications
-        # (head/mined for the same block, rivals' pendings) arrive in bursts
-        # exactly when a window is contested — the valuable moments — and a
-        # refusal here used to reach run()'s transport handler, resetting the
-        # engine and backing off while competitors took the window. Real
-        # invalidation is proven against chain state at broadcast time by the
-        # executor's own final guards: the pinned current() freshness check,
-        # the target-mined and target-nonce re-checks, and block-pinned
-        # exact quotes with their ancestry re-check.
+        # Ordinary queued siblings do not veto a send. Explicit removals do;
+        # otherwise the executor's pinned quotes, freshness, target-mined and
+        # target-nonce checks provide the final broadcast guards.
 
     def refresh(self, scan=False):
         if self.store.data["position"] is not None:
@@ -306,37 +301,19 @@ class Service:
             or f"{action}:{decision['hash']}" in self.store.data["attempts"]
         ):
             return
-        self.entry_guard(action)
         self.next_attempt = self.clock() + self.settings.cooldown
         try:
+            self.entry_guard(action)
             with rpc.purpose(rpc.QUOTES):
                 result = (
                     self.executor.backrun(decision, action=action)
                     if action in ("backrun", "arbitrage")
                     else self.executor.enter(decision, self.engine.snapshot)
                 )
-        except (OSError, Web3Exception) as exc:
-            # Transport failures leave snapshot/feed state genuinely unknown:
-            # run()'s reset-and-backoff handler owns these.
-            self.record(
-                {
-                    "kind": "execution",
-                    "status": "execution_rejected",
-                    "action": action,
-                    "hash": decision["hash"],
-                    "reason": error_summary(exc),
-                    "diagnostics": getattr(self.executor, "attempt", {}),
-                }
-            )
-            raise
-        except ValueError as exc:
-            # Expected per-candidate verdicts end here (no exact profitable
-            # cycle, snapshot advanced past the candidate, target no longer
-            # pending, guard refusal): the candidate is dead, but the engine
-            # and every sibling candidate are fine. Re-raising these used to
-            # land in run()'s transport handler, resetting the engine and
-            # backing off on every model-vs-exact miss — collateral loss of
-            # concurrent windows (observed Nov 19 15:11, three times).
+        except (ValueError, ContractLogicError) as exc:
+            # Control refusals and pre-send simulation reverts reject this
+            # candidate only. Catch contract reverts before Web3Exception so
+            # they cannot reset sibling candidates through transport backoff.
             self.record(
                 {
                     "kind": "execution",
@@ -348,6 +325,20 @@ class Service:
                 }
             )
             return
+        except (OSError, Web3Exception) as exc:
+            # Transport failures leave snapshot/feed state genuinely unknown:
+            # run()'s reset-and-backoff handler owns these. Halt is never caught.
+            self.record(
+                {
+                    "kind": "execution",
+                    "status": "execution_rejected",
+                    "action": action,
+                    "hash": decision["hash"],
+                    "reason": error_summary(exc),
+                    "diagnostics": getattr(self.executor, "attempt", {}),
+                }
+            )
+            raise
         self.read_controls()
         self.process_mode(busy=True)
         self.record(result)
@@ -436,6 +427,9 @@ class Service:
                 self.store.save()
 
     def included(self, tx):
+        # maintain() may poll receipts before next_event() selects a removal.
+        if self.feed.queue.has_removal():
+            return
         try:
             with rpc.purpose(rpc.RECEIPTS):
                 receipt = self.executor.w3.eth.get_transaction_receipt(tx["hash"])
@@ -445,19 +439,40 @@ class Service:
             self.engine.snapshot is None
             or receipt["blockNumber"] > self.engine.snapshot["block"]
         ):
-            # Behind the receipt: the next refresh catches up and the engine
-            # retries via pending_transactions. (Ahead of the receipt is now
-            # valid revalidation state in the engine - cumulative state
-            # includes the target, and exact send-time quotes carry the
-            # guarantees.)
+            # Catch up before retrying through pending_transactions. An ahead
+            # snapshot additionally needs the canonical receipt anchor below.
             return
-        self.fees.confirm(tx, receipt, self.engine.snapshot)
+        snapshot = self.engine.snapshot
+        anchor = {}
+        if snapshot["block"] > receipt["blockNumber"]:
+            # An older receipt is usable only on the pinned snapshot's chain.
+            # Recheck the snapshot after the older header read to catch a reorg
+            # between the two reads; never infer ancestry from height alone.
+            with rpc.purpose(rpc.RECEIPTS):
+                header = self.executor.w3.eth.get_block(receipt["blockNumber"])
+                if hexstr(header["hash"]) != hexstr(receipt["blockHash"]):
+                    raise ValueError("target receipt block changed")
+                pinned = self.executor.w3.eth.get_block(snapshot["block"])
+                if hexstr(pinned["hash"]) != snapshot["block_hash"]:
+                    raise ValueError("snapshot block changed after receipt check")
+            anchor = {
+                "receipt_anchor": {
+                    "block": receipt["blockNumber"],
+                    "block_hash": hexstr(header["hash"]),
+                    "snapshot_block": snapshot["block"],
+                    "snapshot_hash": snapshot["block_hash"],
+                }
+            }
+        if self.feed.queue.has_removal():
+            return  # A removal may have arrived during the canonical reads.
+        self.fees.confirm(tx, receipt, snapshot)
         decision = self.engine.handle(
             {
                 "kind": "mined",
                 "now": self.clock(),
                 "transaction": tx,
                 "receipt": receipt_dict(receipt),
+                **anchor,
             }
         )
         if decision.get("status") == "paper_revalidated":
@@ -465,10 +480,53 @@ class Service:
                 "block": receipt["blockNumber"],
                 "block_hash": hexstr(receipt["blockHash"]),
                 "transaction_index": receipt.get("transactionIndex"),
-                "source": "receipt_matching_snapshot",
+                "source": "receipt_canonical_before_snapshot"
+                if anchor
+                else "receipt_matching_snapshot",
             }
         self.record(decision)
         self.maybe_execute(decision)
+
+    def refresh_for(self, event):
+        """Reuse a reconciled pin only when the notification and latest agree."""
+        snapshot = self.engine.snapshot
+        data = event.get("header" if event["kind"] == "head" else "transaction")
+        number_key, hash_key = (
+            ("number", "hash")
+            if event["kind"] == "head"
+            else ("blockNumber", "blockHash")
+        )
+        matches = False
+        if (
+            snapshot is not None
+            and isinstance(data, dict)
+            and getattr(self.snapshots, "reconciled_hash", None)
+            == snapshot["block_hash"]
+            and 0 <= self.clock() - snapshot["timestamp"] <= self.engine.max_age
+        ):
+            try:
+                number = data[number_key]
+                if isinstance(number, str):
+                    number = int(number, 16)
+                matches = (
+                    type(number) is int
+                    and number == snapshot["block"]
+                    and market.hex_value(data[hash_key], 32) == snapshot["block_hash"]
+                )
+            except (KeyError, TypeError, ValueError):
+                pass
+        if matches:
+            # A websocket notification alone cannot establish canonicality or
+            # freshness. One latest-header read avoids repeating service
+            # refresh work for a sibling, retaining the pin's canonical guard.
+            with rpc.purpose(rpc.SNAPSHOT):
+                latest = self.executor.w3.eth.get_block("latest")
+            if (
+                latest["number"] == snapshot["block"]
+                and hexstr(latest["hash"]) == snapshot["block_hash"]
+            ):
+                return
+        self.refresh()
 
     def handle(self, event):
         if (
@@ -478,14 +536,7 @@ class Service:
         ):
             self.discarded_events["feed_changed"] += 1
             return
-        if event["kind"] == "head":
-            self.fees.schedule()
-            self.refresh()
-            for tx in self.engine.pending_transactions():
-                self.included(tx)
-            self.cross_pool()
-            return
-        if event.get("removed"):
+        if event.get("removed") or event["kind"] == "reorg":
             self.fees.invalidate()
             self.executor.history_verified = False
             self.invalidate_prices()
@@ -501,6 +552,15 @@ class Service:
             # ancestry check still parks conservatively.
             self.feed.gap.set()
             return
+        if self.feed.queue.has_removal():
+            return  # A removal arrived after dequeue; recover before planning.
+        if event["kind"] == "head":
+            self.fees.schedule()
+            self.refresh_for(event)
+            for tx in self.engine.pending_transactions():
+                self.included(tx)
+            self.cross_pool()
+            return
         if self.observer and event.get("transaction"):
             self.observer.remember(event["transaction"])
         if event.get("transaction"):
@@ -510,7 +570,7 @@ class Service:
                 received_mono=event.get("received_mono"),
             )
         if event["kind"] == "mined":
-            self.refresh()
+            self.refresh_for(event)
             self.included(event["transaction"])
             return
         if self.clock() - event["received"] > 2:
@@ -663,34 +723,9 @@ class Service:
         )
 
     def next_event(self, timeout):
-        """Dequeue the most perishable event first.
-
-        Pendings carry a 2 s freshness budget, and the loop spends 2-4 s per
-        head/mined sibling in a synchronous snapshot catch-up; queued behind
-        one, they used to be discarded as stale without ever becoming a
-        candidate. Removals stay immediate; everything else keeps FIFO order.
-        """
-        first = self.feed.queue.get(timeout=timeout)
-        if first.get("kind") == "pending" or first.get("removed"):
-            return first
-        held = [first]
-        picked = None
-        while len(held) < 32:
-            try:
-                item = self.feed.queue.get_nowait()
-            except queue.Empty:
-                break
-            if picked is None and item.get("kind") == "pending":
-                picked = item
-            else:
-                held.append(item)
-        if picked is None:
-            for item in held[1:]:
-                self.feed.queue.put(item)
-            return held[0]
-        for item in held:
-            self.feed.queue.put(item)
-        return picked
+        # EventQueue selects removals under its mutex; otherwise retain FIFO.
+        # A pending must not jump over newer head state or competitor evidence.
+        return self.feed.queue.get(timeout=timeout)
 
     def run(self, stop, seconds=None):
         started = self.clock()

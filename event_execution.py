@@ -175,6 +175,27 @@ class Executor:
         if self.bot is None:
             raise ValueError("Phase 2 bot not configured")
 
+        self.attempt.update(
+            stage="quote_context",
+            quote_rungs=0,
+            snapshot_block=candidate["snapshot_block"],
+        )
+        context = arbitrage.CycleContext(
+            candidate["snapshot_block"],
+            candidate["snapshot_hash"],
+            header=self.current(
+                candidate["snapshot_block"], candidate["snapshot_hash"]
+            ),
+            vault_identity=(
+                self.bot.address,
+                market.QUOTE,
+                market.BASE,
+                market.POOLS[500],
+                market.POOLS[10000],
+            ),
+            estimate_gas=False,
+        )
+
         def quote(amount):
             return arbitrage.quote_cycle(
                 self.pools[candidate["backrun"]["buy_fee"]],
@@ -185,6 +206,7 @@ class Executor:
                 self.settings.slippage_bps,
                 self.settings.move_bps,
                 ttl=30,
+                context=context,
             )
 
         # A profitable bracket quote is sent immediately: every extra rung risks
@@ -193,8 +215,10 @@ class Executor:
         # when the bracket found nothing — no race to lose in a quiet market.
         best = None
         priority, rest = self.quote_ladder(candidate, action)
+        self.attempt["stage"] = "quote_ladder"
         for rung in (priority, rest):
             for amount in rung:
+                self.attempt["quote_rungs"] += 1
                 try:
                     row = quote(amount)
                 except ValueError:
@@ -207,7 +231,14 @@ class Executor:
             raise ConfigurationError("no exact profitable bounded cycle")
         if best["block"] != candidate["snapshot_block"]:
             raise ConfigurationError("backrun state advanced; candidate expired")
-        checked = arbitrage.simulate_cycle(self.w3, self.bot, self.operator, best)
+        # Reject head drift before the whole-cycle call and latest gas estimation.
+        self.attempt["stage"] = "cycle_freshness"
+        self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
+        self.attempt["stage"] = "cycle_simulation"
+        checked = arbitrage.simulate_cycle(
+            self.w3, self.bot, self.operator, best, context
+        )
+        self.attempt["stage"] = "gas_freshness"
         self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
         return self.perform(
             action + ":" + candidate["hash"],
@@ -328,7 +359,18 @@ class Executor:
         timing = timing or self.start_attempt(candidate, action)
         if self.w3.eth.chain_id != 11155111:
             raise ValueError("execution requires Sepolia")
-        gas = fn.estimate_gas({"from": self.operator})
+        if action in ("backrun", "arbitrage"):
+            self.attempt["stage"] = "gas_estimate"
+        try:
+            gas = fn.estimate_gas({"from": self.operator})
+        except Web3Exception:
+            # A new head during estimation can turn valid pinned limits into SPL.
+            # Report proven drift as expiry; preserve the original error otherwise.
+            if action in ("backrun", "arbitrage"):
+                self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
+            raise
+        if action in ("backrun", "arbitrage"):
+            self.attempt["stage"] = "final_guards"
         buffered = int(gas * bot_contract.SWAP_GAS_BUFFER)
         self.attempt.update(estimated_gas=gas, gas_limit=buffered)
         if buffered > s.max_gas:
@@ -344,6 +386,12 @@ class Executor:
             "gas_limit": buffered,
             "timing": timing.data,
         }
+        if action in ("backrun", "arbitrage"):
+            row.update(
+                stage=self.attempt["stage"],
+                quote_rungs=self.attempt.get("quote_rungs", 0),
+                snapshot_block=candidate["snapshot_block"],
+            )
         self.attempt = row
         position = self.store.data["position"]
         row["mode"] = s.mode

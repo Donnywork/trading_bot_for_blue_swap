@@ -36,7 +36,9 @@
 | No simulated execution | Check the Phase 2 panel's entry pause and module switches. `prepared` is only a model result; `simulated` confirms execution checks. |
 | Feed connected / snapshot ready, but entries paused | Read the entry explanation. After selecting a mode, wait for acknowledgement, then click **Start Trading**. An older Start request cannot authorize the new mode. |
 | Rejected or unprepared target | The latest evaluation shows the rejection stage/reason. `unprepared` means successful pending preparation is missing; it is not proof that a profitable trade was missed. Older records may only contain a generic rejection. |
-| No opportunity | The enabled strategy found no eligible route under its caps and profit floor. Backruns wait for target inclusion; independent cross-pool arbitrage is separately enabled. |
+| No opportunity | The enabled strategy found no eligible route under its caps and profit floor at the sampled state. It does not prove that no opportunity existed between samples. Backruns wait for target inclusion; independent cross-pool arbitrage is separately enabled. |
+| `execution snapshot is no longer current` / `quote block reorganized` | Validation stopped before sending because its pinned state changed. Check validation timing and the next block's activity. Raising the fee does not shorten quoting. |
+| `execution reverted: SPL` during validation | The pool rejected the sqrt-price limit. Compare the quote block with the simulation/estimate state; a price move can invalidate an older limit. This is not proof of an on-chain revert: check broadcast timing and the receipt. Current cycle validation uses one pinned quote/simulation context and one gas estimate. |
 | Empty price chart after upgrade | Restart bot and dashboard using the normal handoff. History starts with new reconciled block observations; it is not reconstructed from the legacy CSV. Select another range if needed. |
 | Stale price or gaps | The chart labels prices older than 30 seconds. Gaps over 60 seconds, restarts and mode changes break the line. Check feed and snapshot freshness; the dashboard never refreshes the chain itself. |
 | Price history unreadable | Inspect `history_error` in event status and preserve the damaged file for diagnosis. Chart storage failures do not halt exits or reset trading records. |
@@ -54,7 +56,7 @@
 
 Each start pauses entries and selects Simulation with a vault or Paper without one. Paper displays modeled candidates. Simulation runs the existing read-only contract execution checks. Live requires `DRY_RUN=false` in operator configuration plus a valid vault, signer and limits. `EVENT_EXECUTION_MODE` is accepted for compatibility and cannot enable new live entries. A recorded live position resumes exit management and needs a fresh Live request once flat. The dashboard displays a refusal reason if a switch is blocked. Select the desired mode again after resolving it.
 
-Before recovery can exit a recorded position, the runtime validates retained execution receipt block hashes, including receipts older than 64 blocks. The entry backing an open position is checked every maintenance pass, even if its trade row was trimmed. An unavailable read defers execution; a missing or changed canonical block halts for reconciliation. Do not clear or reset the position to bypass this check.
+Before recovery can exit a recorded position, the runtime validates retained execution receipt block hashes, including receipts older than 64 blocks. The entry backing an open position is checked every maintenance pass, even if its trade row was trimmed. An unavailable or missing block read defers execution; a successfully fetched block with a changed hash halts for reconciliation. Do not clear or reset the position to bypass this check.
 
 ### Phase 2 dashboard operation
 

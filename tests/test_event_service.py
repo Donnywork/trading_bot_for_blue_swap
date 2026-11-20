@@ -1329,23 +1329,23 @@ def test_attempts_are_bounded_and_exit_retry_keys_survive_trim(tmp_path):
     assert all(k.startswith("exit:" + HASH) for k in keys)
 
 
-def test_pendings_dequeue_ahead_of_head_refresh_work(tmp_path, snapshot):
-    # Pendings carry a 2 s freshness budget; queued behind a head/mined
-    # sibling that spends seconds in a synchronous catch-up, they used to be
-    # discarded as stale without ever becoming a candidate.
+def test_pendings_dequeue_in_arrival_order_without_jumping_evidence(tmp_path, snapshot):
+    # Pendings carry a 2 s freshness budget, but they must not jump ahead of
+    # head/mined evidence: a newer head can invalidate the state a pending
+    # plan was built on. Removals are selected first under the queue mutex.
     svc = service(tmp_path, snapshot)
     svc.feed.queue.put({"kind": "head", "generation": svc.generation})
     svc.feed.queue.put({"kind": "mined", "generation": svc.generation})
     svc.feed.queue.put({"kind": "pending", "generation": svc.generation, "received": 1})
     svc.feed.queue.put({"kind": "head", "generation": svc.generation})
-    assert svc.next_event(0.1)["kind"] == "pending"
-    order = [svc.feed.queue.get_nowait()["kind"] for _ in range(3)]
-    assert order == ["head", "mined", "head"]
-    # Without a pending waiting, FIFO order is untouched.
-    svc.feed.queue.put({"kind": "head", "generation": svc.generation})
-    svc.feed.queue.put({"kind": "mined", "generation": svc.generation})
     assert svc.next_event(0.1)["kind"] == "head"
-    assert svc.feed.queue.get_nowait()["kind"] == "mined"
+    assert svc.next_event(0.1)["kind"] == "mined"
+    assert svc.next_event(0.1)["kind"] == "pending"
+    assert svc.next_event(0.1)["kind"] == "head"
+    svc.feed.queue.put({"kind": "mined", "generation": svc.generation, "removed": True})
+    svc.feed.queue.put({"kind": "head", "generation": svc.generation})
+    assert svc.next_event(0.1).get("removed") is True
+    assert svc.next_event(0.1)["kind"] == "head"
     assert svc.feed.queue.empty()
 
 

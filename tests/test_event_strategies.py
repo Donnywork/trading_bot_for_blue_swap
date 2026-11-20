@@ -409,11 +409,10 @@ def test_mined_notice_requires_receipt_and_fresh_exact_block_snapshot(snapshot):
     assert result["backrun"]["exact_validation_required"]
 
 
-def test_mined_revalidation_survives_snapshot_ahead_of_receipt(snapshot):
-    # Sepolia can advance past the receipt while the feed burst is still being
-    # processed; the old exact-block equality dead-ended these candidates
-    # until TTL. Cumulative state at N+1 already includes the target's
-    # effects, and exact send-time quotes carry the guarantees.
+@pytest.mark.parametrize("proof", ["valid", "missing", "wrong_receipt", "old_snapshot"])
+def test_mined_revalidation_survives_snapshot_ahead_of_receipt(snapshot, proof):
+    # A newer snapshot is useful only after the service verifies that the
+    # receipt and the snapshot are both still canonical.
     e, now = engine(snapshot), snapshot["timestamp"]
     tx = transaction(snapshot)
     e.handle({"kind": "pending", "transaction": tx, "now": now + 1})
@@ -422,14 +421,30 @@ def test_mined_revalidation_survives_snapshot_ahead_of_receipt(snapshot):
     )
     ahead = after_snapshot(snapshot, after)  # block N+1, post-target state
     e.handle({"kind": "snapshot", "snapshot": ahead, "now": now + 13})
+    anchor = {
+        "block": snapshot["block"],
+        "block_hash": snapshot["block_hash"],
+        "snapshot_block": ahead["block"],
+        "snapshot_hash": ahead["block_hash"],
+    }
+    if proof == "missing":
+        anchor = None
+    elif proof == "wrong_receipt":
+        anchor["block_hash"] = "0x" + "ef" * 32
+    elif proof == "old_snapshot":
+        anchor["snapshot_block"] -= 1
     result = e.handle(
         {
             "kind": "mined",
             "transaction": tx,
-            "receipt": receipt(tx, snapshot),  # mined in block N
+            "receipt": receipt(tx, snapshot),
+            "receipt_anchor": anchor,
             "now": now + 14,
         }
     )
+    if proof != "valid":
+        assert result["status"] == "awaiting_snapshot" and result["backrun"] is None
+        return
     assert result["status"] == "paper_revalidated"
     assert result["backrun"] == backrun.best_cycle(
         market.models(ahead, now + 14), LIMITS

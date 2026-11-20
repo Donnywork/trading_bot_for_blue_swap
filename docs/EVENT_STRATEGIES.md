@@ -31,6 +31,10 @@ Pending preparation does not establish transaction order. The default backrun pa
 
 Ordered same-block backruns remain unsupported. The atomic executor checks the whole-cycle f564 profit but cannot insert another account's transaction between its own legs. Front-running uses separate entry and exit transactions and cannot guarantee ordering or profit. The target can be replaced, revert, or be mined before our entry; the service exits recorded inventory even in those cases.
 
+Cycle execution creates one attempt-local quote context at the candidate's block/hash. Size rungs reuse the pool prices and route identity from that context, with fresh canonical validation before using the result. Owner caps and the profit floor are checked for the attempt, not cached across attempts. The whole-cycle `eth_call` uses the quote block; the send path performs one current-state gas estimate and retains final feed/control/target/snapshot checks. Moving state can still reject a candidate before broadcast.
+
+For atomic cycles, the quote minimum is the greater of the configured slippage minimum and `amount_in + min_profit`. Exact quoted output must reach that minimum. This tightens tolerated slippage when the profit floor binds, so a small profitable cycle need not be rejected merely because spending the entire configured slippage allowance would miss the floor. It does not change single-swap risk or guarantee front-run round-trip profit.
+
 The execution adapter preserves Sepolia-only checks, owner limits, whole-cycle simulation, `SWAP_GAS_BUFFER=2.0`, and before-send skip versus post-send halt classifications. It never rebuilds and retries an uncertain send. Actual live submission is not authorized by this implementation work.
 
 ## Competitive fee preparation
@@ -53,7 +57,7 @@ Unsupported calldata, token pairs, ambiguous multicalls, nonzero pool price limi
 
 - Pending events deduplicate by hash. A different hash with the same signer and nonce supersedes the previous candidate, including a replacement that is not a supported swap.
 - Market-bot transactions generate hypothetical preparations. Competitor activity marks preparations stale; it does not prove execution or change canonical pool state.
-- Inclusion must provide receipt success and a fresh matching snapshot. Recompute the actual post-trade opportunity rather than reusing the prediction.
+- Inclusion must provide receipt success and a fresh matching snapshot. A newer snapshot additionally requires canonical checks of both its block hash and the older receipt's block hash; a receipt alone does not prove the target survived a reorg. Recompute the actual post-trade opportunity rather than reusing the prediction.
 - Removed/reorg notifications invalidate affected candidates. Expiry and snapshot age prevent an old observation becoming a fresh trade signal.
 - Front-run paper estimates do not become backrun-ready instructions. They describe an assumed sequence and cannot claim actual inventory or profit.
 - Decisions record reasons, assumptions, trigger hash, nonce, snapshot block/hash, route, input, predicted f564 gain and validation state. No endpoint, key, or provider exception body belongs in a journal.

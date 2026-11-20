@@ -1,0 +1,43 @@
+{
+  "source": "https://ethereum-sepolia-rpc.publicnode.com",
+  "scope": "Read-only receipt and historical slot0 queries; no credentials or signing",
+  "target": {
+    "hash": "0x1bbd9c30b74419165388092a12a6894dc0ddda9b6d27d1d6f45fd35215cc0b2e",
+    "block": 12171635,
+    "block_hash": "0x8a249c80d55fc5c8923e598757e035f515ee0ecf129c55be249ef1f589ae22d3",
+    "block_time_utc": "2026-11-19T23:35:36Z",
+    "validation_started_at": 1795131339.7345843,
+    "rejection_at": 1795131355.30899,
+    "rejection": "ContractLogicError: execution reverted: SPL",
+    "broadcast_start_at": null,
+    "paper_profit_f564": 90.61092591186662
+  },
+  "competitor": {
+    "sender": "0xd067640b2e032b1a878bd87b4d85cb5a87ef64ef",
+    "vault": "0x7e0c07c6d5262727b598e299a14b75acb3e5666f",
+    "block": 12171636,
+    "block_hash": "0xd5312907ab13641e466a20a5e649e477b9a8cb24fa0c8ac082a8397ae966e2dc",
+    "block_time_utc": "2026-11-19T23:35:48Z",
+    "buy": {
+      "hash": "0x9cb854618fe77a68d682a442167e724b5c9baf01f22e4baf7ebc419b95cc2de4",
+      "index": 0,
+      "status": 1,
+      "pool": "0xc67fcb8459c792ae1e271f24ce212ba90ecc2920",
+      "swap_topic": "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+      "data": "0x00000000000000000000000000000000000000000000009863328f6066100000ffffffffffffffffffffffffffffffffffffffffffffffffd8eca9688682de610000000000000000000000000000000000000000081a62d2785f35ac324b8120000000000000000000000000000000000000000000000274778affb2648ba5bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffef239"
+    },
+    "sell": {
+      "hash": "0x1b207dc7ac7aa198dac65bb5ee03c4208d04334388922a4d83d6cfbd057025e5",
+      "index": 1,
+      "status": 1,
+      "pool": "0x68d8bc396df8e791efd45a9b214cb07fe4300f48",
+      "swap_topic": "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+      "data": "0xffffffffffffffffffffffffffffffffffffffffffffff636ad4cc0ed06c862a00000000000000000000000000000000000000000000000027135697797d219f00000000000000000000000000000000000000000800e85ad10a14cf2c96b3300000000000000000000000000000000000000000000006013bb82606235d99f3fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffef142"
+    },
+    "approximate_quote_profit_f564": 77.3877851386842
+  },
+  "buy_pool_sqrt_before_hex": "0831f83d2571c49e00ed863a",
+  "buy_pool_sqrt_after_hex": "081a62d2785f35ac324b8120",
+  "approximate_raw_price_change_pct": -2.2355999789801073,
+  "limits": "The log does not record which RPC call raised SPL or the selected price limit. State drift is consistent with the timing and pool move; no historical execution trace was fetched. One public archive slot0 request for the 500-fee pool at block 12171636 was refused; its post-swap sqrt is available in the Swap event above."
+}

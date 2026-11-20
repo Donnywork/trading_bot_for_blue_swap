@@ -38,10 +38,30 @@ def endpoint(env=None):
     )
 
 
+class EventQueue(queue.Queue):
+    """Bounded FIFO with invalidations selected atomically before ordinary work."""
+
+    def _get(self):
+        # Queue.get holds the mutex: producers cannot refill between selection
+        # and removal. Never drain/requeue; that can deadlock a bounded queue.
+        for index, event in enumerate(self.queue):
+            if event.get("removed") or event.get("kind") == "reorg":
+                del self.queue[index]
+                return event
+        return self.queue.popleft()
+
+    def has_removal(self):
+        with self.mutex:
+            return any(
+                event.get("removed") or event.get("kind") == "reorg"
+                for event in self.queue
+            )
+
+
 class Feed:
     def __init__(self, uri, signers, stop, capacity=512, metrics=None):
         self.uri, self.signers, self.stop = uri, sorted(set(signers)), stop
-        self.queue = queue.Queue(capacity)
+        self.queue = EventQueue(capacity)
         self.ready = threading.Event()
         self.gap = threading.Event()
         self.gap.set()
