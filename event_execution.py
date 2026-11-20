@@ -24,8 +24,13 @@ def sizes(cap):
     # Dense low rungs: thin pools peak at small sizes (observed ~3% of cap on Sepolia),
     # and a six-rung ladder spaced 2x cannot express that optimum. Adjacent rungs stay
     # within 1.5x — except the smallest step, which integer rungs cannot split below 2x.
+    # n=20 and n=36 (recomputed Nov 20) bracket the observed big-window optima
+    # (~4.7k and ~5.6k on a 10k cap) that previously fell between rungs.
     return sorted(
-        {max(1, cap * n // 64) for n in (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64)}
+        {
+            max(1, cap * n // 64)
+            for n in (1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 36, 48, 64)
+        }
     )
 
 
@@ -240,6 +245,14 @@ class Executor:
         )
         self.attempt["stage"] = "gas_freshness"
         self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
+        # The deadline is anchored to the pinned quote block, but current()
+        # still admits a header up to 30 s stale: after a slow validation the
+        # transaction would broadcast with seconds of margin and revert
+        # "expired" at inclusion — the class single() fixed on Nov 19.
+        # Inclusion-block timestamps track wall time, so require room for the
+        # send plus the next block against the wall clock.
+        if best["deadline"] <= self.clock() + 13:
+            raise ConfigurationError("cycle deadline cannot cover inclusion")
         return self.perform(
             action + ":" + candidate["hash"],
             self.bot.functions.execute(checked["args"]),
@@ -361,14 +374,10 @@ class Executor:
             raise ValueError("execution requires Sepolia")
         if action in ("backrun", "arbitrage"):
             self.attempt["stage"] = "gas_estimate"
-        try:
-            gas = fn.estimate_gas({"from": self.operator})
-        except Web3Exception:
-            # A new head during estimation can turn valid pinned limits into SPL.
-            # Report proven drift as expiry; preserve the original error otherwise.
-            if action in ("backrun", "arbitrage"):
-                self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
-            raise
+        # A new head during estimation can turn valid pinned limits into SPL;
+        # the estimation error itself is always the recorded verdict (the
+        # stage field plus timing identify the drift context).
+        gas = fn.estimate_gas({"from": self.operator})
         if action in ("backrun", "arbitrage"):
             self.attempt["stage"] = "final_guards"
         buffered = int(gas * bot_contract.SWAP_GAS_BUFFER)

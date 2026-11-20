@@ -33,7 +33,6 @@ def svc(tmp_path):
     )
     value = service(tmp_path, snapshot)
     value.refresh()
-    value.snapshots.reconciled_hash = snapshot["block_hash"]
     return value
 
 
@@ -177,7 +176,11 @@ def test_control_refusal_is_recorded_without_reset_or_executor_call(svc):
     svc.executor.backrun.assert_not_called()
     assert svc.engine.snapshot is snapshot
     assert svc.last_execution["status"] == "execution_rejected"
-    assert svc.next_attempt > svc.clock()
+    # A guard refusal burned no attempt: the gate stays open for the next
+    # window (previously it paid a full cooldown), and the record carries no
+    # stale diagnostics from a previous attempt.
+    assert svc.next_attempt == 0
+    assert svc.last_execution["diagnostics"] == {}
 
 
 @pytest.mark.parametrize(
@@ -246,60 +249,6 @@ def test_unknown_send_halt_is_never_swallowed(svc):
     with pytest.raises(Halt, match="uncertain send"):
         svc.maybe_execute(decision)
     assert svc.last_execution is None
-
-
-@pytest.mark.parametrize("kind", ["head", "mined"])
-def test_matching_notification_reuses_only_canonically_verified_snapshot(svc, kind):
-    snapshot = svc.engine.snapshot
-    block, block_hash = snapshot["block"], snapshot["block_hash"]
-    event = (
-        {"kind": "head", "header": {"number": hex(block), "hash": block_hash}}
-        if kind == "head"
-        else {
-            "kind": "mined",
-            "transaction": {"blockNumber": hex(block), "blockHash": block_hash},
-        }
-    )
-    svc.executor.w3.eth.get_block = Mock(
-        return_value={"number": block, "hash": bytes.fromhex(block_hash[2:])}
-    )
-    svc.refresh = Mock()
-    svc.refresh_for(event)
-    svc.refresh.assert_not_called()
-    svc.executor.w3.eth.get_block.assert_called_once_with("latest")
-    assert svc.engine.snapshot is snapshot
-
-
-@pytest.mark.parametrize(
-    "case",
-    ["changed_hash", "newer", "unvalidated", "malformed", "stale", "read_failure"],
-)
-def test_notification_reuse_cannot_bypass_canonical_guards(svc, case):
-    snapshot = svc.engine.snapshot
-    block, block_hash = snapshot["block"], snapshot["block_hash"]
-    event = {"kind": "head", "header": {"number": hex(block), "hash": block_hash}}
-    latest = {"number": block, "hash": block_hash}
-    if case == "changed_hash":
-        latest["hash"] = OTHER_HASH
-    elif case == "newer":
-        latest["number"] += 1
-    elif case == "unvalidated":
-        svc.snapshots.reconciled_hash = None
-    elif case == "malformed":
-        event["header"]["number"] = "not-a-number"
-    elif case == "stale":
-        svc.clock = lambda: snapshot["timestamp"] + 31
-    latest["hash"] = bytes.fromhex(latest["hash"][2:])
-    svc.executor.w3.eth.get_block = Mock(return_value=latest)
-    svc.refresh = Mock()
-    if case == "read_failure":
-        svc.executor.w3.eth.get_block.side_effect = HTTPError("private provider body")
-        with pytest.raises(HTTPError):
-            svc.refresh_for(event)
-        svc.refresh.assert_not_called()
-    else:
-        svc.refresh_for(event)
-        svc.refresh.assert_called_once_with()
 
 
 def receipt_setup(svc, ahead=True):

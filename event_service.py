@@ -301,9 +301,25 @@ class Service:
             or f"{action}:{decision['hash']}" in self.store.data["attempts"]
         ):
             return
-        self.next_attempt = self.clock() + self.settings.cooldown
         try:
             self.entry_guard(action)
+        except ValueError as exc:
+            # A guard refusal (paused, module off, removal queued) touched
+            # nothing: it burns no cooldown and must not attach the previous
+            # attempt's diagnostics to the record.
+            self.record(
+                {
+                    "kind": "execution",
+                    "status": "execution_rejected",
+                    "action": action,
+                    "hash": decision["hash"],
+                    "reason": error_summary(exc),
+                    "diagnostics": {},
+                }
+            )
+            return
+        self.next_attempt = self.clock() + self.settings.cooldown
+        try:
             with rpc.purpose(rpc.QUOTES):
                 result = (
                     self.executor.backrun(decision, action=action)
@@ -314,6 +330,11 @@ class Service:
             # Control refusals and pre-send simulation reverts reject this
             # candidate only. Catch contract reverts before Web3Exception so
             # they cannot reset sibling candidates through transport backoff.
+            # Nothing was sent and the store recorded no intent, so the gate
+            # frees for the next window after a short floor: consecutive-block
+            # contests used to lose their middle window to a full cooldown
+            # burned by a 300 ms rejection.
+            self.next_attempt = self.clock() + 2
             self.record(
                 {
                     "kind": "execution",
@@ -487,47 +508,6 @@ class Service:
         self.record(decision)
         self.maybe_execute(decision)
 
-    def refresh_for(self, event):
-        """Reuse a reconciled pin only when the notification and latest agree."""
-        snapshot = self.engine.snapshot
-        data = event.get("header" if event["kind"] == "head" else "transaction")
-        number_key, hash_key = (
-            ("number", "hash")
-            if event["kind"] == "head"
-            else ("blockNumber", "blockHash")
-        )
-        matches = False
-        if (
-            snapshot is not None
-            and isinstance(data, dict)
-            and getattr(self.snapshots, "reconciled_hash", None)
-            == snapshot["block_hash"]
-            and 0 <= self.clock() - snapshot["timestamp"] <= self.engine.max_age
-        ):
-            try:
-                number = data[number_key]
-                if isinstance(number, str):
-                    number = int(number, 16)
-                matches = (
-                    type(number) is int
-                    and number == snapshot["block"]
-                    and market.hex_value(data[hash_key], 32) == snapshot["block_hash"]
-                )
-            except (KeyError, TypeError, ValueError):
-                pass
-        if matches:
-            # A websocket notification alone cannot establish canonicality or
-            # freshness. One latest-header read avoids repeating service
-            # refresh work for a sibling, retaining the pin's canonical guard.
-            with rpc.purpose(rpc.SNAPSHOT):
-                latest = self.executor.w3.eth.get_block("latest")
-            if (
-                latest["number"] == snapshot["block"]
-                and hexstr(latest["hash"]) == snapshot["block_hash"]
-            ):
-                return
-        self.refresh()
-
     def handle(self, event):
         if (
             event.get("generation") != self.generation
@@ -556,7 +536,7 @@ class Service:
             return  # A removal arrived after dequeue; recover before planning.
         if event["kind"] == "head":
             self.fees.schedule()
-            self.refresh_for(event)
+            self.refresh()
             for tx in self.engine.pending_transactions():
                 self.included(tx)
             self.cross_pool()
@@ -570,7 +550,7 @@ class Service:
                 received_mono=event.get("received_mono"),
             )
         if event["kind"] == "mined":
-            self.refresh_for(event)
+            self.refresh()
             self.included(event["transaction"])
             return
         if self.clock() - event["received"] > 2:

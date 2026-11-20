@@ -215,9 +215,7 @@ def test_drift_never_reaches_send_or_durable_intent(cycle_executor, drift, stage
 
 
 @pytest.mark.parametrize("drift", [False, True])
-def test_estimate_revert_is_classified_as_drift_only_with_head_evidence(
-    cycle_executor, drift
-):
+def test_estimate_revert_always_preserves_the_original_reason(cycle_executor, drift):
     f = cycle_executor
 
     def revert():
@@ -226,8 +224,31 @@ def test_estimate_revert_is_classified_as_drift_only_with_head_evidence(
         raise ContractLogicError("execution reverted: SPL")
 
     f.hooks["estimate"] = revert
-    error = ConfigurationError if drift else ContractLogicError
-    with pytest.raises(error, match="no longer current" if drift else "SPL"):
+    # The estimation error is always the recorded verdict; the stage field
+    # and timing identify the drift context instead of replacing the reason.
+    with pytest.raises(ContractLogicError, match="SPL"):
+        f.ex.backrun(f.decision)
+    assert f.ex.attempt["stage"] == "gas_estimate"
+    assert f.ex.store.data["intent"] is None
+
+
+def test_cycle_deadline_must_cover_send_plus_next_block(cycle_executor):
+    # The deadline is anchored to the pinned quote block while current()
+    # admits a header up to 30 s stale: after a slow validation the deadline
+    # has seconds of wall-clock margin left and would revert "expired" at
+    # inclusion (the class single() fixed on Nov 19). Slow validation must
+    # reject pre-send instead of broadcasting a guaranteed revert.
+    f = cycle_executor
+
+    def slow_validation():
+        # Deadline was anchored at header timestamp 99 (+30 = 129); the wall
+        # clock has now advanced to 125, leaving 4 s — less than the send
+        # plus one block.
+        f.ex.clock = lambda: 125
+
+    f.hooks["execute"] = slow_validation
+    f.ex.settings = replace(f.ex.settings, mode="live")
+    with pytest.raises(ConfigurationError, match="deadline cannot cover inclusion"):
         f.ex.backrun(f.decision)
     assert f.ex.store.data["intent"] is None
 

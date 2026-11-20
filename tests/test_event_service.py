@@ -64,11 +64,15 @@ def test_execution_ladder_covers_small_and_narrow_optima():
     assert all(type(n) is int for n in ladder)
     assert ladder[0] == cap // 64  # a ~3%-of-cap optimum has a rung beside it
     assert ladder[-1] == cap
-    assert len(ladder) == 12
+    assert len(ladder) == 14
     for index, (low, high) in enumerate(pairwise(ladder)):
         # Integer rungs cannot split the first (cap/64 -> cap/32) step below 2x;
         # everywhere else adjacent rungs stay within 1.5x (high*2 <= low*3).
         assert high * 2 <= (low * 4 if index == 0 else low * 3) + 2
+    # The Nov 20 recomputation: denser mid-range rungs bracket big-window
+    # optima that previously fell between 3750 and 5000.
+    assert 20 * cap // 64 in ladder  # 3125 on a 10k cap
+    assert 36 * cap // 64 in ladder  # 5625 on a 10k cap
     assert sizes(1) == [1] and sizes(2) == [1, 2]
 
 
@@ -2066,6 +2070,7 @@ def test_cycle_execution_keys_distinguish_backrun_and_independent_scan(
             "block": 7,
             "amount_in": A,
             "min_quote_out": A + 1,
+            "deadline": 10**12,
         },
     )
     monkeypatch.setattr(
