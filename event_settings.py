@@ -35,10 +35,14 @@ def bounded(env, name, default, lo, hi):
     return number
 
 
-def enabled(env, name):
+def enabled(env, name, default=False):
     # Boolean flags parse a closed set: a typo must refuse startup, not trade blind.
+    # An unset/empty variable falls back to the caller's default, so a feature
+    # can be armed in code while an explicit 0/false stays a working opt-out.
     value = str(env.get(name, "")).strip().lower()
-    if value in ("", "0", "false"):
+    if value == "":
+        return default
+    if value in ("0", "false"):
         return False
     if value in ("1", "true"):
         return True
@@ -54,7 +58,7 @@ class EventSettings:
     min_profit: int = market.UNIT
     slippage_bps: int = 20
     move_bps: int = 100
-    pending_backrun: bool = False
+    pending_backrun: bool = True
     exit_seconds: int = 60
     cooldown: int = 10
     observer_seconds: int = 15
@@ -186,7 +190,7 @@ class EventSettings:
             min_profit=amount("EVENT_MIN_PROFIT", "1"),
             slippage_bps=bounded(env, "EVENT_SLIPPAGE_BPS", 20, 0, 500),
             move_bps=bounded(env, "EVENT_MOVE_BPS", 100, 1, 500),
-            pending_backrun=enabled(env, "EVENT_PENDING_BACKRUN"),
+            pending_backrun=enabled(env, "EVENT_PENDING_BACKRUN", default=True),
             exit_seconds=bounded(env, "EVENT_EXIT_SECONDS", 60, 5, 300),
             cooldown=bounded(env, "EVENT_COOLDOWN_SECONDS", 10, 1, 300),
             observer_seconds=bounded(env, "EVENT_OBSERVER_SECONDS", 15, 5, 600),

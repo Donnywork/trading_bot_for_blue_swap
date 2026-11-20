@@ -455,12 +455,15 @@ def test_mined_confirmation_fallback_still_runs_after_pending_submission(
 
 
 def test_pending_backrun_flag_parses_and_fails_closed():
-    assert EventSettings.from_env({}).pending_backrun is False
+    # Armed by default: the contested windows are lost without it, so a bare
+    # deployment must race; an explicit 0/false remains the working opt-out.
+    assert EventSettings.from_env({}).pending_backrun is True
+    assert EventSettings.from_env({"EVENT_PENDING_BACKRUN": ""}).pending_backrun is True
     for value in ("1", "true", "TRUE", " True "):
         assert EventSettings.from_env({"EVENT_PENDING_BACKRUN": value}).pending_backrun
-    for value in ("", "0", "false", None):
+    for value in ("0", "false"):
         assert not EventSettings.from_env(
-            {} if value is None else {"EVENT_PENDING_BACKRUN": value}
+            {"EVENT_PENDING_BACKRUN": value}
         ).pending_backrun
     with pytest.raises(ValueError, match="EVENT_PENDING_BACKRUN"):
         EventSettings.from_env({"EVENT_PENDING_BACKRUN": "yes"})

@@ -195,7 +195,7 @@ Reproduce the counts with `uv run pytest -qs tests/test_phase2_rpc.py`.
 | `EVENT_MIN_PROFIT` | `1` | f564 modeled/exact cycle floor before native ETH gas |
 | `EVENT_SLIPPAGE_BPS` | `20` | Minimum-output allowance, 0–500 bps |
 | `EVENT_MOVE_BPS` | `100` | Single-swap and atomic cycle pool price limits, 1–500 bps |
-| `EVENT_PENDING_BACKRUN` | `false` | Offer the atomic backrun cycle while the target is still pending (no exact quote; on-chain floor is the guard, failed cycles cost gas) |
+| `EVENT_PENDING_BACKRUN` | `true` | Offer the atomic backrun cycle while the target is still pending (no exact quote; on-chain floor is the guard, failed cycles cost gas). Set `0`/`false` to restrict backruns to the receipt-confirmed path |
 | `EVENT_EXIT_SECONDS` | `60` | Front-run inventory exit timer, 5–300 seconds |
 | `EVENT_COOLDOWN_SECONDS` | `10` | Delay after execution attempts/failures, 1–300 seconds |
 | `EVENT_OBSERVER_SECONDS` | `15` | Diagnostic-worker cadence, 5–600 seconds; slower saves compute units |
