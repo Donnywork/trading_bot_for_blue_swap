@@ -35,6 +35,16 @@ def bounded(env, name, default, lo, hi):
     return number
 
 
+def enabled(env, name):
+    # Boolean flags parse a closed set: a typo must refuse startup, not trade blind.
+    value = str(env.get(name, "")).strip().lower()
+    if value in ("", "0", "false"):
+        return False
+    if value in ("1", "true"):
+        return True
+    raise ConfigurationError(f"{name} must be 1/true or 0/false")
+
+
 @dataclass(frozen=True)
 class EventSettings:
     mode: str = "paper"
@@ -44,6 +54,7 @@ class EventSettings:
     min_profit: int = market.UNIT
     slippage_bps: int = 20
     move_bps: int = 100
+    pending_backrun: bool = False
     exit_seconds: int = 60
     cooldown: int = 10
     observer_seconds: int = 15
@@ -175,6 +186,7 @@ class EventSettings:
             min_profit=amount("EVENT_MIN_PROFIT", "1"),
             slippage_bps=bounded(env, "EVENT_SLIPPAGE_BPS", 20, 0, 500),
             move_bps=bounded(env, "EVENT_MOVE_BPS", 100, 1, 500),
+            pending_backrun=enabled(env, "EVENT_PENDING_BACKRUN"),
             exit_seconds=bounded(env, "EVENT_EXIT_SECONDS", 60, 5, 300),
             cooldown=bounded(env, "EVENT_COOLDOWN_SECONDS", 10, 1, 300),
             observer_seconds=bounded(env, "EVENT_OBSERVER_SECONDS", 15, 5, 600),

@@ -264,6 +264,96 @@ class Executor:
             cycle_deadline=best["deadline"],
         )
 
+    def pending_cycle(self, candidate, snapshot):
+        # ------------------------------------
+        # Same-block pending submission. A competitor twice took our windows
+        # (+12.30/+35.79 f564) by broadcasting the atomic cycle as a PENDING
+        # transaction ~1 s after the market bot appeared pending, landing in
+        # the block right after the target. This variant submits before any
+        # receipt exists. The target is NOT on-chain yet, so exact quotes,
+        # whole-cycle eth_call and gas estimation all read the wrong
+        # (pre-target) state and would reject or revert: build the cycle from
+        # the pinned snapshot's reconciled sqrt prices and the paper plan,
+        # skip every quote/simulation read, and let the contract's atomic
+        # floor be the guard — a lost race reverts both legs together.
+        # ------------------------------------
+        timing = self.start_attempt(candidate, "backrun")
+        if self.bot is None or self.settings.mode not in ("simulate", "live"):
+            raise ValueError("Phase 2 bot not configured")
+        if not {"hash", "snapshot_block", "snapshot_hash"} <= set(candidate):
+            raise ValueError("pending backrun candidate is invalid")
+        plan = candidate.get("backrun") or {}
+        if not {"buy_fee", "sell_fee", "input_f564"} <= set(plan):
+            raise ValueError("pending backrun plan is invalid")
+        try:
+            hint = int(plan["input_f564"] * market.UNIT)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("pending backrun plan is invalid") from None
+        if hint <= 0:
+            raise ValueError("pending backrun plan is invalid")
+        if (
+            snapshot is None
+            or snapshot.get("block") != candidate["snapshot_block"]
+            or snapshot.get("block_hash") != candidate["snapshot_hash"]
+        ):
+            raise ConfigurationError("pending plan snapshot advanced")
+        self.attempt.update(
+            stage="pending_submission",
+            quote_rungs=0,
+            snapshot_block=candidate["snapshot_block"],
+        )
+        # The pinned snapshot must still BE the latest block: a newer head
+        # means the pending window moved and the pre-target cycle is stale.
+        header = self.current(candidate["snapshot_block"], candidate["snapshot_hash"])
+        if {plan["buy_fee"], plan["sell_fee"]} != set(market.POOLS) or {
+            p.get("fee") for p in snapshot.get("profiles", [])
+        } != set(market.POOLS):
+            raise ValueError("pending backrun plan pools missing from snapshot")
+        sqrt = {p["fee"]: p["sqrtPriceX96"] for p in snapshot["profiles"]}
+        # First bracket rung nearest the paper optimum; the float hint only
+        # ORDERS configuration-derived integer rungs, never calldata amounts.
+        amount = sizes_near(self.settings.quote_cap, hint)[0][0]
+        # No quote exists pre-target, so the slippage-bps minimum cannot
+        # apply: the on-chain floor (minQuoteOut = amount + min_profit, which
+        # the contract also enforces as its own required output) is the only
+        # guard. min_base_out just needs the contract's nonzero minimum; the
+        # atomic second leg catches a bad buy fill through the final floor.
+        minimum = amount + self.settings.min_profit
+        buy_limit = arbitrage.price_limit(
+            sqrt[plan["buy_fee"]],
+            int(market.QUOTE, 16) < int(market.BASE, 16),
+            self.settings.move_bps,
+        )
+        sell_limit = arbitrage.price_limit(
+            sqrt[plan["sell_fee"]],
+            int(market.BASE, 16) < int(market.QUOTE, 16),
+            self.settings.move_bps,
+        )
+        deadline = max(header["timestamp"], snapshot.get("timestamp", 0)) + 30
+        if deadline <= self.clock() + 13:
+            raise ConfigurationError("cycle deadline cannot cover inclusion")
+        args = (
+            plan["buy_fee"] == 500,  # pool0 is the fee-500 pool, validated at startup
+            amount,
+            1,
+            minimum,
+            self.settings.min_profit,
+            deadline,
+            buy_limit,
+            sell_limit,
+        )
+        return self.perform(
+            "backrun_pending:" + candidate["hash"],
+            self.bot.functions.execute(args),
+            "backrun",
+            amount,
+            minimum,
+            candidate,
+            timing=timing,
+            cycle_deadline=deadline,
+            gas_override=self.settings.max_gas,
+        )
+
     def quote_ladder(self, candidate, action=None):
         # Both cycle actions quote the bracket around the paper optimum first;
         # event-chaos arbitrage windows are races too. The float hint only
@@ -377,6 +467,7 @@ class Executor:
         *,
         timing=None,
         cycle_deadline=None,
+        gas_override=None,
     ):
         if key in self.store.data["attempts"]:
             raise ValueError("candidate already attempted")
@@ -384,16 +475,29 @@ class Executor:
         timing = timing or self.start_attempt(candidate, action)
         if self.w3.eth.chain_id != 11155111:
             raise ValueError("execution requires Sepolia")
-        if action in ("backrun", "arbitrage"):
+        if gas_override is not None and (
+            type(gas_override) is not int or gas_override <= 0
+        ):
+            raise ValueError("gas override must be a positive integer")
+        if action in ("backrun", "arbitrage") and gas_override is None:
             self.attempt["stage"] = "gas_estimate"
-        # A new head during estimation can turn valid pinned limits into SPL;
-        # the estimation error itself is always the recorded verdict (the
-        # stage field plus timing identify the drift context).
-        gas = fn.estimate_gas({"from": self.operator})
-        if action in ("backrun", "arbitrage"):
+        if gas_override is None:
+            # A new head during estimation can turn valid pinned limits into SPL;
+            # the estimation error itself is always the recorded verdict (the
+            # stage field plus timing identify the drift context).
+            gas = fn.estimate_gas({"from": self.operator})
+            buffered = int(gas * bot_contract.SWAP_GAS_BUFFER)
+            estimated = gas
+        else:
+            # A pending cycle executes against state that does not exist yet:
+            # estimating against the pre-target pools would revert. The
+            # override is already the configured ceiling, so the 2x estimate
+            # buffer must never stack on top of it.
+            gas = buffered = gas_override
+            estimated = None  # no estimate happened; gas_limit carries the override
+        if action in ("backrun", "arbitrage") and gas_override is None:
             self.attempt["stage"] = "final_guards"
-        buffered = int(gas * bot_contract.SWAP_GAS_BUFFER)
-        self.attempt.update(estimated_gas=gas, gas_limit=buffered)
+        self.attempt.update(estimated_gas=estimated, gas_limit=buffered)
         if buffered > s.max_gas:
             raise ConfigurationError("buffered gas exceeds event limit")
         balance = self.w3.eth.get_balance(self.operator)
@@ -403,7 +507,7 @@ class Executor:
             "amount_raw": amount,
             "minimum_raw": minimum,
             "reason": candidate.get("reason", ""),
-            "estimated_gas": gas,
+            "estimated_gas": estimated,
             "gas_limit": buffered,
             "timing": timing.data,
         }
@@ -516,7 +620,11 @@ class Executor:
                     self.w3,
                     self.account,
                     tx,
-                    gas_buffer=bot_contract.SWAP_GAS_BUFFER,
+                    gas_buffer=(
+                        bot_contract.SWAP_GAS_BUFFER
+                        if gas_override is None
+                        else 1.0  # the override is already the ceiling; never double it
+                    ),
                     timing=timing,
                 )
         except bot_contract.NotSent:

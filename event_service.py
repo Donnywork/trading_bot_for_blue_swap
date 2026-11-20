@@ -109,11 +109,20 @@ class Service:
         decision = {"mode": self.settings.mode, "now": self.clock(), **decision}
         if decision.get("kind") in ("pending", "mined", "arbitrage"):
             if decision.get("status") == "prepared":
-                decision["execution_note"] = (
-                    "Backrun requires successful target inclusion and a profitable inclusion-block quote."
-                    if decision.get("backrun")
-                    else "No modeled backrun meets the configured caps and profit floor."
-                )
+                if not decision.get("backrun"):
+                    decision["execution_note"] = (
+                        "No modeled backrun meets the configured caps and profit floor."
+                    )
+                elif self.settings.pending_backrun:
+                    decision["execution_note"] = (
+                        "Pending backrun submission is enabled: the atomic cycle is "
+                        "offered while the target is still pending (on-chain floor is "
+                        "the guard); the mined-confirmation path remains the fallback."
+                    )
+                else:
+                    decision["execution_note"] = (
+                        "Backrun requires successful target inclusion and a profitable inclusion-block quote."
+                    )
                 if decision.get("frontrun") and not self.controls.event_frontrun:
                     decision["execution_note"] += (
                         " A modeled front-run exists, but front-runs are disabled."
@@ -277,7 +286,7 @@ class Service:
             or self.clock() < self.next_attempt
         ):
             return
-        action = None
+        action, pending = None, False
         if (
             decision.get("status") == "arbitrage_prepared"
             and decision.get("backrun")
@@ -292,14 +301,28 @@ class Service:
             action = "backrun"
         elif (
             decision.get("status") == "prepared"
+            and decision.get("backrun")
+            and self.settings.pending_backrun
+            and self.controls.event_backrun
+        ):
+            # Same-block pending submission: the race is won ~1 s after the
+            # target appears pending, long before any receipt exists. The
+            # mined-confirmation path below stays the fallback.
+            action, pending = "backrun", True
+        elif (
+            decision.get("status") == "prepared"
             and decision.get("frontrun")
             and self.controls.event_frontrun
         ):
             action = "entry"
-        if (
-            action is None
-            or f"{action}:{decision['hash']}" in self.store.data["attempts"]
-        ):
+        key = (
+            None
+            if action is None
+            else "backrun_pending:" + decision["hash"]
+            if pending
+            else f"{action}:{decision['hash']}"
+        )
+        if key is None or key in self.store.data["attempts"]:
             return
         try:
             self.entry_guard(action)
@@ -322,9 +345,13 @@ class Service:
         try:
             with rpc.purpose(rpc.QUOTES):
                 result = (
-                    self.executor.backrun(decision, action=action)
-                    if action in ("backrun", "arbitrage")
-                    else self.executor.enter(decision, self.engine.snapshot)
+                    self.executor.pending_cycle(decision, self.engine.snapshot)
+                    if pending
+                    else (
+                        self.executor.backrun(decision, action=action)
+                        if action in ("backrun", "arbitrage")
+                        else self.executor.enter(decision, self.engine.snapshot)
+                    )
                 )
         except (ValueError, ContractLogicError) as exc:
             # Control refusals and pre-send simulation reverts reject this
