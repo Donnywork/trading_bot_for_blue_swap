@@ -195,6 +195,54 @@ def test_pending_cycle_live_never_estimates_never_doubles_the_override(
     assert f.ex.store.data["attempts"] == {"backrun_pending:" + HASH: "not_sent"}
 
 
+def test_pending_cycle_sends_pending_tip_and_keeps_max_fee(pending_env, monkeypatch):
+    # Block-ordering fix (2026-11-21): the market bot's targets pay 0 gwei and
+    # builders sort by tip descending, so the configured 10 gwei tip placed
+    # the pending cycle at block 12178067 index 1 while the 0-gwei target sat
+    # at index 135 - a guaranteed pre-target revert. The pending submission
+    # must carry the pending tip (default 0) while the max fee stays at the
+    # decided ceiling; every other send path keeps the configured priority.
+    f = pending_env
+    f.ex.settings = replace(
+        f.ex.settings,
+        mode="live",
+        priority_wei=10_000_000_000,
+        pending_priority_wei=0,
+    )
+    sends = []
+
+    def send(*args, **kwargs):
+        sends.append(args[2])
+        raise bot_contract.NotSent("refused before broadcast")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["status"] == "not_sent"
+    assert sends[0]["maxPriorityFeePerGas"] == 0
+    assert sends[0]["maxFeePerGas"] == f.ex.settings.max_fee_wei
+    assert result["fee_decision"]["selected_priority_wei"] == 0
+    assert result["fee_decision"]["selected_max_fee_wei"] == f.ex.settings.max_fee_wei
+    assert result["fee_decision"]["pending_tip"] is True
+
+
+def test_pending_cycle_honors_configured_pending_tip(pending_env, monkeypatch):
+    f = pending_env
+    f.ex.settings = replace(
+        f.ex.settings, mode="live", pending_priority_wei=1_500_000_000
+    )
+    sends = []
+
+    def send(*args, **kwargs):
+        sends.append(args[2])
+        raise bot_contract.NotSent("refused before broadcast")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["status"] == "not_sent"
+    assert sends[0]["maxPriorityFeePerGas"] == 1_500_000_000
+    assert result["fee_decision"]["selected_priority_wei"] == 1_500_000_000
+
+
 def test_gas_override_skips_estimate_and_keeps_estimated_buffer(
     pending_env, monkeypatch
 ):
@@ -467,6 +515,21 @@ def test_pending_backrun_flag_parses_and_fails_closed():
         ).pending_backrun
     with pytest.raises(ValueError, match="EVENT_PENDING_BACKRUN"):
         EventSettings.from_env({"EVENT_PENDING_BACKRUN": "yes"})
+
+
+def test_pending_priority_fee_parses_and_validates():
+    # Default 0: join the target's zero-fee group and rely on arrival order.
+    assert EventSettings.from_env({}).pending_priority_wei == 0
+    env = {"EVENT_PENDING_PRIORITY_FEE_WEI": "3000000000"}
+    assert EventSettings.from_env(env).pending_priority_wei == 3_000_000_000
+    # Other send paths keep the configured priority fee untouched.
+    assert EventSettings.from_env(env).priority_wei == 2_000_000_000
+    with pytest.raises(ValueError, match="EVENT_PENDING_PRIORITY_FEE_WEI"):
+        EventSettings.from_env({"EVENT_PENDING_PRIORITY_FEE_WEI": "1.5"})
+    with pytest.raises(ValueError, match="EVENT_PENDING_PRIORITY_FEE_WEI"):
+        EventSettings.from_env({"EVENT_PENDING_PRIORITY_FEE_WEI": "-1"})
+    with pytest.raises(ValueError, match="pending priority fee exceeds"):
+        EventSettings.from_env({"EVENT_PENDING_PRIORITY_FEE_WEI": "50000000000"})
 
 
 def test_pending_submission_survives_head_advance(pending_env):

@@ -613,6 +613,22 @@ class Executor:
             fn.call({"from": self.operator})
             header = self.w3.eth.get_block("latest")
         decision = self.fees.decide(header, action)
+        if fee_header is not None:
+            # The pending cycle must sort INTO the target's fee group, never
+            # above it: builders order by tip descending and the market bot's
+            # targets pay 0 gwei, so any positive tip buys an EARLIER slot —
+            # and earlier than the target is a guaranteed pre-target revert
+            # (block 12178067: our 10 gwei cycle sat at index 1 while the
+            # 0-gwei target sat at index 135). Joining the group with the
+            # pending tip keeps arrival order — we broadcast ~0.5 s after the
+            # target — placing the cycle right behind it. This overrides any
+            # fee policy for this one send; the max fee stays at the decided
+            # ceiling so inclusion never depends on the tip.
+            decision = dict(
+                decision,
+                selected_priority_wei=s.pending_priority_wei,
+                pending_tip=True,
+            )
         self.attempt["fee_decision"] = row["fee_decision"] = decision
         if not decision["allowed"]:
             raise ConfigurationError("configured fee ceiling is too low")

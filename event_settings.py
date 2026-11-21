@@ -65,6 +65,7 @@ class EventSettings:
     max_gas: int = 1_500_000
     priority_wei: int = 2_000_000_000
     max_fee_wei: int = 20_000_000_000
+    pending_priority_wei: int = 0
     fee_policy: str = "fixed"
     fee_baseline_wei: int = 20_000_000_000
     fee_network_bps: int = 12_500
@@ -166,6 +167,11 @@ class EventSettings:
         max_fee = bounded(env, "EVENT_MAX_FEE_WEI", 20_000_000_000, 1, 200_000_000_000)
         if priority > max_fee:
             raise ConfigurationError("priority fee exceeds maximum fee")
+        pending_tip = bounded(
+            env, "EVENT_PENDING_PRIORITY_FEE_WEI", 0, 0, 100_000_000_000
+        )
+        if pending_tip > max_fee:
+            raise ConfigurationError("pending priority fee exceeds maximum fee")
         policy = env.get("EVENT_FEE_POLICY", "fixed")
         if policy not in ("fixed", "competitive"):
             raise ConfigurationError("EVENT_FEE_POLICY must be fixed or competitive")
@@ -197,6 +203,7 @@ class EventSettings:
             max_gas=bounded(env, "EVENT_MAX_GAS", 1_500_000, 100_000, 5_000_000),
             priority_wei=priority,
             max_fee_wei=max_fee,
+            pending_priority_wei=pending_tip,
             fee_policy=policy,
             fee_baseline_wei=baseline,
             fee_network_bps=bounded(
