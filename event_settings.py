@@ -65,7 +65,7 @@ class EventSettings:
     max_gas: int = 1_500_000
     priority_wei: int = 2_000_000_000
     max_fee_wei: int = 20_000_000_000
-    pending_priority_wei: int = 0
+    pending_priority_wei: int = 2
     fee_policy: str = "fixed"
     fee_baseline_wei: int = 20_000_000_000
     fee_network_bps: int = 12_500
@@ -167,8 +167,14 @@ class EventSettings:
         max_fee = bounded(env, "EVENT_MAX_FEE_WEI", 20_000_000_000, 1, 200_000_000_000)
         if priority > max_fee:
             raise ConfigurationError("priority fee exceeds maximum fee")
+        # Default 2 wei: the market bot's targets carry tip=2 wei / maxFee~32
+        # wei (measured 2026-11-21), and matching that fee group is what keeps
+        # the cycle in the target's block. Tip 0 proved too low - zero-tip
+        # transactions are the first pushed out of a filling block, so both
+        # tip-0 cycles landed a block late in the zero tail (blocks 12180474
+        # idx 138 and 12181496 idx 86) behind competitor-1's 15 gwei sweep.
         pending_tip = bounded(
-            env, "EVENT_PENDING_PRIORITY_FEE_WEI", 0, 0, 100_000_000_000
+            env, "EVENT_PENDING_PRIORITY_FEE_WEI", 2, 0, 100_000_000_000
         )
         if pending_tip > max_fee:
             raise ConfigurationError("pending priority fee exceeds maximum fee")

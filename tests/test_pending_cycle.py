@@ -518,10 +518,20 @@ def test_pending_backrun_flag_parses_and_fails_closed():
 
 
 def test_pending_priority_fee_parses_and_validates():
-    # Default 0: join the target's zero-fee group and rely on arrival order.
-    assert EventSettings.from_env({}).pending_priority_wei == 0
+    # Default 2 wei: match the market bot's observed fee group (tip=2 wei) so
+    # the cycle stays in the target's block; tip 0 landed in the zero tail a
+    # block late (2026-11-21: blocks 12180474/12181496 reverted behind the
+    # competitor's next-block sweep).
+    assert EventSettings.from_env({}).pending_priority_wei == 2
     env = {"EVENT_PENDING_PRIORITY_FEE_WEI": "3000000000"}
     assert EventSettings.from_env(env).pending_priority_wei == 3_000_000_000
+    # An explicit 0 stays a valid opt-back-out to the zero-tail group.
+    assert (
+        EventSettings.from_env(
+            {"EVENT_PENDING_PRIORITY_FEE_WEI": "0"}
+        ).pending_priority_wei
+        == 0
+    )
     # Other send paths keep the configured priority fee untouched.
     assert EventSettings.from_env(env).priority_wei == 2_000_000_000
     with pytest.raises(ValueError, match="EVENT_PENDING_PRIORITY_FEE_WEI"):

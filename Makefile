@@ -23,4 +23,7 @@ status:
 dashboard:
 	uv run python dashboard.py
 
+watchdog:
+	uv run python watchdog.py
+
 events: run

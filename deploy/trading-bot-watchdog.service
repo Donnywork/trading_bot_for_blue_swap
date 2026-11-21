@@ -1,0 +1,19 @@
+# Replace __USER__ and __PROJECT_DIR__; see docs/DEPLOY.md.
+# The watchdog only ALERTS on a halted/unhealthy runtime - it never restarts
+# or reconciles anything (uncertain-send halts require a human). Set a
+# webhook with: Environment=WATCHDOG_WEBHOOK_URL=https://...
+[Unit]
+Description=BlueSwap Phase 2 event watchdog (alerting only)
+After=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/.venv/bin/python watchdog.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
