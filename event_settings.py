@@ -59,6 +59,8 @@ class EventSettings:
     slippage_bps: int = 20
     move_bps: int = 100
     pending_backrun: bool = True
+    pending_sweep: bool = True
+    sweep_priority_wei: int = 16_000_000_000
     exit_seconds: int = 60
     cooldown: int = 10
     observer_seconds: int = 15
@@ -176,8 +178,13 @@ class EventSettings:
         pending_tip = bounded(
             env, "EVENT_PENDING_PRIORITY_FEE_WEI", 2, 0, 100_000_000_000
         )
-        if pending_tip > max_fee:
-            raise ConfigurationError("pending priority fee exceeds maximum fee")
+        # The sweep replicates competitor-1's next-block play: a tip high
+        # enough to top the block AFTER the target's when the same-block
+        # cycle misses it (they use 15 gwei and land index 0; 16 gwei with
+        # our faster broadcast wins the same-tip arrival tie).
+        sweep_tip = bounded(
+            env, "EVENT_SWEEP_PRIORITY_FEE_WEI", 16_000_000_000, 1, 100_000_000_000
+        )
         policy = env.get("EVENT_FEE_POLICY", "fixed")
         if policy not in ("fixed", "competitive"):
             raise ConfigurationError("EVENT_FEE_POLICY must be fixed or competitive")
@@ -194,6 +201,13 @@ class EventSettings:
             raise ConfigurationError(
                 "competitive fees require baseline <= tip cap <= max cap"
             )
+        # Tips are validated against the EFFECTIVE ceiling: max_fee under the
+        # fixed policy, the competitive max cap otherwise.
+        ceiling = max_fee if policy == "fixed" else fee_cap
+        if pending_tip > ceiling:
+            raise ConfigurationError("pending priority fee exceeds fee ceiling")
+        if sweep_tip > ceiling:
+            raise ConfigurationError("sweep priority fee exceeds fee ceiling")
         return cls(
             mode="simulate" if addresses[0] else "paper",
             live_enabled=env.get("DRY_RUN", "true").lower() == "false",
@@ -203,6 +217,8 @@ class EventSettings:
             slippage_bps=bounded(env, "EVENT_SLIPPAGE_BPS", 20, 0, 500),
             move_bps=bounded(env, "EVENT_MOVE_BPS", 100, 1, 500),
             pending_backrun=enabled(env, "EVENT_PENDING_BACKRUN", default=True),
+            pending_sweep=enabled(env, "EVENT_PENDING_SWEEP", default=True),
+            sweep_priority_wei=sweep_tip,
             exit_seconds=bounded(env, "EVENT_EXIT_SECONDS", 60, 5, 300),
             cooldown=bounded(env, "EVENT_COOLDOWN_SECONDS", 10, 1, 300),
             observer_seconds=bounded(env, "EVENT_OBSERVER_SECONDS", 15, 5, 600),

@@ -26,7 +26,11 @@ class EventStore:
         if mode != "live" and (self.directory / "execution_live.json").exists():
             try:
                 live = json.loads((self.directory / "execution_live.json").read_text())
-                if live["position"] is not None or live["intent"] is not None:
+                if (
+                    live["position"] is not None
+                    or live["intent"] is not None
+                    or live.get("intent_extra") is not None
+                ):
                     raise Halt(
                         "live event inventory/intent requires live reconciliation before changing modes"
                     )
@@ -60,7 +64,9 @@ class EventStore:
             or not isinstance(self.data["trades"], list)
         ):
             self.halt("event execution ledger identity/schema mismatch")
-        if self.data["intent"] is not None:
+        # The sweep slot postdates the first ledgers; absent means none.
+        self.data.setdefault("intent_extra", None)
+        if self.data["intent"] is not None or self.data["intent_extra"] is not None:
             self.halt(
                 "unfinished execution intent; reconcile transaction before restart"
             )
@@ -223,6 +229,28 @@ class EventStore:
             kept = dict(list(self.data["attempts"].items())[-1000:])
             self.data["attempts"] = kept
         self.save()  # durable BEFORE any possible broadcast
+
+    def begin_extra(self, key, details):
+        # The next-block sweep shares a race window with the primary attempt:
+        # its own durable slot, saved BEFORE its broadcast, settled
+        # independently so either outcome never leaves the other unrecorded.
+        if key in self.data["attempts"] or self.data["intent_extra"] is not None:
+            raise ValueError("sweep execution already attempted")
+        self.data["intent_extra"] = {"key": key, "at": self.clock(), **details}
+        self.data["attempts"][key] = "inflight"
+        if len(self.data["attempts"]) > 1000:
+            kept = dict(list(self.data["attempts"].items())[-1000:])
+            self.data["attempts"] = kept
+        self.save()  # durable BEFORE any possible broadcast
+
+    def finish_extra(self, key, status, row):
+        # Never touches `position` or the primary intent: the primary
+        # attempt's finish owns the position lifecycle.
+        self.data["attempts"][key] = status
+        self.data["intent_extra"] = None
+        self.data["trades"].append({"at": self.clock(), "status": status, **row})
+        self.data["trades"] = self.data["trades"][-200:]
+        self.save()
 
     def finish(self, key, status, position, row):
         self.data["attempts"][key] = status

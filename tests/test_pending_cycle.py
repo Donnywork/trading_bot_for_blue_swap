@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from test_event_service import HASH, A, candidate, fake_executor, service
+from web3.exceptions import TimeExhausted
 
 import arbitrage
 import bot_contract
@@ -21,6 +22,11 @@ from event_settings import EventSettings
 from runtime import ConfigurationError
 
 ROOT = Path(__file__).parents[1]
+
+
+class FakeHash(bytes):
+    def to_0x_hex(self):
+        return "0x" + bytes(self).hex()
 
 
 @pytest.fixture
@@ -65,9 +71,21 @@ def pending_env(tmp_path, snapshot):
             calls.append(("transaction",))
             return {"blockNumber": None}
 
+        def send_raw_transaction(self, raw):
+            calls.append(("send_raw",))
+            raws.append(raw)
+            return FakeHash(bytes.fromhex("cd" * 32))
+
+        def wait_for_transaction_receipt(self, tx_hash, timeout=None):
+            calls.append(("wait_receipt", timeout))
+            if not receipts:
+                raise TimeExhausted
+            return receipts.pop(0)
+
     ex.w3.eth = Eth()
     ex.fees = event_fees.FeeCache(ex.w3, ex.settings, ex.clock)
     built = {}
+    raws, receipts = [], []
 
     class Execute:
         def __init__(self, args):
@@ -174,7 +192,7 @@ def test_pending_cycle_live_never_estimates_never_doubles_the_override(
     pending_env, monkeypatch
 ):
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=False)
     f.decision["backrun"] = {"buy_fee": 10000, "sell_fee": 500, "input_f564": 100}
     sends = []
 
@@ -206,6 +224,7 @@ def test_pending_cycle_sends_pending_tip_and_keeps_max_fee(pending_env, monkeypa
     f.ex.settings = replace(
         f.ex.settings,
         mode="live",
+        pending_sweep=False,
         priority_wei=10_000_000_000,
         pending_priority_wei=0,
     )
@@ -228,7 +247,10 @@ def test_pending_cycle_sends_pending_tip_and_keeps_max_fee(pending_env, monkeypa
 def test_pending_cycle_honors_configured_pending_tip(pending_env, monkeypatch):
     f = pending_env
     f.ex.settings = replace(
-        f.ex.settings, mode="live", pending_priority_wei=1_500_000_000
+        f.ex.settings,
+        mode="live",
+        pending_sweep=False,
+        pending_priority_wei=1_500_000_000,
     )
     sends = []
 
@@ -241,6 +263,165 @@ def test_pending_cycle_honors_configured_pending_tip(pending_env, monkeypatch):
     assert result["status"] == "not_sent"
     assert sends[0]["maxPriorityFeePerGas"] == 1_500_000_000
     assert result["fee_decision"]["selected_priority_wei"] == 1_500_000_000
+
+
+def test_dual_submission_sends_sweep_then_same_block(pending_env, monkeypatch):
+    # Competitor replication: nonce N carries the 16 gwei next-block sweep
+    # (fired first, raw), nonce N+1 carries the same-block cycle through the
+    # normal perform path. Both attempt keys settle; the primary keeps the
+    # pending tip and its own nonce.
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")  # sweep defaults on
+    f.ex.account = SimpleNamespace(
+        address=f.ex.operator,
+        sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
+    )
+    primary = {}
+
+    def send(*args, **kwargs):
+        primary.update(args[2])
+        raise bot_contract.NotSent("refused before broadcast")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    f.receipts.append(
+        {
+            "status": 0,
+            "blockNumber": 8,
+            "blockHash": bytes.fromhex("ef" * 32),
+            "transactionHash": bytes.fromhex("cd" * 32),
+            "gasUsed": 700_000,
+            "effectiveGasPrice": 1,
+            "transactionIndex": 4,
+        }
+    )
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["status"] == "not_sent"
+    assert f.raws == [b"sweep"]  # exactly one raw sweep broadcast
+    assert primary["nonce"] == 2  # get_transaction_count returned 1; primary takes N+1
+    assert primary["maxPriorityFeePerGas"] == f.ex.settings.pending_priority_wei
+    attempts = f.ex.store.data["attempts"]
+    assert attempts["backrun_pending:" + HASH] == "not_sent"
+    assert attempts["backrun_sweep:" + HASH] == "reverted"
+    assert f.ex.store.data["intent"] is None
+    assert f.ex.store.data["intent_extra"] is None
+    sweep_row = next(t for t in f.ex.store.data["trades"] if t.get("sweep"))
+    assert sweep_row["status"] == "reverted"
+    assert sweep_row["block"] == 8
+    assert sweep_row["reason"] == "next-block sweep"
+
+
+def test_dual_submission_confirmed_sweep_records_profit(pending_env, monkeypatch):
+    import event_execution
+
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.account = SimpleNamespace(
+        address=f.ex.operator,
+        sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
+    )
+
+    def send(*args, **kwargs):
+        raise bot_contract.NotSent("refused before broadcast")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    f.receipts.append(
+        {
+            "status": 1,
+            "blockNumber": 9,
+            "blockHash": bytes.fromhex("ee" * 32),
+            "transactionHash": bytes.fromhex("cd" * 32),
+            "gasUsed": 600_000,
+            "effectiveGasPrice": 2,
+            "transactionIndex": 0,
+        }
+    )
+    rung = sizes_near(f.ex.settings.quote_cap, 100 * A)[0][0]
+    sweep_received = rung + f.ex.settings.min_profit + 2 * A
+    monkeypatch.setattr(
+        event_execution, "received_from_receipt", lambda r, t, a: sweep_received
+    )
+    f.ex.pending_cycle(f.decision, f.pinned)
+    sweep_row = next(t for t in f.ex.store.data["trades"] if t.get("sweep"))
+    assert sweep_row["status"] == "confirmed"
+    assert sweep_row["received_raw"] == sweep_received
+    assert sweep_row["transaction_index"] == 0
+
+
+def test_sweep_unsettled_when_no_receipt_arrives(pending_env, monkeypatch):
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.account = SimpleNamespace(
+        address=f.ex.operator,
+        sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
+    )
+
+    def send(*args, **kwargs):
+        raise bot_contract.NotSent("refused before broadcast")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    # no receipt queued: the bounded wait exhausts and records "unsettled"
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["status"] == "not_sent"
+    assert f.ex.store.data["attempts"]["backrun_sweep:" + HASH] == "unsettled"
+    assert f.ex.store.data["intent_extra"] is None
+
+
+def test_dual_affordability_covers_two_cycles(pending_env, monkeypatch):
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.w3.eth.get_balance = lambda _: 1  # far below 2 * max_gas * ceiling
+    with pytest.raises(ValueError, match="two-cycle"):
+        f.ex.pending_cycle(f.decision, f.pinned)
+    assert "backrun_sweep:" + HASH not in f.ex.store.data["attempts"]
+    assert f.raws == []
+
+
+def test_sweep_uncertain_broadcast_halts(pending_env, monkeypatch):
+    from legacy_main import Halt
+
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.account = SimpleNamespace(
+        address=f.ex.operator,
+        sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
+    )
+    f.ex.w3.eth.send_raw_transaction = lambda raw: (_ for _ in ()).throw(
+        RuntimeError("transport died")
+    )
+    with pytest.raises(Halt):
+        f.ex.pending_cycle(f.decision, f.pinned)
+    # the durable sweep intent blocks any restart until reconciled
+    assert f.ex.store.data["intent_extra"]["key"] == "backrun_sweep:" + HASH
+    assert f.ex.store.data["attempts"]["backrun_sweep:" + HASH] == "inflight"
+
+
+def test_open_intent_extra_halts_reload(pending_env):
+    import event_store as store_module
+    from legacy_main import Halt
+
+    f = pending_env
+    f.ex.store.begin_extra("backrun_sweep:" + HASH, {"action": "backrun"})
+    with pytest.raises(Halt, match="unfinished execution intent"):
+        store_module.EventStore(
+            f.ex.store.directory,
+            f.ex.store.data["identity"],
+            "simulate",
+            clock=lambda: 100,
+        )
+
+
+def test_pending_sweep_settings_parse():
+    assert EventSettings.from_env({}).pending_sweep is True
+    assert EventSettings.from_env({}).sweep_priority_wei == 16_000_000_000
+    assert (
+        EventSettings.from_env({"EVENT_PENDING_SWEEP": "false"}).pending_sweep is False
+    )
+    tuned = EventSettings.from_env({"EVENT_SWEEP_PRIORITY_FEE_WEI": "17000000000"})
+    assert tuned.sweep_priority_wei == 17_000_000_000
+    with pytest.raises(ValueError, match="EVENT_SWEEP_PRIORITY_FEE_WEI"):
+        EventSettings.from_env({"EVENT_SWEEP_PRIORITY_FEE_WEI": "0"})
+    with pytest.raises(ValueError, match="sweep priority fee exceeds"):
+        EventSettings.from_env({"EVENT_SWEEP_PRIORITY_FEE_WEI": "50000000000"})
 
 
 def test_gas_override_skips_estimate_and_keeps_estimated_buffer(
@@ -322,7 +503,7 @@ def test_reverted_pending_cycle_records_gas_only_without_position(
     # Target replaced before inclusion: our cycle lands against different
     # state and reverts. The existing revert accounting keeps gas only.
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=False)
     receipt = {
         "blockNumber": 7,
         "blockHash": bytes.fromhex("ab" * 32),

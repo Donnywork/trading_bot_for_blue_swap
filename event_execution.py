@@ -3,7 +3,7 @@
 import time
 
 from web3 import Web3
-from web3.exceptions import Web3Exception
+from web3.exceptions import TimeExhausted, Web3Exception
 
 import arbitrage
 import bot_contract
@@ -14,9 +14,9 @@ import event_submission
 import frontrun
 import rpc_metrics as rpc
 from event_snapshot import hexstr
-from legacy_main import received_from_receipt
+from legacy_main import Halt, received_from_receipt
 from phase2_contract import load_abi
-from runtime import ConfigurationError
+from runtime import ConfigurationError, error_summary
 
 
 def sizes(cap):
@@ -364,18 +364,143 @@ class Executor:
             buy_limit,
             sell_limit,
         )
-        return self.perform(
-            "backrun_pending:" + candidate["hash"],
-            self.bot.functions.execute(args),
-            "backrun",
-            amount,
-            minimum,
-            candidate,
-            timing=timing,
-            cycle_deadline=deadline,
-            gas_override=self.settings.max_gas,
-            fee_header=header,
+        fn = self.bot.functions.execute(args)
+        sweep = self.prepare_sweep(candidate, header, fn, timing, amount, minimum)
+        try:
+            result = self.perform(
+                "backrun_pending:" + candidate["hash"],
+                fn,
+                "backrun",
+                amount,
+                minimum,
+                candidate,
+                timing=timing,
+                cycle_deadline=deadline,
+                gas_override=self.settings.max_gas,
+                fee_header=header,
+                nonce_override=None if sweep is None else sweep["nonce"] + 1,
+            )
+        except Halt:
+            # Uncertainty about the primary send: both durable intents stay
+            # exactly as recorded for manual reconciliation. Never settle
+            # (or guess) around an unresolved broadcast.
+            raise
+        except Exception:
+            # A definite pre-send refusal of the primary still leaves the
+            # already-broadcast sweep in flight: settle it before the
+            # rejection propagates, so no window ends with an open intent.
+            if sweep is not None:
+                self.settle_sweep(sweep, wait=True)
+            raise
+        if sweep is not None:
+            # Nonce N mines before the primary's N+1: the primary's settled
+            # outcome implies the sweep has one too.
+            self.settle_sweep(sweep, wait=False)
+        return result
+
+    def prepare_sweep(self, candidate, header, fn, timing, amount, minimum):
+        # ------------------------------------
+        # Competitor-1's next-block sweep (operator-approved 2026-11-21;
+        # supersedes the earlier no-parallel-broadcast scope). Fired in the
+        # same ~0.5 s window as the same-block cycle: nonce N carries the
+        # sweep whose 16 gwei tip tops the block AFTER the target's whenever
+        # the same-block cycle misses it (they took +77.39, +40.46 and
+        # +28.49 exactly this way, index 0 of the next block); nonce N+1
+        # carries the 2-wei same-block cycle. Fee-descending order and
+        # account-nonce order agree (sweep tip > same-block tip > target
+        # tip), so a builder can include both; every losing combination
+        # reverts BOTH legs on the on-chain floor - gas only.
+        # ------------------------------------
+        s = self.settings
+        if not s.pending_sweep or s.mode != "live":
+            return None
+        self.entry_guard("backrun")
+        sweep_deadline = header["timestamp"] + 45  # must outlive the target's block
+        if sweep_deadline <= self.clock() + 13:
+            raise ConfigurationError("sweep deadline cannot cover inclusion")
+        if s.fee_ceiling < header["baseFeePerGas"] + s.sweep_priority_wei:
+            raise ConfigurationError("configured fee ceiling too low for sweep")
+        nonce = self.w3.eth.get_transaction_count(self.operator, "pending")
+        balance = self.w3.eth.get_balance(self.operator)
+        if balance < 2 * s.max_gas * s.fee_ceiling:
+            raise ConfigurationError("operator ETH below two-cycle maximum cost")
+        tx = fn.build_transaction(
+            {
+                "from": self.operator,
+                "chainId": 11155111,
+                "gas": s.max_gas,
+                "nonce": nonce,
+                "maxPriorityFeePerGas": s.sweep_priority_wei,
+                "maxFeePerGas": s.fee_ceiling,
+            }
         )
+        row = {
+            "action": "backrun",
+            "target": candidate["hash"],
+            "amount_raw": amount,
+            "minimum_raw": minimum,
+            "reason": "next-block sweep",
+            "estimated_gas": None,
+            "gas_limit": s.max_gas,
+            "snapshot_block": candidate["snapshot_block"],
+            "stage": "sweep_submission",
+            "quote_rungs": 0,
+            "sweep": True,
+        }
+        key = "backrun_sweep:" + candidate["hash"]
+        try:
+            signed = self.account.sign_transaction(tx)
+            timing.mark("sweep_broadcast_start")
+        except (OSError, Web3Exception, ValueError, TypeError) as exc:
+            # Nothing was broadcast: refuse the sweep only, the same-block
+            # cycle still races.
+            self.attempt["sweep_error"] = error_summary(exc)
+            return None
+        self.store.begin_extra(key, row)  # durable BEFORE the broadcast
+        try:
+            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+            timing.mark("sweep_broadcast_return")
+        except Exception:  # noqa: BLE001 — even 'already known' may have landed
+            self.halt_uncertain()
+        return {
+            "key": key,
+            "row": row,
+            "hash": tx_hash.to_0x_hex(),
+            "nonce": nonce,
+        }
+
+    def settle_sweep(self, sweep, wait):
+        # Classify the sweep's outcome once its receipt exists. A bounded
+        # wait covers both the primary's definite pre-send refusal (nonce
+        # N+1 unused, so the sweep may still be in the mempool) and the
+        # rare missing-receipt read; exhausting it records the terminal
+        # "unsettled" status for manual reconciliation - never a silent
+        # guess, never a retry. Transport failures propagate as ordinary
+        # read errors and leave the durable intent for reconciliation.
+        try:
+            receipt = self.w3.eth.wait_for_transaction_receipt(
+                Web3.to_bytes(hexstr=sweep["hash"]), timeout=60 if wait else 10
+            )
+        except TimeExhausted:
+            self.store.finish_extra(sweep["key"], "unsettled", sweep["row"])
+            return
+        row = sweep["row"] | {
+            "tx_hash": sweep["hash"],
+            "block": receipt["blockNumber"],
+            "block_hash": hexstr(receipt["blockHash"]),
+            "gas_wei": receipt["gasUsed"] * receipt["effectiveGasPrice"],
+            "transaction_index": receipt.get("transactionIndex"),
+        }
+        if receipt["status"] != 1:
+            self.store.finish_extra(sweep["key"], "reverted", row)
+            return
+        received = received_from_receipt(receipt, market.QUOTE, self.bot.address)
+        if received < sweep["row"]["minimum_raw"]:
+            # Same protection as the primary path: a mined fill below the
+            # recorded floor leaves accounting uncertain - halt for a human.
+            self.store.halt("sweep receipt output below recorded minimum")
+        row["received_raw"] = received
+        self.store.finish_extra(sweep["key"], "confirmed", row)
 
     def quote_ladder(self, candidate, action=None):
         # Both cycle actions quote the bracket around the paper optimum first;
@@ -492,6 +617,7 @@ class Executor:
         cycle_deadline=None,
         gas_override=None,
         fee_header=None,
+        nonce_override=None,
     ):
         if key in self.store.data["attempts"]:
             raise ValueError("candidate already attempted")
@@ -503,6 +629,10 @@ class Executor:
             type(gas_override) is not int or gas_override <= 0
         ):
             raise ValueError("gas override must be a positive integer")
+        if nonce_override is not None and (
+            type(nonce_override) is not int or nonce_override < 0
+        ):
+            raise ValueError("nonce override must be a non-negative integer")
         if action in ("backrun", "arbitrage") and gas_override is None:
             self.attempt["stage"] = "gas_estimate"
         if gas_override is None:
@@ -580,10 +710,17 @@ class Executor:
         if s.mode not in ("simulate", "live"):
             raise ValueError("paper execution cannot send")
         tx = None
+        # The dual pending submission assigns consecutive nonces itself
+        # (sweep first); reading the pending nonce here would race our own
+        # in-flight sweep and produce a replacement, not a second cycle.
         nonce = (
-            self.w3.eth.get_transaction_count(self.operator, "pending")
-            if s.mode == "live"
-            else None
+            nonce_override
+            if nonce_override is not None
+            else (
+                self.w3.eth.get_transaction_count(self.operator, "pending")
+                if s.mode == "live"
+                else None
+            )
         )
         if action != "exit":
             if fee_header is not None:
