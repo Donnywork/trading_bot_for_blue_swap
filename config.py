@@ -192,13 +192,21 @@ class RpcAdapter(requests.adapters.HTTPAdapter):
         batch = isinstance(payload, list)
         calls = payload if batch else [payload]
         count = len(calls)
+        method = None if batch else calls[0].get("method")
         cost = sum(CU_COSTS.get(c.get("method", ""), DEFAULT_CU) for c in calls)
         # Diagnostic reads share the quota with execution. Lock only pacing;
         # a slow diagnostic HTTP response must never hold the execution thread.
+        # A raw send is exempt from the WAIT (2026-11-22): it is one request,
+        # a few per hour, and the entire point of the system — but the hot
+        # path's own batched reads reserve ~360 CU (at 250 CU/s), which used
+        # to park the broadcast behind a read reservation for ~300-400 ms
+        # (the 08:00 winner waited 319 ms between validation and broadcast).
+        # The send still counts and still reserves for whatever follows it.
+        urgent = method == "eth_sendRawTransaction"
         with self.pacing_lock:
             now = time.monotonic()
-            wait = self.next_at - now
-            if self.cu_budget and self.cu_next_at:
+            wait = 0.0 if urgent else self.next_at - now
+            if not urgent and self.cu_budget and self.cu_next_at:
                 # Every request reserves its compute units before it is sent, so a
                 # burst of heavy methods cannot pass the provider's CU/s ceiling.
                 wait = max(wait, self.cu_next_at - now)
@@ -210,13 +218,20 @@ class RpcAdapter(requests.adapters.HTTPAdapter):
             # flat 1 s post-batch rule both overcharged the 5-read pending
             # hot path (delaying the broadcast that follows it) and
             # undercharged 20-call depth batches relative to their quota.
-            self.next_at = self.last_at + self.interval * count
-            if self.cu_budget:
-                self.cu_next_at = self.last_at + cost / self.cu_budget
+            if urgent:
+                # Skipping the wait must not spend reservations the send
+                # never actually waited behind: only extend, never lower.
+                self.next_at = max(self.next_at, self.last_at + self.interval * count)
+                if self.cu_budget:
+                    self.cu_next_at = max(
+                        self.cu_next_at, self.last_at + cost / self.cu_budget
+                    )
+            else:
+                self.next_at = self.last_at + self.interval * count
+                if self.cu_budget:
+                    self.cu_next_at = self.last_at + cost / self.cu_budget
         if self.metrics is not None:
-            self.metrics.attempt(
-                count, method=None if batch else calls[0].get("method")
-            )
+            self.metrics.attempt(count, method=method)
         return super().send(request, **kwargs)
 
 

@@ -59,7 +59,7 @@ class EventSettings:
     slippage_bps: int = 20
     move_bps: int = 100
     pending_backrun: bool = True
-    pending_sweep: bool = True
+    pending_sweep: bool = False
     sweep_priority_wei: int = 16_000_000_000
     exit_seconds: int = 60
     cooldown: int = 10
@@ -217,7 +217,12 @@ class EventSettings:
             slippage_bps=bounded(env, "EVENT_SLIPPAGE_BPS", 20, 0, 500),
             move_bps=bounded(env, "EVENT_MOVE_BPS", 100, 1, 500),
             pending_backrun=enabled(env, "EVENT_PENDING_BACKRUN", default=True),
-            pending_sweep=enabled(env, "EVENT_PENDING_SWEEP", default=True),
+            # Default OFF since 2026-11-22: 0-for-4 live, ~19 mETH burned —
+            # every firing tip-sorted to index 0 BEFORE the target in the
+            # target's own block (the block always had room at our latency,
+            # so the next-block prize never materialized). Every capture all
+            # week came same-block-behind-target.
+            pending_sweep=enabled(env, "EVENT_PENDING_SWEEP", default=False),
             sweep_priority_wei=sweep_tip,
             exit_seconds=bounded(env, "EVENT_EXIT_SECONDS", 60, 5, 300),
             cooldown=bounded(env, "EVENT_COOLDOWN_SECONDS", 10, 1, 300),

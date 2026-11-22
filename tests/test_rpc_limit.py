@@ -225,6 +225,52 @@ def test_read_batch_serves_mixed_readonly_calls_in_one_request(monkeypatch):
         provider.read_batch([("eth_sendRawTransaction", ["0x00"])])
 
 
+def test_raw_sends_skip_the_pacing_wait_but_still_reserve(monkeypatch):
+    # 2026-11-22: the hot path's batched reads reserve ~90 CU (~360 ms at
+    # 250 CU/s), which parked the broadcast behind a READ reservation for
+    # ~320 ms (the 08:00 winner waited exactly there). A raw send is one
+    # rare, urgent request: it must never sleep, and it must never LOWER
+    # the reservations it jumped — the read after it still paces behind
+    # everything that came before.
+    sleeps = fake_clock(monkeypatch)
+
+    def send(self, req, **kwargs):
+        import json
+
+        payload = json.loads(req.body)
+        reply = requests.Response()
+        reply.status_code = 200
+        single = {"jsonrpc": "2.0", "id": 1, "result": "0x1"}
+        reply._content = json.dumps(
+            [single] * len(payload) if isinstance(payload, list) else single
+        ).encode()
+        return reply
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+    adapter = config.RpcAdapter(Decimal(20), None, Decimal(250))
+    heavy_batch = [
+        {"jsonrpc": "2.0", "id": i, "method": "eth_getBlockByNumber", "params": []}
+        for i in range(5)
+    ]
+    raw = {"jsonrpc": "2.0", "id": 1, "method": "eth_sendRawTransaction", "params": []}
+    follow = {"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []}
+    adapter.send(
+        requests.Request(
+            "POST", "http://rpc.test", data=json.dumps(heavy_batch)
+        ).prepare()
+    )
+    adapter.send(
+        requests.Request("POST", "http://rpc.test", data=json.dumps(raw)).prepare()
+    )
+    assert sleeps == []  # the send jumped the batch's reservation
+    adapter.send(
+        requests.Request("POST", "http://rpc.test", data=json.dumps(follow)).prepare()
+    )
+    # The follow read still waits out the batch's 100 CU (0.4 s at 250 CU/s);
+    # the send neither slept nor shortened anyone else's wait.
+    assert sleeps == pytest.approx([0.4], abs=1e-9)
+
+
 # ---------------------------------------------------------------- failover
 
 

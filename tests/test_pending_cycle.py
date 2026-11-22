@@ -233,7 +233,7 @@ def test_presend_refusal_cancels_the_sweep_too(pending_env):
     # must leave no open intent, no attempt key and nothing in flight —
     # previously the sweep was already broadcast and had to be settled.
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
     f.ex.account = SimpleNamespace(
         address=f.ex.operator,
         sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
@@ -251,7 +251,7 @@ def test_sweep_sign_failure_falls_back_to_plain_nonce(pending_env, monkeypatch):
     # The same-block cycle takes nonce N (not N+1) when the sweep could not
     # be signed: a parked N+1 would wait on a nonce that never fills.
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
 
     def boom(tx):
         raise TypeError("signer unavailable")
@@ -361,7 +361,7 @@ def test_dual_submission_sends_sweep_then_same_block(pending_env, monkeypatch):
     # normal perform path. Both attempt keys settle; the primary keeps the
     # pending tip and its own nonce.
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")  # sweep defaults on
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
     f.ex.account = SimpleNamespace(
         address=f.ex.operator,
         sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
@@ -404,7 +404,7 @@ def test_dual_submission_confirmed_sweep_records_profit(pending_env, monkeypatch
     import event_execution
 
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
     f.ex.account = SimpleNamespace(
         address=f.ex.operator,
         sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
@@ -439,7 +439,7 @@ def test_dual_submission_confirmed_sweep_records_profit(pending_env, monkeypatch
 
 def test_sweep_unsettled_when_no_receipt_arrives(pending_env, monkeypatch):
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
     f.ex.account = SimpleNamespace(
         address=f.ex.operator,
         sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
@@ -458,7 +458,7 @@ def test_sweep_unsettled_when_no_receipt_arrives(pending_env, monkeypatch):
 
 def test_dual_affordability_covers_two_cycles(pending_env, monkeypatch):
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
     f.ex.w3.eth.get_balance = lambda _: 1  # far below 2 * max_gas * ceiling
     with pytest.raises(ValueError, match="two-cycle"):
         f.ex.pending_cycle(f.decision, f.pinned)
@@ -470,7 +470,7 @@ def test_sweep_uncertain_broadcast_halts(pending_env, monkeypatch):
     from legacy_main import Halt
 
     f = pending_env
-    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.settings = replace(f.ex.settings, mode="live", pending_sweep=True)
     f.ex.account = SimpleNamespace(
         address=f.ex.operator,
         sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
@@ -501,8 +501,11 @@ def test_open_intent_extra_halts_reload(pending_env):
 
 
 def test_pending_sweep_settings_parse():
-    assert EventSettings.from_env({}).pending_sweep is True
-    assert EventSettings.from_env({}).sweep_priority_wei == 16_000_000_000
+    # Default OFF since 2026-11-22 (0-for-4 live: every firing landed index 0
+    # BEFORE the target in the target's own block — pure gas); explicit
+    # opt-in restores the dual submission.
+    assert EventSettings.from_env({}).pending_sweep is False
+    assert EventSettings.from_env({"EVENT_PENDING_SWEEP": "true"}).pending_sweep is True
     assert (
         EventSettings.from_env({"EVENT_PENDING_SWEEP": "false"}).pending_sweep is False
     )
