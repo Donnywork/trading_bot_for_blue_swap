@@ -83,6 +83,37 @@ def pending_env(tmp_path, snapshot):
             return receipts.pop(0)
 
     ex.w3.eth = Eth()
+
+    def read_batch(batch):
+        # One batched round trip servicing the five hot-path calls from the
+        # same fakes above, so per-method monkeypatches still apply and the
+        # individual ("chain"/"header"/...) tracking entries stay meaningful.
+        calls.append(("read_batch", tuple(method for method, _ in batch)))
+        out = []
+        for method, params in batch:
+            if method == "eth_chainId":
+                out.append(hex(ex.w3.eth.chain_id))
+            elif method == "eth_getBlockByNumber":
+                raw = ex.w3.eth.get_block(
+                    "latest" if params[0] == "latest" else int(params[0], 16)
+                )
+                out.append(
+                    {
+                        "number": hex(raw["number"]),
+                        "hash": "0x" + bytes(raw["hash"]).hex(),
+                        "timestamp": hex(raw["timestamp"]),
+                        "baseFeePerGas": hex(raw["baseFeePerGas"]),
+                    }
+                )
+            elif method == "eth_getBalance":
+                out.append(hex(ex.w3.eth.get_balance(params[0])))
+            elif method == "eth_getTransactionCount":
+                out.append(hex(ex.w3.eth.get_transaction_count(*params)))
+            else:
+                raise AssertionError(f"unexpected read-batch method {method}")
+        return out
+
+    ex.w3.provider = SimpleNamespace(read_batch=read_batch)
     ex.fees = event_fees.FeeCache(ex.w3, ex.settings, ex.clock)
     built = {}
     raws, receipts = [], []
@@ -181,11 +212,63 @@ def test_pending_cycle_submits_bracket_rung_with_snapshot_limits(pending_env):
     )
     assert f.ex.store.data["position"] is None
     assert f.ex.store.data["attempts"] == {"backrun_pending:" + HASH: "simulated"}
-    # Read budget: latest head + canonical pinned block (pending_header) +
-    # chain + balance. Simulate skips the operator nonce read; perform()
-    # reuses the pending header instead of re-reading freshness.
+    # Read budget: ONE batched round trip carries chain + latest head +
+    # canonical pinned block + balance + pending nonce (the batch rides the
+    # same fakes, so their tracking entries appear too); perform() reuses
+    # the pending header instead of re-reading freshness, and simulate
+    # still sends nothing.
     counts = Counter(row[0] for row in f.calls)
-    assert counts == {"chain": 1, "header": 2, "balance": 1}
+    assert counts == {
+        "read_batch": 1,
+        "chain": 1,
+        "header": 2,
+        "balance": 1,
+        "nonce": 1,
+    }
+
+
+def test_presend_refusal_cancels_the_sweep_too(pending_env):
+    # 2026-11-22 restructure: BOTH transactions validate before either is
+    # durable or broadcast. A same-block refusal (deadline too tight here)
+    # must leave no open intent, no attempt key and nothing in flight —
+    # previously the sweep was already broadcast and had to be settled.
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")
+    f.ex.account = SimpleNamespace(
+        address=f.ex.operator,
+        sign_transaction=lambda tx: SimpleNamespace(raw_transaction=b"sweep"),
+    )
+    f.ex.clock = lambda: 120  # freshness still passes (21s), deadline does not
+    with pytest.raises(ValueError, match="deadline"):
+        f.ex.pending_cycle(f.decision, f.pinned)
+    assert f.ex.store.data["attempts"] == {}
+    assert f.ex.store.data["intent"] is None
+    assert f.ex.store.data["intent_extra"] is None
+    assert f.raws == []
+
+
+def test_sweep_sign_failure_falls_back_to_plain_nonce(pending_env, monkeypatch):
+    # The same-block cycle takes nonce N (not N+1) when the sweep could not
+    # be signed: a parked N+1 would wait on a nonce that never fills.
+    f = pending_env
+    f.ex.settings = replace(f.ex.settings, mode="live")
+
+    def boom(tx):
+        raise TypeError("signer unavailable")
+
+    f.ex.account = SimpleNamespace(address=f.ex.operator, sign_transaction=boom)
+    primary = {}
+
+    def send(*args, **kwargs):
+        primary.update(args[2])
+        raise bot_contract.NotSent("refused before broadcast")
+
+    monkeypatch.setattr(bot_contract, "send_tx", send)
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["status"] == "not_sent"
+    assert primary["nonce"] == 1  # the batched pending nonce, unshifted
+    assert f.raws == []
+    assert "backrun_sweep:" + HASH not in f.ex.store.data["attempts"]
 
 
 def test_pending_cycle_live_never_estimates_never_doubles_the_override(
@@ -208,7 +291,14 @@ def test_pending_cycle_live_never_estimates_never_doubles_the_override(
     assert result["gas_limit"] == f.ex.settings.max_gas
     assert sends == [(1.0, f.ex.settings.max_gas)]
     counts = Counter(row[0] for row in f.calls)
-    assert counts == {"chain": 1, "header": 2, "balance": 1, "nonce": 1, "build": 1}
+    assert counts == {
+        "read_batch": 1,
+        "chain": 1,
+        "header": 2,
+        "balance": 1,
+        "nonce": 1,
+        "build": 1,
+    }
     assert f.ex.store.data["intent"] is None
     assert f.ex.store.data["attempts"] == {"backrun_pending:" + HASH: "not_sent"}
 
@@ -753,7 +843,13 @@ def test_pending_submission_survives_head_advance(pending_env):
     assert result["status"] == "simulated"
     assert f.built["args"][5] == 108 + 30
     counts = Counter(row[0] for row in f.calls)
-    assert counts == {"chain": 1, "header": 2, "balance": 1}
+    assert counts == {
+        "read_batch": 1,
+        "chain": 1,
+        "header": 2,
+        "balance": 1,
+        "nonce": 1,
+    }
 
 
 def test_pending_submission_rejects_head_beyond_window(pending_env):

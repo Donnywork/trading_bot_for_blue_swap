@@ -154,6 +154,77 @@ def test_batches_reserve_the_sum_of_their_compute_units(monkeypatch):
     assert sleeps == pytest.approx([260 / 250], abs=1e-9)
 
 
+def test_batches_reserve_their_call_count_not_a_flat_second(monkeypatch):
+    # Quota-fair batch pacing (2026-11-22): a 5-call batch reserves five
+    # intervals — the exact price of the same calls one by one — instead of
+    # the old flat 1 s, which delayed the pending hot path's own broadcast
+    # right after its batched reads.
+    sleeps = fake_clock(monkeypatch)
+
+    def send(self, req, **kwargs):
+        import json
+
+        payload = json.loads(req.body)
+        reply = requests.Response()
+        reply.status_code = 200
+        single = {"jsonrpc": "2.0", "id": 1, "result": "0x1"}
+        reply._content = json.dumps(
+            [single] * len(payload) if isinstance(payload, list) else single
+        ).encode()
+        return reply
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+    adapter = config.RpcAdapter(Decimal(20), None)  # interval 0.05 s
+    batch = [
+        {"jsonrpc": "2.0", "id": i, "method": "eth_blockNumber", "params": []}
+        for i in range(5)
+    ]
+    for payload in (batch, dict(batch[0])):
+        adapter.send(
+            requests.Request(
+                "POST", "http://rpc.test", data=json.dumps(payload)
+            ).prepare()
+        )
+    assert sleeps == pytest.approx([0.25], abs=1e-9)
+
+
+def test_read_batch_serves_mixed_readonly_calls_in_one_request(monkeypatch):
+    import json as jsonlib
+
+    posted = []
+
+    def send(self, req, **kwargs):
+        posted.append(jsonlib.loads(req.body))
+        reply = requests.Response()
+        reply.status_code = 200
+        results = ["0x1", hex(12183069), "0x2", hex(10**20), hex(7)]
+        items = [
+            {"jsonrpc": "2.0", "id": i, "result": r} for i, r in enumerate(results)
+        ]
+        reply._content = jsonlib.dumps(items).encode()
+        return reply
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+    provider = config.ThrottledProvider("http://rpc.test")
+    calls = [
+        ("eth_chainId", []),
+        ("eth_getBlockByNumber", ["latest", False]),
+        ("eth_getBlockByNumber", [hex(12183069), False]),
+        ("eth_getBalance", ["0x" + "11" * 20, "pending"]),
+        ("eth_getTransactionCount", ["0x" + "11" * 20, "pending"]),
+    ]
+    assert provider.read_batch(calls) == [
+        "0x1",
+        hex(12183069),
+        "0x2",
+        hex(10**20),
+        hex(7),
+    ]
+    assert len(posted) == 1 and len(posted[0]) == 5  # ONE round trip
+    with pytest.raises(ValueError, match="read-only"):
+        provider.read_batch([("eth_sendRawTransaction", ["0x00"])])
+
+
 # ---------------------------------------------------------------- failover
 
 

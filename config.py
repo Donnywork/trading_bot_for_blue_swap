@@ -128,6 +128,17 @@ CU_COSTS = {
 }
 DEFAULT_CU = 20  # unknown methods: a mid-weight read, never a free pass
 
+# read_batch's allowlist: every method a hot-path read may need, all pure
+# reads, so a batch can never smuggle a send past the send-path rules.
+READ_ONLY_METHODS = {
+    "eth_chainId",
+    "eth_blockNumber",
+    "eth_getBlockByNumber",
+    "eth_getBalance",
+    "eth_getTransactionCount",
+    "eth_getCode",
+}
+
 
 def cu_rate():
     # ------------------------------------
@@ -187,9 +198,6 @@ class RpcAdapter(requests.adapters.HTTPAdapter):
         with self.pacing_lock:
             now = time.monotonic()
             wait = self.next_at - now
-            if self.interval and count > 1 and self.next_at:
-                # Start a fresh quota window for a batch, including after scalar reads.
-                wait = max(wait, self.last_at + 1 - now)
             if self.cu_budget and self.cu_next_at:
                 # Every request reserves its compute units before it is sent, so a
                 # burst of heavy methods cannot pass the provider's CU/s ceiling.
@@ -197,9 +205,12 @@ class RpcAdapter(requests.adapters.HTTPAdapter):
             if wait > 0:
                 time.sleep(wait)
             self.last_at = time.monotonic()
-            self.next_at = self.last_at + (
-                1 if count > 1 and self.interval else self.interval
-            )
+            # A batch reserves its call count against the per-second cap —
+            # exactly the price of the same calls sent one by one. The old
+            # flat 1 s post-batch rule both overcharged the 5-read pending
+            # hot path (delaying the broadcast that follows it) and
+            # undercharged 20-call depth batches relative to their quota.
+            self.next_at = self.last_at + self.interval * count
             if self.cu_budget:
                 self.cu_next_at = self.last_at + cost / self.cu_budget
         if self.metrics is not None:
@@ -256,6 +267,41 @@ class ThrottledProvider(Web3.HTTPProvider):
             bytes.fromhex(results[i].removeprefix("0x")) for i in range(len(params))
         ]
 
+    def read_batch(self, calls):
+        # ------------------------------------
+        # Mixed READ-ONLY calls in ONE round trip. The pending hot path pays
+        # a full round trip per sequential read (five of them cost the race
+        # windows of 2026-11-21); this carries them together under the same
+        # pacing/metering as any other request. Same strict shape checks as
+        # depth_calls, but each item keeps its own method and None results
+        # are valid (a reorganized block lookup legitimately returns null).
+        # ------------------------------------
+        if not 1 <= len(calls) <= self.batch_size:
+            raise ValueError("read batch exceeds provider limit")
+        for method, _ in calls:
+            if method not in READ_ONLY_METHODS:
+                raise ValueError("read batch method is not read-only")
+        payload = [
+            {"jsonrpc": "2.0", "id": i, "method": method, "params": params}
+            for i, (method, params) in enumerate(calls)
+        ]
+        reply = json.loads(
+            self._request_session_manager.make_post_request(
+                self.endpoint_uri,
+                json.dumps(payload).encode(),
+                **self.get_request_kwargs(),
+            )
+        )
+        if not isinstance(reply, list) or len(reply) != len(calls):
+            raise ValueError("incomplete read batch response")
+        if any(
+            not isinstance(r, dict) or type(r.get("id")) is not int or "error" in r
+            for r in reply
+        ) or {r["id"] for r in reply} != set(range(len(calls))):
+            raise ValueError("invalid read batch response")
+        by_id = {r["id"]: r.get("result") for r in reply}
+        return [by_id[i] for i in range(len(calls))]
+
 
 class FailoverProvider(BaseProvider):
     # ------------------------------------
@@ -307,6 +353,11 @@ class FailoverProvider(BaseProvider):
         return self._request(
             "eth_call batch", lambda provider: provider.depth_calls(params)
         )
+
+    def read_batch(self, calls):
+        # One provider serves the whole batch (never split across providers);
+        # a transport/quota refusal cools it and retries the identical batch.
+        return self._request("read batch", lambda provider: provider.read_batch(calls))
 
     def _request(self, method, send):
         failures = 0

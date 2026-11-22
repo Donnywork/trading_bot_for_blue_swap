@@ -19,6 +19,23 @@ from phase2_contract import load_abi
 from runtime import ConfigurationError, error_summary
 
 
+def decode_block(raw):
+    # Normalize one eth_getBlockByNumber result from a read batch into the
+    # keys the pending path consumes. Raw JSON numbers arrive as hex
+    # strings; the hash stays 0x-hex (hexstr handles both shapes upstream).
+    if not isinstance(raw, dict) or not isinstance(raw.get("hash"), str):
+        raise TypeError("read batch block response invalid")
+    try:
+        return {
+            "number": int(raw["number"], 16),
+            "hash": raw["hash"].lower(),
+            "timestamp": int(raw["timestamp"], 16),
+            "baseFeePerGas": int(raw.get("baseFeePerGas") or "0x0", 16),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("read batch block response invalid") from exc
+
+
 def sizes(cap):
     # Calldata sizes are derived exclusively from integer configuration, never model floats.
     # Dense low rungs: thin pools peak at small sizes (observed ~3% of cap on Sepolia),
@@ -134,6 +151,37 @@ class Executor:
         if hexstr(pinned["hash"]) != block_hash:
             raise ConfigurationError("pending snapshot block was reorganized")
         return header
+
+    def pending_reads(self, block, block_hash, window=2):
+        # ------------------------------------
+        # pending_header()'s freshness/canonical rules plus the chain id,
+        # operator balance and pending nonce, ALL in one batched round trip.
+        # Five sequential reads cost five round trips (~350 ms measured
+        # 2026-11-21 — the same-block cycle broadcast at +0.72 s lost the
+        # window to rivals arriving ~0.5 s); the batch answers in one. The
+        # chain id comes from the same provider that will broadcast, so a
+        # mid-flight failover only ever lands on another Sepolia endpoint.
+        # ------------------------------------
+        replies = self.w3.provider.read_batch(
+            [
+                ("eth_chainId", []),
+                ("eth_getBlockByNumber", ["latest", False]),
+                ("eth_getBlockByNumber", [hex(block), False]),
+                ("eth_getBalance", [self.operator, "pending"]),
+                ("eth_getTransactionCount", [self.operator, "pending"]),
+            ]
+        )
+        chain, latest, pinned, balance, nonce = replies
+        if int(chain, 16) != 11155111:
+            raise ValueError("execution requires Sepolia")
+        header = decode_block(latest)
+        if not 0 <= self.clock() - header["timestamp"] <= 30:
+            raise ConfigurationError("pending submission head is not fresh")
+        if not 0 <= header["number"] - block <= window:
+            raise ConfigurationError("pending snapshot outside the submission window")
+        if pinned is None or decode_block(pinned)["hash"] != block_hash.lower():
+            raise ConfigurationError("pending snapshot block was reorganized")
+        return header, int(balance, 16), int(nonce, 16)
 
     def start_attempt(self, candidate, action):
         timing = event_submission.Timing(
@@ -324,7 +372,10 @@ class Executor:
         )
         # The head normally advances while the target sits pending: use the
         # bounded-window freshness check, not strict pinned==latest equality.
-        header = self.pending_header(
+        # ONE batched round trip also carries the chain id, operator balance
+        # and pending nonce for both sends (2026-11-22: five sequential reads
+        # pushed the broadcasts to +0.45 s/+0.72 s and lost every race).
+        header, balance, nonce = self.pending_reads(
             candidate["snapshot_block"], candidate["snapshot_hash"]
         )
         if {plan["buy_fee"], plan["sell_fee"]} != set(market.POOLS) or {
@@ -365,20 +416,52 @@ class Executor:
             sell_limit,
         )
         fn = self.bot.functions.execute(args)
-        sweep = self.prepare_sweep(candidate, header, fn, timing, amount, minimum)
+        sweep = self.prepare_sweep(
+            candidate, header, fn, timing, amount, minimum, nonce, balance
+        )
+        # Validate the same-block cycle with EVERY guard before either
+        # broadcast: a refusal here cancels both (nothing in flight), and
+        # the two raw sends then leave back-to-back instead of straddling
+        # a re-validation pass.
+        prepared = self.prepare(
+            "backrun_pending:" + candidate["hash"],
+            fn,
+            "backrun",
+            amount,
+            minimum,
+            candidate,
+            timing=timing,
+            cycle_deadline=deadline,
+            gas_override=self.settings.max_gas,
+            fee_header=header,
+            nonce_override=nonce + (1 if sweep is not None else 0),
+            prefetched={"chain": 11155111, "balance": balance, "nonce": nonce},
+        )
+        if isinstance(prepared, dict):
+            return prepared  # simulated
+        tx, row, position, decision, _ = prepared
+        if sweep is not None:
+            # Both transactions validated: record the sweep's durable intent
+            # immediately before ITS broadcast (dispatch does the same for
+            # the same-block cycle).
+            self.store.begin_extra(sweep["key"], sweep["row"])
+            try:
+                timing.mark("sweep_broadcast_start")
+                tx_hash = self.w3.eth.send_raw_transaction(sweep["signed"])
+                timing.mark("sweep_broadcast_return")
+            except Exception:  # noqa: BLE001 — even 'already known' may have landed
+                self.halt_uncertain()
+            sweep["hash"] = tx_hash.to_0x_hex()
         try:
-            result = self.perform(
+            result = self.dispatch(
                 "backrun_pending:" + candidate["hash"],
-                fn,
-                "backrun",
-                amount,
-                minimum,
+                row,
+                position,
+                tx,
                 candidate,
+                decision,
                 timing=timing,
-                cycle_deadline=deadline,
                 gas_override=self.settings.max_gas,
-                fee_header=header,
-                nonce_override=None if sweep is None else sweep["nonce"] + 1,
             )
         except Halt:
             # Uncertainty about the primary send: both durable intents stay
@@ -386,9 +469,11 @@ class Executor:
             # (or guess) around an unresolved broadcast.
             raise
         except Exception:
-            # A definite pre-send refusal of the primary still leaves the
-            # already-broadcast sweep in flight: settle it before the
-            # rejection propagates, so no window ends with an open intent.
+            # The sweep is in flight while the primary definitely failed
+            # after its durable intent: settle the sweep before the refusal
+            # propagates, so no window ends with an open intent. (A pre-send
+            # refusal happens BEFORE the sweep broadcasts now — nothing to
+            # settle in that case.)
             if sweep is not None:
                 self.settle_sweep(sweep, wait=True)
             raise
@@ -398,18 +483,25 @@ class Executor:
             self.settle_sweep(sweep, wait=False)
         return result
 
-    def prepare_sweep(self, candidate, header, fn, timing, amount, minimum):
+    def prepare_sweep(
+        self, candidate, header, fn, timing, amount, minimum, nonce, balance
+    ):
         # ------------------------------------
         # Competitor-1's next-block sweep (operator-approved 2026-11-21;
-        # supersedes the earlier no-parallel-broadcast scope). Fired in the
-        # same ~0.5 s window as the same-block cycle: nonce N carries the
-        # sweep whose 16 gwei tip tops the block AFTER the target's whenever
-        # the same-block cycle misses it (they took +77.39, +40.46 and
-        # +28.49 exactly this way, index 0 of the next block); nonce N+1
-        # carries the 2-wei same-block cycle. Fee-descending order and
-        # account-nonce order agree (sweep tip > same-block tip > target
-        # tip), so a builder can include both; every losing combination
-        # reverts BOTH legs on the on-chain floor - gas only.
+        # supersedes the earlier no-parallel-broadcast scope). Built and
+        # SIGNED in the same ~0.5 s window as the same-block cycle, but
+        # PURE: no store write, no broadcast. pending_cycle validates BOTH
+        # transactions first (2026-11-22) and only then records the durable
+        # intents and fires the two raw sends back-to-back — a pre-send
+        # refusal of either cancels both, leaving nothing in flight and
+        # nothing open to reconcile. Nonce N carries the sweep whose 16 gwei
+        # tip tops the block AFTER the target's whenever the same-block
+        # cycle misses it (they took +77.39, +40.46 and +28.49 exactly this
+        # way, index 0 of the next block); nonce N+1 carries the 2-wei
+        # same-block cycle. Fee-descending order and account-nonce order
+        # agree (sweep tip > same-block tip > target tip), so a builder
+        # can include both; every losing combination reverts BOTH legs on
+        # the on-chain floor - gas only.
         # ------------------------------------
         s = self.settings
         if not s.pending_sweep or s.mode != "live":
@@ -420,8 +512,6 @@ class Executor:
             raise ConfigurationError("sweep deadline cannot cover inclusion")
         if s.fee_ceiling < header["baseFeePerGas"] + s.sweep_priority_wei:
             raise ConfigurationError("configured fee ceiling too low for sweep")
-        nonce = self.w3.eth.get_transaction_count(self.operator, "pending")
-        balance = self.w3.eth.get_balance(self.operator)
         if balance < 2 * s.max_gas * s.fee_ceiling:
             raise ConfigurationError("operator ETH below two-cycle maximum cost")
         tx = fn.build_transaction(
@@ -450,22 +540,16 @@ class Executor:
         key = "backrun_sweep:" + candidate["hash"]
         try:
             signed = self.account.sign_transaction(tx)
-            timing.mark("sweep_broadcast_start")
+            timing.mark("sweep_signed")
         except (OSError, Web3Exception, ValueError, TypeError) as exc:
             # Nothing was broadcast: refuse the sweep only, the same-block
-            # cycle still races.
+            # cycle still races (with this nonce, not nonce+1).
             self.attempt["sweep_error"] = error_summary(exc)
             return None
-        self.store.begin_extra(key, row)  # durable BEFORE the broadcast
-        try:
-            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-            timing.mark("sweep_broadcast_return")
-        except Exception:  # noqa: BLE001 — even 'already known' may have landed
-            self.halt_uncertain()
         return {
             "key": key,
             "row": row,
-            "hash": tx_hash.to_0x_hex(),
+            "signed": signed.raw_transaction,
             "nonce": nonce,
         }
 
@@ -618,12 +702,70 @@ class Executor:
         gas_override=None,
         fee_header=None,
         nonce_override=None,
+        prefetched=None,
+    ):
+        # ------------------------------------
+        # The shared send path: every guard in prepare(), then the durable
+        # intent and broadcast in dispatch(). Split (2026-11-22) so the
+        # pending dual submission can validate BOTH transactions before
+        # either broadcasts — the same-block cycle used to leave ~250 ms of
+        # re-validation between the sweep's broadcast and its own, arriving
+        # at +0.72 s in races decided by ~0.2 s.
+        # ------------------------------------
+        prepared = self.prepare(
+            key,
+            fn,
+            action,
+            amount,
+            minimum,
+            candidate,
+            timing=timing,
+            cycle_deadline=cycle_deadline,
+            gas_override=gas_override,
+            fee_header=fee_header,
+            nonce_override=nonce_override,
+            prefetched=prefetched,
+        )
+        if isinstance(prepared, dict):
+            return prepared  # the simulate path finished inside prepare
+        tx, row, position, decision, timing = prepared
+        return self.dispatch(
+            key,
+            row,
+            position,
+            tx,
+            candidate,
+            decision,
+            timing=timing,
+            gas_override=gas_override,
+        )
+
+    def prepare(
+        self,
+        key,
+        fn,
+        action,
+        amount,
+        minimum,
+        candidate,
+        *,
+        timing=None,
+        cycle_deadline=None,
+        gas_override=None,
+        fee_header=None,
+        nonce_override=None,
+        prefetched=None,
     ):
         if key in self.store.data["attempts"]:
             raise ValueError("candidate already attempted")
         s = self.settings
         timing = timing or self.start_attempt(candidate, action)
-        if self.w3.eth.chain_id != 11155111:
+        # Prefetched values (pending path) come from the same batched round
+        # trip as the freshness header; every other caller re-reads live.
+        if prefetched is not None:
+            if prefetched["chain"] != 11155111:
+                raise ValueError("execution requires Sepolia")
+        elif self.w3.eth.chain_id != 11155111:
             raise ValueError("execution requires Sepolia")
         if gas_override is not None and (
             type(gas_override) is not int or gas_override <= 0
@@ -654,7 +796,11 @@ class Executor:
         self.attempt.update(estimated_gas=estimated, gas_limit=buffered)
         if buffered > s.max_gas:
             raise ConfigurationError("buffered gas exceeds event limit")
-        balance = self.w3.eth.get_balance(self.operator)
+        balance = (
+            prefetched["balance"]
+            if prefetched is not None
+            else self.w3.eth.get_balance(self.operator)
+        )
         row = {
             "action": action,
             "target": candidate["hash"],
@@ -713,15 +859,16 @@ class Executor:
         # The dual pending submission assigns consecutive nonces itself
         # (sweep first); reading the pending nonce here would race our own
         # in-flight sweep and produce a replacement, not a second cycle.
-        nonce = (
-            nonce_override
-            if nonce_override is not None
-            else (
-                self.w3.eth.get_transaction_count(self.operator, "pending")
-                if s.mode == "live"
-                else None
+        if nonce_override is not None:
+            nonce = nonce_override
+        elif s.mode == "live":
+            nonce = (
+                prefetched["nonce"]
+                if prefetched is not None
+                else self.w3.eth.get_transaction_count(self.operator, "pending")
             )
-        )
+        else:
+            nonce = None
         if action != "exit":
             if fee_header is not None:
                 # Pending submission: pending_header() validated freshness
@@ -796,6 +943,18 @@ class Executor:
             self.store.begin(key, row)
             self.store.finish(key, "simulated", position, row)
             return row | {"status": "simulated"}
+        return tx, row, position, decision, timing
+
+    def dispatch(
+        self, key, row, position, tx, candidate, decision, *, timing, gas_override=None
+    ):
+        # ------------------------------------
+        # Durable intent, broadcast, receipt classification: perform()'s
+        # original tail, unchanged. store.begin lands here so the intent is
+        # recorded immediately before ITS OWN broadcast — never before some
+        # other transaction's.
+        # ------------------------------------
+        action, amount, minimum = row["action"], row["amount_raw"], row["minimum_raw"]
         self.store.begin(key, row)
         try:
             with rpc.purpose(rpc.LIVE):
