@@ -180,7 +180,9 @@ class EventSettings:
         # the 07:30 window exactly this way, idx 135 directly behind the
         # target. Tip 0 remains the old failure (pushed into the zero
         # tail of filling blocks, a block late).
-        pending_tip = bounded(env, "EVENT_PENDING_PRIORITY_FEE_WEI", 1, 0, 100_000_000_000)
+        pending_tip = bounded(
+            env, "EVENT_PENDING_PRIORITY_FEE_WEI", 1, 0, 100_000_000_000
+        )
         # The sweep replicates competitor-1's next-block play: a tip high
         # enough to top the block AFTER the target's when the same-block
         # cycle misses it (they use 15 gwei and land index 0; 16 gwei with
