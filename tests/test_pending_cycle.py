@@ -792,11 +792,13 @@ def test_pending_backrun_flag_parses_and_fails_closed():
 
 
 def test_pending_priority_fee_parses_and_validates():
-    # Default 2 wei: match the market bot's observed fee group (tip=2 wei) so
-    # the cycle stays in the target's block; tip 0 landed in the zero tail a
-    # block late (2026-11-21: blocks 12180474/12181496 reverted behind the
-    # competitor's next-block sweep).
-    assert EventSettings.from_env({}).pending_priority_wei == 2
+    # Default 1 wei, one BELOW the target's tip=2 group (2026-11-23): at
+    # 53-85 ms broadcasts a matching tip landed the cycle BEFORE the target
+    # itself (block 12193519 idx 210 vs the target's 212 - pre-target
+    # revert), while competitor-2 won the 07:30 window with tip 1 directly
+    # behind the target. A tip below the group can never sort pre-target;
+    # tip 0 stays the old zero-tail failure.
+    assert EventSettings.from_env({}).pending_priority_wei == 1
     env = {"EVENT_PENDING_PRIORITY_FEE_WEI": "3000000000"}
     assert EventSettings.from_env(env).pending_priority_wei == 3_000_000_000
     # An explicit 0 stays a valid opt-back-out to the zero-tail group.
