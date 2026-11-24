@@ -26,6 +26,8 @@ At block 12,203,699 the pool held 195,633.94 f564 and 186.0938 fETH, about 381,7
 | Down 5% / up 5% | 42.79 fETH / 42,188 f564 |
 | Down 25% / up 33% | 145.24 fETH / 139,767 f564 |
 
+Run `python research/2026-11-24-phase3/depth.py` to reproduce the table offline. Supply `logs/phase3/state.json` as its argument to use a newer market snapshot.
+
 The market bot bought 0.042162 fETH for 42.29 f564 at 12:50 UTC and sold 0.021 fETH for 20.938 f564 at 14:30 UTC. Several other ticks produced only approvals. Counting those as trades would overstate both volume and fee revenue. A five-minute scheduling interval gives no reliable prediction of a fill. [Flows and approvals](flows.txt)
 
 Competitor 1 funded a vault and added 7,791.60 f564 and 8.2084 fETH at 15:23 UTC across approximately 968.41–1,034.48, the same range as the organizer’s core position. This placed roughly 27% of active liquidity with that position at the observed tick. Both observed swaps predated its mint. Competitor 2 approved both tokens for the credit facility. No borrow followed through the snapshot block. The enrolled wallet still held its initial endowment at the token-flow probe. The monitor tracks all four contract addresses, including events from participants absent from the Phase 2 signer list. [Flows](flows.txt) · [Independent LP evidence](liquidity.txt)
@@ -55,5 +57,7 @@ A lab borrower owing 11,989.21 f564 against 20 fETH became eligible at a TWAP of
 The pool’s opening depth makes the largest threshold moves expensive relative to one endowment. A spot move also takes time to feed through the TWAP. If depth falls or borrowers cluster near a threshold, repeat the calculations with the monitor’s current tick map, spot, TWAP, borrower health and market utilization. The Phase 2 two-pool cycle has no second official pool in this phase.
 
 ### Evidence and verification
+
+The [offline lab](lab/) includes the public creation bytecode, ABI and mock market. With project dev dependencies and solc 0.8.27 installed locally, run `uv run python research/2026-11-24-phase3/lab/phase3_credit_lab.py` for the participant scenarios, `phase3_credit_admin_lab.py` in the same directory for admin controls, or `phase3_settle_probe.py` for the bad-debt follow-up. Each script starts a fresh in-memory chain.
 
 The report uses the platform’s public control and phase APIs, public Sepolia events and contract views, and offline experiments with the deployed facility bytecode and mock tokens and pool. The participant lab idealized leveraged exchanges at TWAP with zero fees and impact. The admin lab used local stand-in admins. In its transcript, the attempted 1,000 bps bonus change reverted, so the subsequent line labeled “at its maximum” actually used 500 bps. The live monitor pins its market reads to one block and reconciles event-derived liquidity against the pool. The saved opening-day captures remain dated evidence as conditions change. [Facility on Blockscout](https://eth-sepolia.blockscout.com/address/0x2a61eB24e46E8568C15becaEAa7E549B50700Dd2) · [Monitor runbook](../../docs/DEPLOY.md#phase-3-monitor)
