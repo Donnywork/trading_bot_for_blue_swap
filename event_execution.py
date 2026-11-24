@@ -187,6 +187,15 @@ class Executor:
         timing = event_submission.Timing(
             self.fees.first_seen(candidate["hash"]), self.clock
         )
+        # Queue plumbing measured by the service: how long the event waited
+        # between the feed's arrival stamp and dispatch, and how long
+        # dispatch (guards, fee observation, paper model) then took before
+        # validation began. The 2026-11-23 17:56 window lost tail ordering
+        # to an invisible 76 ms wait in exactly this gap.
+        timing.data["queue_wait_ms"] = candidate.get("queue_wait_ms")
+        dequeue = candidate.get("_dequeue_mono")
+        if dequeue is not None:
+            timing.data["dispatch_ms"] = round((timing.started - dequeue) * 1000, 3)
         self.attempt = {
             "action": action,
             "target": candidate["hash"],

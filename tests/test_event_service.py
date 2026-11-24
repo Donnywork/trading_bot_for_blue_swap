@@ -1,6 +1,7 @@
 import copy
 import json
 import threading
+import time
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
@@ -1432,6 +1433,73 @@ def test_stale_or_old_generation_pending_never_plans(tmp_path, snapshot):
         {"kind": "pending", "generation": 0, "received": snapshot["timestamp"] - 10}
     )
     assert not svc.recent
+
+
+def test_pending_decision_records_queue_wait_not_plumbing(tmp_path, snapshot):
+    # The 17:56 Nov 23 window lost tail ordering to a 76 ms queue wait that
+    # no record exposed. Decisions must carry how long the event waited
+    # between the feed's arrival stamp and dispatch, while the monotonic
+    # stamp that carries the measurement to the executor never persists.
+    svc = service(tmp_path, snapshot)
+    svc.refresh()
+    tx = {
+        "hash": HASH,
+        "from": market.MARKET_BOT,
+        "nonce": "0x1",
+        "to": market.ROUTER,
+        "value": "0x0",
+        "chainId": hex(11155111),
+        "input": market.router().encode_abi(
+            "exactInputSingle",
+            args=[
+                (
+                    Web3.to_checksum_address(market.QUOTE),
+                    Web3.to_checksum_address(market.BASE),
+                    10000,
+                    Web3.to_checksum_address(market.MARKET_BOT),
+                    5000 * A,
+                    1,
+                    0,
+                )
+            ],
+        ),
+    }
+    svc.handle(
+        {
+            "kind": "pending",
+            "transaction": tx,
+            "generation": svc.generation,
+            "received": svc.clock(),
+            "received_mono": time.monotonic() - 0.075,
+        }
+    )
+    row = svc.recent[-1]
+    assert row["status"] == "prepared"
+    assert 70 <= row["queue_wait_ms"] <= 90
+    assert "_dequeue_mono" not in row
+    stored = json.loads(
+        (tmp_path / "events" / "decisions.jsonl").read_text().splitlines()[-1]
+    )
+    assert stored["queue_wait_ms"] == row["queue_wait_ms"]
+    assert "_dequeue_mono" not in stored
+
+
+def test_start_attempt_carries_queue_plumbing(tmp_path):
+    ex, _ = fake_executor(tmp_path)
+    timing = ex.start_attempt(
+        {
+            "hash": "0x" + "cd" * 32,
+            "queue_wait_ms": 12.5,
+            "_dequeue_mono": time.monotonic() - 0.03,
+        },
+        "backrun",
+    )
+    assert timing.data["queue_wait_ms"] == 12.5
+    assert 25 <= timing.data["dispatch_ms"] <= 40
+    assert ex.attempt["timing"]["queue_wait_ms"] == 12.5
+    bare = ex.start_attempt({"hash": "0x" + "ce" * 32}, "backrun")
+    assert bare.data["queue_wait_ms"] is None
+    assert bare.data["dispatch_ms"] is None
 
 
 @pytest.mark.parametrize("refresh", ["head", "timer", "reconnect"])

@@ -106,6 +106,12 @@ class Service:
         self.read_controls()  # Adopt old request numbers, never old permission to trade.
 
     def record(self, decision):
+        if any(key.startswith("_") for key in decision):
+            # Transient plumbing (the monotonic dequeue stamp) rides the
+            # decision to the executor but has no persisted meaning.
+            decision = {
+                key: value for key, value in decision.items() if not key.startswith("_")
+            }
         decision = {"mode": self.settings.mode, "now": self.clock(), **decision}
         if decision.get("kind") in ("pending", "mined", "arbitrage"):
             if decision.get("status") == "prepared":
@@ -536,6 +542,12 @@ class Service:
         self.maybe_execute(decision)
 
     def handle(self, event):
+        dequeue = time.monotonic()
+        queue_wait_ms = (
+            round((dequeue - event["received_mono"]) * 1000, 3)
+            if event.get("received_mono") is not None
+            else None
+        )
         if (
             event.get("generation") != self.generation
             or not self.feed.ready.is_set()
@@ -587,6 +599,10 @@ class Service:
         decision = self.engine.handle(
             {"kind": "pending", "now": self.clock(), "transaction": tx}
         )
+        # Tail-regime ordering is decided by total reaction time; the queue
+        # wait is the only leg of it that was invisible per decision.
+        decision["queue_wait_ms"] = queue_wait_ms
+        decision["_dequeue_mono"] = dequeue
         self.record(decision)
         self.maybe_execute(decision)
 
