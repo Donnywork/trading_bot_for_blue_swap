@@ -122,10 +122,11 @@ def notify(severity, text, now, settings, emit, post):
         ).encode()
         try:
             post(settings["webhook"], body)
-        except OSError as error:
+        except (OSError, ValueError) as error:
             # Delivery failure must never take the watchdog down; the log
             # line above is the durable record. Only the kind/status is
             # logged — exception text can embed the URL, never print it.
+            # ValueError covers a malformed URL (bad scheme) as well.
             detail = getattr(error, "code", None) or type(error).__name__
             emit(f"{stamp} UTC [info] webhook delivery failed ({detail})")
 

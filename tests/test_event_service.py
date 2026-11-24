@@ -1464,23 +1464,26 @@ def test_pending_decision_records_queue_wait_not_plumbing(tmp_path, snapshot):
             ],
         ),
     }
+    arrived = svc.clock()
     svc.handle(
         {
             "kind": "pending",
             "transaction": tx,
             "generation": svc.generation,
-            "received": svc.clock(),
+            "received": arrived,
             "received_mono": time.monotonic() - 0.075,
         }
     )
     row = svc.recent[-1]
     assert row["status"] == "prepared"
     assert 70 <= row["queue_wait_ms"] <= 90
+    assert row["feed_arrival"] == arrived
     assert "_dequeue_mono" not in row
     stored = json.loads(
         (tmp_path / "events" / "decisions.jsonl").read_text().splitlines()[-1]
     )
     assert stored["queue_wait_ms"] == row["queue_wait_ms"]
+    assert stored["feed_arrival"] == arrived
     assert "_dequeue_mono" not in stored
 
 

@@ -150,6 +150,32 @@ def test_webhook_failure_names_the_http_status(settings, monkeypatch):
     assert any("webhook delivery failed (403)" in line for line in lines)
 
 
+def test_webhook_failure_survives_a_malformed_url(settings, monkeypatch):
+    # An invalid scheme raises ValueError, not OSError: the watchdog must
+    # log the failure and keep watching either way.
+    halted = {
+        "updated": 1000,
+        "health": "halted",
+        "message": "Execution halted. reconcile",
+    }
+    lines = []
+
+    def bad_url_post(url, body):
+        raise ValueError("unknown url type")
+
+    monkeypatch.setattr(watchdog, "read_state", lambda path, now: (halted, None))
+    with pytest.raises(_Stop):
+        watchdog.run(
+            settings,
+            now=lambda: 1000,
+            sleep=lambda seconds: (_ for _ in ()).throw(_Stop()),
+            read_state=lambda path, now: (halted, None),
+            emit=lines.append,
+            post=bad_url_post,
+        )
+    assert any("webhook delivery failed (ValueError)" in line for line in lines)
+
+
 def test_post_webhook_identifies_itself(monkeypatch):
     # Discord's edge 403s the default Python-urllib User-Agent, so the
     # request has to carry a custom one.

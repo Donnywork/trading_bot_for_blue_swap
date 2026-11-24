@@ -600,8 +600,12 @@ class Service:
             {"kind": "pending", "now": self.clock(), "transaction": tx}
         )
         # Tail-regime ordering is decided by total reaction time; the queue
-        # wait is the only leg of it that was invisible per decision.
+        # wait is the only leg of it that was invisible per decision. The
+        # feed's own arrival stamp rides along so offline analysis can join
+        # our sight time against other sources (the feed-race study) —
+        # without it, decisions carry no arrival time to join on at all.
         decision["queue_wait_ms"] = queue_wait_ms
+        decision["feed_arrival"] = event.get("received")
         decision["_dequeue_mono"] = dequeue
         self.record(decision)
         self.maybe_execute(decision)
