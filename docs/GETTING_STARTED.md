@@ -2,6 +2,8 @@
 
 ### Phase 3 observation
 
+For spot trading, fund and configure the registered trading vault, then check the `spot.status` field in `logs/phase3/auto.json`. [Wallet calls and strategy rules](PHASE3_SPOT.md)
+
 For automatic trading, follow [automatic liquidation setup](PHASE3_VAULT.md#automatic-liquidations). `logs/phase3/auto.json` reports the live worker's status, latest observed block, borrower count and owner caps.
 
 For the credit vault, follow the [Phase 3 owner walkthrough](PHASE3_VAULT.md). It identifies the wallet for each action, the two Phase 3 tokens and the owner settings for borrowing and liquidation.

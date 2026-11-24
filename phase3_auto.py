@@ -16,6 +16,7 @@ import operator_lock
 import phase3_vault as vault_cli
 from phase3_chain import PUBLIC_RPC, WAD, Chain
 from phase3_monitor import alert
+from phase3_spot import Spot
 from phase_markets import PHASE3
 from runtime import ConfigurationError, error_kind, load_environment
 
@@ -261,12 +262,13 @@ class Trader:
             return {"status": "confirmed", "tx_hash": record["tx_hash"]}
 
 
-def run(live, once=False):
+def run(live, once=False, *, with_spot=False):
     directory = vault_cli.DIRECTORY
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / ("auto.json" if live else "auto-simulation.json")
     previous = None
     trader = None
+    spot = None
     while True:
         terminal = False
         try:
@@ -284,6 +286,23 @@ def run(live, once=False):
             else:
                 trader = trader or Trader(live, directory)
                 state = trader.step()
+                if with_spot and state is not None:
+                    if state["status"] in ("confirmed", "simulated"):
+                        state["spot"] = {"status": "liquidation_priority"}
+                    else:
+                        try:
+                            spot = spot or Spot(trader)
+                            state["spot"] = spot.step(state["block"])
+                        except Exception as exc:
+                            if (directory / "pending.json").exists():
+                                raise
+                            state["spot"] = {
+                                "status": "degraded",
+                                "reason": str(exc)
+                                if isinstance(exc, ConfigurationError)
+                                else error_kind(exc),
+                            }
+                            spot = None
         except Exception as exc:  # noqa: BLE001 — persist fixed diagnostics, never RPC bodies
             terminal = live and (directory / "pending.json").exists()
             state = {
@@ -293,6 +312,7 @@ def run(live, once=False):
                 else error_kind(exc),
             }
             trader = None
+            spot = None
         if state is not None:
             ledger.atomic_write(
                 path,
@@ -314,10 +334,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--with-spot",
+        action="store_true",
+        help="also run the registered single-pool spot strategy",
+    )
     args = parser.parse_args()
     if args.live:
         load_environment()
     with operator_lock.acquire(
         vault_cli.DIRECTORY / ("auto.lock" if args.live else "auto-simulation.lock")
     ):
-        run(args.live, args.once)
+        run(args.live, args.once, with_spot=args.with_spot)

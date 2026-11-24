@@ -2,6 +2,8 @@
 
 ## Phase 3 monitor
 
+The combined worker uses `.venv/bin/python -u phase3_auto.py --live --with-spot` in the `phase3-auto` session. Run `--once --with-spot` for a read-only preflight. Inspect `logs/phase3/auto.json` for liquidation status and its `spot` field for the second vault. [Spot runbook](PHASE3_SPOT.md)
+
 The automatic sender runs in its own `phase3-auto` tmux session. Follow [automatic liquidation setup](PHASE3_VAULT.md#automatic-liquidations) for the launch command, live status, owner permissions and stop procedure.
 
 The independent [Phase 3 credit vault deployment and operator commands](PHASE3_VAULT.md) use the same checkout. The release contains compiled bytecode and ABI and runs on the server without `solc`.

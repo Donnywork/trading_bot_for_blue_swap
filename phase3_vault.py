@@ -135,7 +135,17 @@ def binding(directory):
     return Web3.to_checksum_address(record["address"])
 
 
-def broadcast(w3, signer, tx, destination, pending, artifact, *, before_intent=None):
+def broadcast(
+    w3,
+    signer,
+    tx,
+    destination,
+    pending,
+    artifact,
+    *,
+    before_intent=None,
+    account_fill=None,
+):
     if destination.exists() or pending.exists():
         raise ConfigurationError(
             "deployment or request already recorded; reconcile before sending"
@@ -182,7 +192,8 @@ def broadcast(w3, signer, tx, destination, pending, artifact, *, before_intent=N
         raise
     except bot_contract.Reverted as exc:
         receipt = exc.receipt
-    if w3.eth.get_block(receipt["blockNumber"])["hash"] != receipt["blockHash"]:
+    header = w3.eth.get_block(receipt["blockNumber"])
+    if header["hash"] != receipt["blockHash"]:
         raise ConfigurationError("receipt reorganized; reconcile the pending record")
     success = receipt["status"] == 1
     record = dict(
@@ -194,6 +205,8 @@ def broadcast(w3, signer, tx, destination, pending, artifact, *, before_intent=N
     )
     if "gasUsed" in receipt and "effectiveGasPrice" in receipt:
         record["gas_cost_wei"] = receipt["gasUsed"] * receipt["effectiveGasPrice"]
+    if success and account_fill is not None:
+        record["spot_fill"] = account_fill(receipt) | {"time": header["timestamp"]}
     if success and "to" not in tx:
         address = receipt["contractAddress"]
         verify(w3, artifact, address, record["block"], initial=True)

@@ -6,6 +6,8 @@ The [Phase 3 vault walkthrough](docs/PHASE3_VAULT.md) covers deployment, owner r
 
 `phase3_auto.py --live` watches for eligible borrowers and executes atomic liquidation-and-close trades under the vault owner's per-token permissions. See [automatic liquidation setup](docs/PHASE3_VAULT.md#automatic-liquidations).
 
+Add `--with-spot` for single-pool trades after confirmed fETH sales. [Spot strategy and owner setup](docs/PHASE3_SPOT.md)
+
 A Python trading bot for **Sepolia (testnet only)**. The Phase 2 event service monitors two Uniswap V3 pools and trades through one `Phase2TradingBot` contract you own. The competition objective is portfolio return measured in f564. It can run on your laptop or under systemd on Ubuntu 24.04.
 
 > Testnet only. Nothing here has the safeguards real money would need. The strategies in `strategy.py` are placeholders, not trading advice.

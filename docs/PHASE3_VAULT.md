@@ -49,7 +49,7 @@ The worker checks fresh Sepolia heads for borrowers with health below 1.00. It p
 To preview once, run `.venv/bin/python phase3_auto.py --once`. To start the live service from the server checkout, run:
 
 ```sh
-tmux new-session -d -s phase3-auto 'set -a; . "$HOME/.watchdog-webhook"; set +a; exec .venv/bin/python -u phase3_auto.py --live'
+tmux new-session -d -s phase3-auto 'set -a; . "$HOME/.watchdog-webhook"; set +a; exec .venv/bin/python -u phase3_auto.py --live --with-spot'
 ```
 
 The live command requires the configured operator and `DRY_RUN=false`. Read `logs/phase3/auto.json` for status. `awaiting_owner_limits` means the worker is watching for permissions. `watching` means it found no eligible borrower. `confirmed` includes a transaction hash, and `logs/phase3/actions/auto-*.json` records mined results and gas costs. For `halted_reconcile`, inspect the existing halt markers and pending record. To stop submissions immediately from this worker, stop its tmux session and check any in-flight transaction. Setting the on-chain liquidation caps back to zero disables future liquidations by the vault. Relaunch the tmux process after a host reboot. The worker stops at the scheduled end of Phase 3.
