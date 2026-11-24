@@ -1,0 +1,8 @@
+after the bad-debt liquidation: collateral 0.0000 fETH / 0.0000 f564, debt 0.0000, badDebt 11880.9525, borrowers 1
+borrow: UnsettledBadDebt
+settleBadDebt with no collateral: ok -> collateral 0.0000 fETH / 0.0000 f564, debt 0.0000, badDebt 11880.9525, borrowers 1
+borrow (no collateral): UnsettledBadDebt
+after depositing 1,000 f564: collateral 0.0000 fETH / 1000.0000 f564, debt 0.0000, badDebt 11880.9525, borrowers 1
+borrow: UnsettledBadDebt | withdraw: ok | repay: InvalidAmount | liquidate: HealthyPosition
+settleBadDebt with collateral: InsufficientCollateral
+market f564 debt 0.0 | carol borrows: InsufficientCollateral

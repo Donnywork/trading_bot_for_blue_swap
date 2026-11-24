@@ -1,0 +1,217 @@
+
+== constants and oracle ==
+MAX_LTV 6000 LIQ_THRESHOLD 8000 bonus 500 | YEAR 31536000 paused False
+oraclePrice 1000.09933898 f564 per fETH, window 31 s (on-chain 1800) | 1.0001^69082 = 1000.099338976498
+interestRate(u): 0%->0.100000 10%->0.137500 20%->0.175000 30%->0.212500 40%->0.250000 50%->0.287500 60%->0.325000 70%->0.362500 80%->0.400000 85%->0.675000 90%->0.950000 95%->1.225000 99%->1.445000 100%->1.500000
+healthOf(no position) inf | isAdmin(alice) False
+
+== A. deposits move tokens; borrows MINT new tokens; max borrow = 60% of collateral value ==
+deposit 0: InvalidAmount | unknown token: InvalidToken
+alice deposit 10 fETH: ok
+alice deposit 10,000 f564: ok
+alice: collateral 10.0000 fETH + 10000.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf | supplies f564 7000000.0000 fETH 7000.0000 | facility cash f564 10000.0000 fETH 10.0000
+max f564 borrow 12000.5960 | 60% of collateral value 12000.5960 | equal: True
+borrow cap+1: InsufficientCollateral | no collateral: InsufficientCollateral
+alice borrows half (6000.2980): ok
+alice: collateral 10.0000 fETH + 10000.0000 f564, debt 0.0000 fETH + 6000.2980 f564, health 2.666667, liquidatable below x-0.2499 | f564 supply change 6000.2980 | supplies f564 7006000.2980 fETH 7000.0000 | facility cash f564 10000.0000 fETH 10.0000
+market f564: debt 6000.2980 ceiling 100000.0000 util 0.060003 rate 0.122501/yr
+dave deposit 5,000 f564: ok
+dave borrows 3000.0000 of the SAME token (f564 against f564): ok
+dave: collateral 0.0000 fETH + 5000.0000 f564, debt 0.0000 fETH + 3000.0000 f564, health 1.333333, never liquidatable
+
+== B. withdraw with debt must keep debt <= 60% of collateral value ==
+max f564 withdraw (10000.0000): ok
+alice: collateral 10.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 6000.2981 f564, health 1.333400, liquidatable below x0.7500
+exact max fETH withdraw by eth_call (0.00049653) sent a block later: InsufficientCollateral
+99.9% of it: ok
+alice: collateral 9.9995 fETH + 0.0000 f564, debt 0.0000 fETH + 6000.2981 f564, health 1.333333, liquidatable below x0.7500 -> the withdraw limit is the same 60% LTV rule as borrowing
+alice repays all (amount = a stale debtOf() read): ok
+alice withdraws all fETH: InsufficientCollateral
+alice: collateral 9.9995 fETH + 0.0000 f564, debt 0.0000 fETH + 0.0000 f564, health 314374956.490643, liquidatable below x0.0000 | debt left 25448585149922 wei (interest accrued between the read and the mined block)
+withdraw(type(uint).max) with dust debt outstanding: InvalidAmount
+repay(type(uint256).max): ok -> 25448585149922 <- repaid
+send repay max: ok
+alice debt left 0 wei | withdraw(type(uint).max): InvalidAmount
+send withdraw max: InvalidAmount
+alice: collateral 9.9995 fETH + 0.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf
+
+== C. leveraged positions; borrow -> sell -> deposit loop (sale idealised at the TWAP, no fee, no impact) ==
+bob deposit 20 fETH: ok
+bob borrows max 12001.1921 f564 and keeps the borrowed f564 (2.5x long): ok
+bob: collateral 20.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 11989.1909 f564, health 1.334668, liquidatable below x0.7492
+carol deposit 60,000 f564: ok
+carol borrows max 35.9964 fETH and sells it (1.5x short): ok
+carol: collateral 0.0000 fETH + 60000.0000 f564, debt 35.9604 fETH + 0.0000 f564, health 1.334668, liquidatable above x1.3347
+frank deposit 20,000 f564; loop keeps his f564 as collateral (mixed collateral): ok
+  round 1: borrow 11988.0000 f564: ok
+    sell for 11.9868 fETH, deposit it: ok
+    debt 11988.0002 | exposure 11988.0000 f564 | equity 19999.9998 | leverage 0.60x | health 2.134668, liquidatable below x-0.4183
+  round 2: borrow 7197.5950 f564: ok
+    sell for 7.1969 fETH, deposit it: ok
+    debt 19185.5957 | exposure 19185.5950 f564 | equity 19999.9993 | leverage 0.96x | health 1.633959, liquidatable below x0.2076
+  round 3: borrow 4321.4355 f564: ok
+    sell for 4.3210 fETH, deposit it: ok
+    debt 23507.0319 | exposure 23507.0305 f564 | equity 19999.9986 | leverage 1.18x | health 1.480647, liquidatable below x0.3992
+  round 4: borrow 2594.5892 f564: ok
+    sell for 2.5943 fETH, deposit it: ok
+    debt 26101.6219 | exposure 26101.6197 f564 | equity 19999.9978 | leverage 1.31x | health 1.412989, liquidatable below x0.4838
+  round 5: borrow 1557.7905 f564: ok
+    sell for 1.5576 fETH, deposit it: ok
+    debt 27659.4134 | exposure 27659.4103 f564 | equity 19999.9969 | leverage 1.38x | health 1.378465, liquidatable below x0.5269
+  round 6: borrow 935.2966 f564: ok
+    sell for 0.9352 fETH, deposit it: ok
+    debt 28594.7109 | exposure 28594.7068 f564 | equity 19999.9959 | leverage 1.43x | health 1.359544, liquidatable below x0.5506
+  round 7: borrow 561.5511 f564: ok
+    sell for 0.5615 fETH, deposit it: ok
+    debt 29156.2629 | exposure 29156.2579 f564 | equity 19999.9950 | leverage 1.46x | health 1.348767, liquidatable below x0.5640
+  round 8: borrow 337.1543 f564: ok
+    sell for 0.3371 fETH, deposit it: ok
+    debt 29493.4182 | exposure 29493.4122 f564 | equity 19999.9940 | leverage 1.47x | health 1.342494, liquidatable below x0.5719
+  round 9: borrow 202.4265 f564: ok
+    sell for 0.2024 fETH, deposit it: ok
+    debt 29695.8457 | exposure 29695.8387 f564 | equity 19999.9930 | leverage 1.48x | health 1.338796, liquidatable below x0.5765
+  round 10: borrow 121.5358 f564: ok
+    sell for 0.1215 fETH, deposit it: ok
+    debt 29817.3826 | exposure 29817.3745 f564 | equity 19999.9920 | leverage 1.49x | health 1.336600, liquidatable below x0.5793
+  round 11: borrow 72.9691 f564: ok
+    sell for 0.0730 fETH, deposit it: ok
+    debt 29890.3527 | exposure 29890.3436 f564 | equity 19999.9909 | leverage 1.49x | health 1.335290, liquidatable below x0.5809
+  round 12: borrow 43.8096 f564: ok
+    sell for 0.0438 fETH, deposit it: ok
+    debt 29934.1633 | exposure 29934.1533 f564 | equity 19999.9899 | leverage 1.50x | health 1.334506, liquidatable below x0.5819
+frank (mixed): collateral 29.9312 fETH + 20000.0000 f564, debt 0.0000 fETH + 29934.1633 f564, health 1.334506, liquidatable below x0.5819
+gina sells 20,000 f564 for fETH, deposits the fETH; loop (all-fETH collateral): ok
+  round 1: borrow 11988.0000 f564: ok
+    sell for 11.9868 fETH, deposit it: ok
+    debt 11988.0004 | exposure 31988.0000 f564 | equity 19999.9996 | leverage 1.60x | health 2.134668, liquidatable below x0.4685
+  round 2: borrow 7197.5948 f564: ok
+    sell for 7.1969 fETH, deposit it: ok
+    debt 19185.5959 | exposure 39185.5948 f564 | equity 19999.9989 | leverage 1.96x | health 1.633959, liquidatable below x0.6120
+  round 3: borrow 4321.4352 f564: ok
+    sell for 4.3210 fETH, deposit it: ok
+    debt 23507.0321 | exposure 43507.0300 f564 | equity 19999.9979 | leverage 2.18x | health 1.480647, liquidatable below x0.6754
+  round 4: borrow 2594.5887 f564: ok
+    sell for 2.5943 fETH, deposit it: ok
+    debt 26101.6220 | exposure 46101.6187 f564 | equity 19999.9967 | leverage 2.31x | health 1.412989, liquidatable below x0.7077
+  round 5: borrow 1557.7899 f564: ok
+    sell for 1.5576 fETH, deposit it: ok
+    debt 27659.4132 | exposure 47659.4086 f564 | equity 19999.9954 | leverage 2.38x | health 1.378465, liquidatable below x0.7254
+  round 6: borrow 935.2958 f564: ok
+    sell for 0.9352 fETH, deposit it: ok
+    debt 28594.7103 | exposure 48594.7044 f564 | equity 19999.9941 | leverage 2.43x | health 1.359544, liquidatable below x0.7355
+  round 7: borrow 561.5502 f564: ok
+    sell for 0.5615 fETH, deposit it: ok
+    debt 29156.2619 | exposure 49156.2546 f564 | equity 19999.9927 | leverage 2.46x | health 1.348767, liquidatable below x0.7414
+  round 8: borrow 337.1534 f564: ok
+    sell for 0.3371 fETH, deposit it: ok
+    debt 29493.4167 | exposure 49493.4080 f564 | equity 19999.9913 | leverage 2.47x | health 1.342494, liquidatable below x0.7449
+  round 9: borrow 202.4255 f564: ok
+    sell for 0.2024 fETH, deposit it: ok
+    debt 29695.8436 | exposure 49695.8334 f564 | equity 19999.9899 | leverage 2.48x | health 1.338796, liquidatable below x0.7469
+  round 10: borrow 121.5348 f564: ok
+    sell for 0.1215 fETH, deposit it: ok
+    debt 29817.3798 | exposure 49817.3683 f564 | equity 19999.9884 | leverage 2.49x | health 1.336599, liquidatable below x0.7482
+  round 11: borrow 72.9681 f564: ok
+    sell for 0.0730 fETH, deposit it: ok
+    debt 29890.3494 | exposure 49890.3363 f564 | equity 19999.9870 | leverage 2.49x | health 1.335289, liquidatable below x0.7489
+  round 12: borrow 43.8086 f564: ok
+    sell for 0.0438 fETH, deposit it: ok
+    debt 29934.1594 | exposure 49934.1449 f564 | equity 19999.9855 | leverage 2.50x | health 1.334506, liquidatable below x0.7493
+gina (pure): collateral 49.9292 fETH + 0.0000 f564, debt 0.0000 fETH + 29934.1594 f564, health 1.334506, liquidatable below x0.7493
+market f564: debt 74857.5457 ceiling 100000.0000 util 0.748575 rate 0.380716/yr
+
+== D. debt ceiling is market-wide (first come, first served) ==
+dave deposits 200,000 f564 more: ok
+dave max fETH borrow 64.0395 | ceiling - outstanding fETH debt = 64.0395 | 60% of dave's own collateral would be 122.9878
+borrow room+1: LimitExceeded
+dave borrows it: ok
+market fETH: debt 99.9360 ceiling 100.0000 util 0.999360 rate 1.496478/yr | dave borrows 1 more fETH (collateral is plenty): LimitExceeded
+dave repays -> the capacity is free again: ok
+market fETH: debt 35.9605 ceiling 100.0000 util 0.359605 rate 0.234852/yr
+
+== E. health vs TWAP price: health = 0.8 x (fETH collateral x TWAP + f564 collateral) / (f564 debt + fETH debt x TWAP) ==
+bob: 2.5x long (fETH collateral).  carol: 1.5x short (f564 collateral).  frank: 2.44x long, mixed collateral
+price     xP0      bob       carol      frank    liquidate(bob)    liquidate(carol)   liquidate(frank)
+ 1000.00  0.9999   1.334533   1.334800   1.334425        HealthyPosition       HealthyPosition       HealthyPosition
+  799.96  0.7999   1.067578   1.668576   1.174412        HealthyPosition       HealthyPosition       HealthyPosition
+  750.97  0.7509   1.002198   1.777428   1.135224        HealthyPosition       HealthyPosition       HealthyPosition
+  750.00  0.7499   1.000896   1.779740   1.134443        HealthyPosition       HealthyPosition       HealthyPosition
+  699.99  0.6999   0.934166   1.906871   1.094445                     ok       HealthyPosition       HealthyPosition
+  684.01  0.6839   0.912836   1.951431   1.081660                     ok       HealthyPosition       HealthyPosition
+  599.97  0.5999   0.800681   2.224776   1.014434                     ok       HealthyPosition       HealthyPosition
+  499.99  0.4999   0.667254   2.669649   0.934458                     ok       HealthyPosition                    ok
+ 1099.98  1.0999   1.467964   1.213473   1.414404        HealthyPosition       HealthyPosition       HealthyPosition
+ 1300.03  1.2999   1.734932   1.026746   1.574424        HealthyPosition       HealthyPosition       HealthyPosition
+ 1332.94  1.3328   1.778850   1.001397   1.600749        HealthyPosition       HealthyPosition       HealthyPosition
+ 1334.00  1.3339   1.780274   1.000596   1.601602        HealthyPosition       HealthyPosition       HealthyPosition
+ 1334.94  1.3348   1.781520   0.999896   1.602349        HealthyPosition                    ok       HealthyPosition
+ 1500.02  1.4999   2.001829   0.889854   1.734402        HealthyPosition                    ok       HealthyPosition
+ 2000.04  1.9998   2.669114   0.667388   2.134373        HealthyPosition                    ok       HealthyPosition
+at P0, all healthy: bob HealthyPosition | dave (collateral == debt token): HealthyPosition
+at 700 (bob liquidatable): maxRepay 0: InvalidAmount | maxRepay 1 wei: InvalidAmount | collateral token without a balance: InvalidAmount
+
+== F. liquidation economics, long side (bob: 20 fETH collateral, f564 debt) at price 700 ==
+bob: collateral 20.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 11989.2058 f564, health 0.934166, liquidatable below x1.0705
+maxRepay = whole debt: ok -> 5,994.602901 / 8.991975 <- repaid / seized
+maxRepay = 50% + 1: ok -> 5,994.602901 / 8.991975
+maxRepay = 25%: ok -> 2,997.30145 / 4.495988
+send liquidate(maxRepay = whole debt): ok
+liquidator paid 5994.6030 f564, received 8.9920 fETH = 6294.3331 f564 at TWAP -> premium 299.7301 = 499 bps | f564 supply change -5994.6030 (the repaid debt is burned)
+bob after: collateral 11.0080 fETH + 0.0000 f564, debt 0.0000 fETH + 5994.6030 f564, health 1.028333, liquidatable below x0.9724
+again at 700: HealthyPosition
+at 680: liquidate again (maxRepay = whole remaining debt): ok
+bob after: collateral 6.3798 fETH + 0.0000 f564, debt 0.0000 fETH + 2997.3016 f564, health 1.157881, liquidatable below x0.8636
+at 660: once more: HealthyPosition
+bob after: collateral 6.3798 fETH + 0.0000 f564, debt 0.0000 fETH + 2997.3016 f564, health 1.123887, liquidatable below x0.8898 | liquidator: f564 spent 8991.9045, fETH gained 13.6202 -> profit at the TWAPs of each call 449.5952 f564 (5%)
+bob repays the rest (max): ok
+bob withdraws everything (max): InvalidAmount
+bob: collateral 6.3798 fETH + 0.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf
+
+== G. liquidation economics, short side (carol: f564 collateral, fETH debt) at price 1400 ==
+carol: collateral 0.0000 fETH + 60000.0000 f564, debt 35.9605 fETH + 0.0000 f564, health 0.953418, liquidatable above x0.9534
+maxRepay = whole debt: ok -> 17.980232 / 26,431.212502 <- repaid / seized
+send liquidate(maxRepay = whole debt): ok
+liquidator paid 17.9802 fETH (25172.5835 f564), received 26431.2127 f564 -> premium 1258.6292 = 499 bps | fETH supply change -17.9802
+carol after: collateral 0.0000 fETH + 33568.7873 f564, debt 17.9802 fETH + 0.0000 f564, health 1.066836, liquidatable above x1.0668
+
+== H. bad debt (gina: 2.5x long with fETH collateral, price -> 1.0) ==
+gina: collateral 49.9292 fETH + 0.0000 f564, debt 0.0000 fETH + 29934.1706 f564, health 0.001334, liquidatable below x749.4157 | badDebtOf before: 0.0000 0.0000 | borrowers 6
+liquidate(maxRepay = whole debt): ok -> 47.551605 / 49.929185 <- repaid / seized
+send: ok
+liquidator paid 47.5516 f564, received 49.9292 fETH (all of it: the repayment is scaled down to the collateral)
+gina after: collateral 0.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf | borrowers 6
+liquidate again: HealthyPosition
+gina repays (no debt left): InvalidAmount
+another account borrows while the bad debt is unsettled: ok ->
+settleBadDebt(gina) by a stranger: ok | badDebtOf now 29886.6194 | borrowers 6
+settleBadDebt(gina) again: ok | market f564: debt 32934.1969 ceiling 100000.0000 util 0.329342 rate 0.223503/yr
+mixed-collateral long (frank) at price 1.0: collateral 29.9312 fETH + 20000.0000 f564, debt 0.0000 fETH + 29934.1927 f564, health 0.535306, liquidatable below x581.9263
+  liquidate f564 debt against the fETH collateral: ok -> 28.505886 / 29.93118 <- repaid / seized
+  send: ok
+  frank: collateral 0.0000 fETH + 20000.0000 f564, debt 0.0000 fETH + 29905.6870 f564, health 0.535015, underwater at any price
+  liquidate against the f564 collateral (same token as the debt): ok -> 14,952.843513 / 15,700.485688
+  send: ok
+  frank: collateral 0.0000 fETH + 4299.5142 f564, debt 0.0000 fETH + 14952.8436 f564, health 0.230031, underwater at any price | badDebtOf 0.0000
+market f564: debt 17952.8479 ceiling 100000.0000 util 0.179528 rate 0.167323/yr
+
+== I. interest accrues on debt only (rate = f(market utilisation = debt / ceiling)) ==
+market f564: debt 17952.8480 ceiling 100000.0000 util 0.179528 rate 0.167323/yr | fETH: debt 17.9802 ceiling 100.0000 util 0.179802 rate 0.167426/yr
+after 1 day: carol fETH debt 17.98023275 -> 17.98848031 = +16.7426%/yr (rate 0.167457); dave f564 debt 3000.00426771 -> 3001.37952867 = +16.7323%/yr (rate 0.167354)
+carol after a day of interest (price unchanged): collateral 0.0000 fETH + 33568.7873 f564, debt 17.9885 fETH + 0.0000 f564, health 1.492903, liquidatable above x1.4929
+after 7 days: carol fETH debt 18.0380 health 1.488807
+
+== J. repay burns tokens ==
+repay 100: ok -> 100000000000000000000
+dave repays 100 f564: ok
+dave debt 2909.6311 | f564 supply change -100.0000
+repay more than the debt: ok -> 2909631110343480743338
+dave repays 10,000 (> debt): ok
+dave: collateral 0.0000 fETH + 205000.0000 f564, debt 0.0000 fETH + 0.0000 f564, health 53848594.080512, liquidatable above x53848594.0805
+repay 0: InvalidAmount
+
+== K. guards ==
+setDebtCeiling by stranger: Unauthorized | setLiquidationBonus: Unauthorized | pause: Unauthorized
+zero pool liquidity -> oraclePrice: OracleUnavailable | healthOf(carol): OracleUnavailable
+  deposit f564: ok | repay: InvalidAmount | liquidate carol: OracleUnavailable
+f564 TOKEN paused -> deposit f564: Paused | repay f564: Paused | withdraw f564: Paused
+  borrow f564: Paused

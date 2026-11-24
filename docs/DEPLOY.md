@@ -1,5 +1,16 @@
 # Running the bot on Ubuntu 24.04
 
+## Phase 3 monitor
+
+Start from the project directory with the Phase 2 sender stopped and its ledger reconciled. The Phase 3 registry contains the new tokens, single 3000-fee pool and credit facility. The monitor connects to a public Sepolia endpoint by default and validates their identities. To select a different endpoint, export `PHASE3_RPC_URL` in the monitor process environment. It does not load `.env`.
+
+```sh
+tmux new-session -d -s monitor 'set -a; . "$HOME/.watchdog-webhook"; set +a; exec .venv/bin/python -u phase3_monitor.py'
+tmux capture-pane -pt monitor
+```
+
+The webhook file is optional. Without Discord, start the same tmux command using only `exec .venv/bin/python -u phase3_monitor.py`. A successful Discord post prints its HTTP status. `logs/phase3/state.json` gives the current health and snapshot block. `logs/phase3/events.sqlite3` retains canonical events beginning at deployment. The monitor checks every 15 seconds, follows the chain two blocks behind the head, samples market and borrower data every minute or after pool/credit activity, and checks the public competition controls every five minutes. A reorganization rewinds affected chunks and replays them. The journal includes historical events during startup. Discord activity notifications begin after the initial catch-up. A tmux session survives SSH disconnects and needs a fresh launch after a host reboot.
+
 ## Phase 2 on Ubuntu
 
 Complete [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md) first, through simulation. That guide owns contract deployment, verification, funding and owner actions. This section installs the same event service on a server; the legacy reference below is for `TradingBot` / `main.py`.

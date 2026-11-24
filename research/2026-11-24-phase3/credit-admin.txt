@@ -1,0 +1,96 @@
+
+== who is admin ==
+isAdmin(CHAO, JOHN, alice): True True False | CHAO() 0x14229A1Cb78b76D937069d38B978b1c7f0fB4ee6 | JOHN() 0x300b4573F3b4C2ace57a1e50F4792d5E1828A597 | stand-in balances 100.00 100.00
+
+== positions and the events they emit ==
+alice deposit fETH: ok | Deposited(account=0x2B5AD5c4, token=0x51a24027, amount=10.0000)
+alice deposit f564: ok | Deposited(account=0x2B5AD5c4, token=0xDe09E74d, amount=10,000.0000)
+alice borrow: ok | Borrowed(account=0x2B5AD5c4, token=0xDe09E74d, amount=6,000.0000)
+bob deposit: ok | Deposited(account=0x6813Eb93, token=0x51a24027, amount=20.0000)
+bob borrow: ok | Borrowed(account=0x6813Eb93, token=0xDe09E74d, amount=12,000.0000)
+carol deposit: ok | Deposited(account=0x1efF47bc, token=0xDe09E74d, amount=60,000.0000)
+carol borrow fETH: ok | Borrowed(account=0x1efF47bc, token=0x51a24027, amount=35.9000)
+alice repay: ok | Repaid(account=0x2B5AD5c4, payer=0x2B5AD5c4, token=0xDe09E74d, amount=100.0000)
+alice withdraw: ok | Withdrawn(account=0x2B5AD5c4, token=0xDe09E74d, amount=100.0000)
+alice: collateral 10.0000 fETH + 9900.0000 f564, debt 0.0000 fETH + 5900.0002 f564, health 2.698440, badDebt 0.0000 f564 / 0.0000 fETH
+bob: collateral 20.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 12000.0003 f564, health 1.333466, badDebt 0.0000 f564 / 0.0000 fETH
+carol: collateral 0.0000 fETH + 60000.0000 f564, debt 35.9000 fETH + 0.0000 f564, health 1.336915, badDebt 0.0000 f564 / 0.0000 fETH
+market f564: debt 17900.0004 ceiling 100000.0000 util 0.179000 rate 0.167125/yr | fETH: debt 35.9000 ceiling 100.0000 util 0.359000 rate 0.234625/yr
+
+== 1. pause ==
+pause by stranger: Unauthorized
+pause by JOHN:: ok | PauseUpdated(paused=True)
+paused() True
+during pause -> deposit: Paused | borrow: Paused | withdraw: Paused | repay: Paused
+  bob at 700 is liquidatable -> liquidate during pause: Paused
+  debt over a 1-day pause: bob 12000.00031840 -> 12000.00031840 (rate 0.167125/yr)
+unpause by stranger: Unauthorized
+unpause by CHAO:: ok | PauseUpdated(paused=False)
+paused() False
+  debt over 1 day unpaused: bob 12000.00031840 -> 12005.49483916
+
+== 2. setDebtCeiling ==
+by stranger: Unauthorized | unknown token by admin: InvalidToken
+CHAO sets the f564 ceiling to 10,000 (below the 17,900 outstanding): LimitExceeded
+market f564: debt 17908.1965 ceiling 100000.0000 util 0.179082 rate 0.167156/yr
+  borrow 1: ok ->  | repay: InvalidAmount | withdraw: ok ->  | liquidate bob: HealthyPosition
+ceiling to 0: LimitExceeded
+market f564: debt 17908.1965 ceiling 100000.0000 util 0.179082 rate 0.167156/yr
+ceiling back to 100,000 (by JOHN): ok | DebtCeilingUpdated(token=0xDe09E74d, amount=100,000.0000)
+ceiling to 2^255: LimitExceeded
+ceiling back to 100,000: ok | DebtCeilingUpdated(token=0xDe09E74d, amount=100,000.0000)
+
+== 3. setLiquidationBonus ==
+by stranger: Unauthorized
+allowed bonus (bps), by eth_call: [500, 501, 502, 503, 504, 505, 506, 507] ... [793, 794, 795, 796, 797, 798, 799, 800] | refused reasons: ['LimitExceeded']
+bonus to 1000 for one liquidation: LimitExceeded
+liquidate bob with the bonus at its maximum: ok | Liquidated(borrower=0x6813Eb93, liquidator=0xe1AB8145, debtToken=0xDe09E74d, collateralToken=0x51a24027, repaid=6,002.7475, seized=9.0042) ; Repaid(account=0x6813Eb93, payer=0xe1AB8145, token=0xDe09E74d, amount=6,002.7475)
+bob: collateral 10.9958 fETH + 0.0000 f564, debt 0.0000 fETH + 6002.7475 f564, health 1.025798, badDebt 0.0000 f564 / 0.0000 fETH
+bonus back to 500: ok | LiquidationBonusUpdated(basisPoints=500)
+
+== 3b. maximum debt ceiling (binary search by eth_call) ==
+  f564: max ceiling 1000000000000000000000000000000000000 = 1,000,000,000,000,000,000.0000 tokens
+  fETH: max ceiling 1000000000000000000000000000000000000 = 1,000,000,000,000,000,000.0000 tokens
+
+== 4. bad debt and settleBadDebt ==
+dave (the liquidator account) deposits 20 fETH: ok | Deposited(account=0xe1AB8145, token=0x51a24027, amount=20.0000)
+  and borrows 11,900 f564: ok | Borrowed(account=0xe1AB8145, token=0xDe09E74d, amount=11,900.0000)
+dave underwater: collateral 20.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 11900.0001 f564, health 0.001345, badDebt 0.0000 f564 / 0.0000 fETH
+settleBadDebt(dave) by a stranger BEFORE any liquidation: InsufficientCollateral
+  send it: InsufficientCollateral
+dave: collateral 20.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 11900.0001 f564, health 0.001345, badDebt 0.0000 f564 / 0.0000 fETH | carol wallet fETH 1035.9000
+frank deposits 20 fETH: ok | Deposited(account=0xd41c057f, token=0x51a24027, amount=20.0000)
+  and borrows 11,900 f564: ok | Borrowed(account=0xd41c057f, token=0xDe09E74d, amount=11,900.0000)
+frank underwater: collateral 20.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 11900.0001 f564, health 0.001345, badDebt 0.0000 f564 / 0.0000 fETH
+alice liquidates frank (collateral exhausted): ok | BadDebtRecorded(borrower=0xd41c057f, token=0xDe09E74d, amount=11,880.9526) ; Liquidated(borrower=0xd41c057f, liquidator=0x2B5AD5c4, debtToken=0xDe09E74d, collateralToken=0x51a24027, repaid=19.0476, seized=20.0000) ; Repaid(account=0xd41c057f, payer=0x2B5AD5c4, token=0xDe09E74d, amount=19.0476)
+frank: collateral 0.0000 fETH + 0.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf, badDebt 11880.9526 f564 / 0.0000 fETH
+the borrower afterwards -> deposit: ok ->  | withdraw: InvalidAmount | borrow: UnsettledBadDebt | repay: InvalidAmount
+frank deposits 100 f564: ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=100.0000)
+  -> withdraw: ok ->  | borrow: UnsettledBadDebt | repay: InvalidAmount | liquidate (f564/f564): HealthyPosition
+frank repays 1 f564 toward the bad debt: InvalidAmount
+frank: collateral 0.0000 fETH + 100.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf, badDebt 11880.9526 f564 / 0.0000 fETH
+settleBadDebt(frank) by a stranger: InsufficientCollateral
+frank: collateral 0.0000 fETH + 100.0000 f564, debt 0.0000 fETH + 0.0000 f564, health inf, badDebt 11880.9526 f564 / 0.0000 fETH
+settleBadDebt(frank) again, by CHAO: InsufficientCollateral
+  -> withdraw: ok ->  | borrow: UnsettledBadDebt | repay: InvalidAmount
+frank deposits up to exactly the bad debt (11880.9526): ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=11,780.9526)
+settleBadDebt with collateral == bad debt: InsufficientCollateral
+frank deposits 100 more: ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=100.0000)
+settleBadDebt with collateral > bad debt: InsufficientCollateral
+settleBadDebt(frank), a stranger: InsufficientCollateral
+frank: collateral 0.0000 fETH + 11980.9526 f564, debt 0.0000 fETH + 0.0000 f564, health inf, badDebt 11880.9526 f564 / 0.0000 fETH | borrow now: UnsettledBadDebt
+  frank tops up to 1.0500 x bad debt (12475.0002): ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=494.0476)
+  settleBadDebt with collateral = 1.0500 x bad debt: InsufficientCollateral
+  frank tops up to 1.2500 x bad debt (14851.1907): ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=2,376.1905)
+  settleBadDebt with collateral = 1.2500 x bad debt: InsufficientCollateral
+  frank tops up to 1.6667 x bad debt (19801.5876): ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=4,950.3969)
+  settleBadDebt with collateral = 1.6667 x bad debt: InsufficientCollateral
+  frank tops up to 2.0000 x bad debt (23761.9051): ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=3,960.3175)
+  settleBadDebt with collateral = 2.0000 x bad debt: InsufficientCollateral
+  frank tops up to 2.5000 x bad debt (29702.3814): ok | Deposited(account=0xd41c057f, token=0xDe09E74d, amount=5,940.4763)
+  settleBadDebt with collateral = 2.5000 x bad debt: InsufficientCollateral
+settleBadDebt(frank), a stranger: InsufficientCollateral
+frank: collateral 0.0000 fETH + 29702.3814 f564, debt 0.0000 fETH + 0.0000 f564, health inf, badDebt 11880.9526 f564 / 0.0000 fETH | borrow now: UnsettledBadDebt
+settleBadDebt on a healthy account (alice): InsufficientCollateral
+settleBadDebt on an account with no position (JOHN): ok |
+borrowing by others after the bad debt: ok ->  | market f564: debt 23805.4521 ceiling 100000.0000 util 0.238055 rate 0.189270/yr

@@ -1,0 +1,42 @@
+{
+  "controlVersion": 118,
+  "status": "running",
+  "participantEnabled": false,
+  "tradingEnabled": false,
+  "phase": {
+    "id": "phase-3",
+    "startsAt": 1795507345,
+    "scheduledEndsAt": 1796716945,
+    "deployedBlock": 12200847,
+    "f564": {
+      "name": "FIN564 Phase 3 f564",
+      "symbol": "f564",
+      "address": "0xc319f958df8A74b077578b437C402dC7D7687864",
+      "decimals": 18
+    },
+    "feth": {
+      "name": "FIN564 Phase 3 fETH",
+      "symbol": "fETH",
+      "address": "0xE00296A373Cd19E6aBAf085e50a393938879737D",
+      "decimals": 18
+    },
+    "pricingPool": "0x7FE977Ba8a5b7b25B8805B3f9456D21D3A4a9934",
+    "officialPools": [
+      {
+        "fee": 3000,
+        "address": "0x7FE977Ba8a5b7b25B8805B3f9456D21D3A4a9934"
+      }
+    ],
+    "creditFacility": "0x2a61eB24e46E8568C15becaEAa7E549B50700Dd2",
+    "bot": {
+      "enabled": true,
+      "tradeBps": 10,
+      "inventoryF564": "100000",
+      "inventoryFeth": "100",
+      "marketAddress": "0x6011139d5F16689bDE1D245C6247b088F9582026",
+      "backstopAddress": "0xC0588ab2a7D22FFAaf7f36ad3820Db2Fd4FD4B1e",
+      "intervalSeconds": 300
+    },
+    "adjustmentNote": "Publish a gradual liquidity withdrawal schedule before starting."
+  }
+}

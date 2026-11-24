@@ -108,8 +108,8 @@ def post_webhook(url, body):
             "User-Agent": "trading-bot-watchdog/1.0",
         },
     )
-    with urllib.request.urlopen(request, timeout=10):
-        pass
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.status
 
 
 def notify(severity, text, now, settings, emit, post):

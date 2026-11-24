@@ -182,6 +182,8 @@ def test_post_webhook_identifies_itself(monkeypatch):
     captured = {}
 
     class _Response:
+        status = 204
+
         def __enter__(self):
             return self
 
@@ -195,7 +197,10 @@ def test_post_webhook_identifies_itself(monkeypatch):
         return _Response()
 
     monkeypatch.setattr(watchdog.urllib.request, "urlopen", fake_urlopen)
-    watchdog.post_webhook("https://discord.example/hook", b'{"content": "x"}')
+    assert (
+        watchdog.post_webhook("https://discord.example/hook", b'{"content": "x"}')
+        == 204
+    )
     assert captured["user_agent"] == "trading-bot-watchdog/1.0"
     assert captured["content_type"] == "application/json"
     assert captured["timeout"] == 10

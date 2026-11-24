@@ -1,0 +1,78 @@
+Phase 3 token flows since the phase block
+run at 11-24 16:20:25 UTC
+head 12203711 | scanned from block 12200847 | endowment recipients 16
+
+transfers between real addresses (no mints): 16
+   blk 12201075 11-24 07:11:12 f564    40,000.0000  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201075 11-24 07:11:12 fETH        40.0000  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201152 11-24 07:26:48 f564    20,449.5429  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201152 11-24 07:26:48 fETH        21.5857  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201186 11-24 07:33:48 f564    66,864.1836  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201212 11-24 07:39:24 f564    60,507.2640  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201240 11-24 07:45:36 fETH        55.9310  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12201266 11-24 07:51:00 fETH        60.3900  0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12202696 11-24 12:50:36 fETH         0.0422  0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934 -> 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot]
+   blk 12202696 11-24 12:50:36 f564        42.2900  0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12203179 11-24 14:30:36 f564        20.9380  0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934 -> 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot]
+   blk 12203179 11-24 14:30:36 fETH         0.0210  0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12203333 11-24 15:02:48 f564    10,000.0000  0xb20d356f8cce14d79a69870e7950d0459571753d [comp-1 wallet] -> 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault]
+   blk 12203338 11-24 15:03:48 fETH        10.0000  0xb20d356f8cce14d79a69870e7950d0459571753d [comp-1 wallet] -> 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault]
+   blk 12203434 11-24 15:23:48 f564     7,791.5956  0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+   blk 12203434 11-24 15:23:48 fETH         8.2084  0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934
+
+approvals since the phase block: 33
+   blk 12201048 11-24 07:05:48 f564          40,000.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201064 11-24 07:09:00 fETH              40.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201075 11-24 07:11:12 f564               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201075 11-24 07:11:12 fETH               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201100 11-24 07:16:24 f564          20,449.54  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201139 11-24 07:24:12 fETH              21.59  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201152 11-24 07:26:48 f564               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201152 11-24 07:26:48 fETH               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201171 11-24 07:30:36 f564          66,864.18  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201186 11-24 07:33:48 f564               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201205 11-24 07:38:00 f564          60,507.26  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201212 11-24 07:39:24 f564               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201230 11-24 07:43:36 fETH              55.93  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201240 11-24 07:45:36 fETH               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201258 11-24 07:49:24 fETH              60.39  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201266 11-24 07:51:00 fETH               0.00  owner 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] -> position manager
+   blk 12201507 11-24 08:40:36 fETH               0.05  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12201930 11-24 10:10:48 fETH               0.06  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12202072 11-24 10:40:48 f564              18.79  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12202212 11-24 11:10:36 f564              54.34  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12202357 11-24 11:40:36 f564              58.82  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12202696 11-24 12:50:36 f564              16.53  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12203179 11-24 14:30:36 fETH               0.04  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12203346 11-24 15:05:36 f564              50.65  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+   blk 12203434 11-24 15:23:48 f564               0.00  owner 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> position manager
+   blk 12203434 11-24 15:23:48 f564               0.00  owner 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> position manager
+   blk 12203434 11-24 15:23:48 f564           7,791.60  owner 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> position manager
+   blk 12203434 11-24 15:23:48 fETH               0.00  owner 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> position manager
+   blk 12203434 11-24 15:23:48 fETH               0.00  owner 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> position manager
+   blk 12203434 11-24 15:23:48 fETH               8.21  owner 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] -> position manager
+   blk 12203491 11-24 15:35:48 f564 115,792,089,237,316,203,707,617,735,395,386,539,918,674,240,093,853,421,928,448.00  owner 0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7 [comp-2 wallet] -> credit facility
+   blk 12203491 11-24 15:35:48 fETH 115,792,089,237,316,203,707,617,735,395,386,539,918,674,240,093,853,421,928,448.00  owner 0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7 [comp-2 wallet] -> credit facility
+   blk 12203589 11-24 15:55:36 fETH               0.05  owner 0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] -> swap router
+
+addresses (18): type, balances, endowment
+   ACTIVE     EOA      0x6011139d5f16689bde1d245c6247b088f9582026 [market bot] | f564 999,978.6480 | fETH 1,000.0212 | ETH   2.499325 | endowed 1,000,000.0000
+   ACTIVE     contract 0x7e0c07c6d5262727b598e299a14b75acb3e5666f [comp-1 vault] | f564   2,208.4044 | fETH     1.7916 | ETH   0.000000 | endowed       0.0000
+   ACTIVE     contract 0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934 | f564 195,633.9380 | fETH   186.0938 | ETH   0.000000 | endowed       0.0000
+   ACTIVE     contract 0x92a3b01d3af8aa7fc0d6695e2153f23d9146ff17 [CHAO (organizer)] | f564 812,179.0096 | fETH   822.0934 | ETH   0.265704 | endowed 1,000,000.0000
+   ACTIVE     contract 0xb20d356f8cce14d79a69870e7950d0459571753d [comp-1 wallet] | f564       0.0000 | fETH     0.0000 | ETH   5.818927 | endowed  10,000.0000
+   inactive   EOA      0x21b1a1e9f20377f4cbf6d874cfcf3df37699c7b7 [comp-2 wallet] | f564  10,000.0000 | fETH    10.0000 | ETH   2.012558 | endowed  10,000.0000
+   inactive   EOA      0x24ff22d754d5c0cfdbd6ad3c30ee8af487abe694 | f564  10,000.0000 | fETH    10.0000 | ETH   0.483307 | endowed  10,000.0000
+   inactive   contract 0x2885f394be3a5c36a0ce67701bfb6c49bb1fb8db | f564  10,000.0000 | fETH    10.0000 | ETH   6.461663 | endowed  10,000.0000
+   inactive   contract 0x357b12245881cac9d9d62e740e298dccb8b83c0a | f564  10,000.0000 | fETH    10.0000 | ETH   0.220622 | endowed  10,000.0000
+   inactive   contract 0x4b44681d79e84c7b0911556db5e63170a3490f4a | f564  10,000.0000 | fETH    10.0000 | ETH   0.107204 | endowed  10,000.0000
+   inactive   contract 0x566a1071be7c2c5d4c8e8bac4e24f57879183744 | f564  10,000.0000 | fETH    10.0000 | ETH   0.969938 | endowed  10,000.0000
+   inactive   contract 0x66227a239d08813650adabd0a7f3b13ab6e06a18 | f564  10,000.0000 | fETH    10.0000 | ETH   0.753240 | endowed  10,000.0000
+   inactive   contract 0x99a7161a05edbbfd20f36023cea6f3c1dd3a81fd | f564  10,000.0000 | fETH    10.0000 | ETH   0.520809 | endowed  10,000.0000
+   inactive   contract 0xa353f08d51bc94ab0f16beb85a362ea897f26728 | f564  10,000.0000 | fETH    10.0000 | ETH   1.000438 | endowed  10,000.0000
+   inactive   contract 0xa9169a32c2a4b28d0d3c14a4c5510aee32ef466c | f564  10,000.0000 | fETH    10.0000 | ETH   0.844161 | endowed  10,000.0000
+   inactive   contract 0xb6bf0ba3f43d4386216df037dca1a1203038e135 | f564  10,000.0000 | fETH    10.0000 | ETH   3.062931 | endowed  10,000.0000
+   inactive   contract 0xd90e50518e4c45285c0abe6dfc000add0557fd4d | f564  10,000.0000 | fETH    10.0000 | ETH   0.907525 | endowed  10,000.0000
+   inactive   contract 0xf22331ef99d96b5f89e2bbfbc41f9ba796500041 | f564  10,000.0000 | fETH    10.0000 | ETH   1.099824 | endowed  10,000.0000
+
+flow probe complete 16:20:30 UTC

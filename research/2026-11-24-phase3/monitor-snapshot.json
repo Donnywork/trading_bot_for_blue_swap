@@ -1,0 +1,62 @@
+{
+  "phase": 3,
+  "pool": "0x7FE977Ba8a5b7b25B8805B3f9456D21D3A4a9934",
+  "credit": "0x2a61eB24e46E8568C15becaEAa7E549B50700Dd2",
+  "head": 12204329,
+  "indexed_block": 12204327,
+  "indexed_hash": "0xe1b4f500c47867e7eec943129a17afbe77a7db3a6e589d7f94ad3920a8219cd3",
+  "market": {
+    "block": 12204327,
+    "spot": 1000.032052593315,
+    "tick": -69082,
+    "liquidity": 57341279504686431094117,
+    "twap": 1000.0993389772589,
+    "twap_seconds": 1800,
+    "paused": false,
+    "bonus_bps": 500,
+    "markets": {
+      "f564": {
+        "debt": 0,
+        "ceiling": 100000000000000000000000,
+        "utilization_wad": 0,
+        "apr_wad": 100000000000000000
+      },
+      "fETH": {
+        "debt": 0,
+        "ceiling": 100000000000000000000,
+        "utilization_wad": 0,
+        "apr_wad": 100000000000000000
+      }
+    },
+    "borrower_health_wad": {},
+    "liquidity_net_by_tick": {
+      "-887220": 1264911064067351732801,
+      "-73140": 16186207363665940778482,
+      "-70500": 32372414727331893605300,
+      "-70440": -16186207363665940778482,
+      "-69420": 56076368440619079361316,
+      "-69360": -32372414727331893605300,
+      "-68820": 32131414289653300151134,
+      "-68760": -56076368440619079361316,
+      "-67500": 16065707144826837317113,
+      "-67440": -32131414289653300151134,
+      "-64740": -16065707144826837317113,
+      "887220": -1264911064067351732801
+    }
+  },
+  "site": {
+    "controlVersion": 119,
+    "status": "running",
+    "participantEnabled": false,
+    "tradingEnabled": false,
+    "phase": "phase-3",
+    "tradeBps": 10,
+    "intervalSeconds": 300,
+    "adjustmentNote": "Publish a gradual liquidity withdrawal schedule before starting.",
+    "pricingPool": "0x7FE977Ba8a5b7b25B8805B3f9456D21D3A4a9934",
+    "creditFacility": "0x2a61eB24e46E8568C15becaEAa7E549B50700Dd2"
+  },
+  "site_checked_at": 1795544941,
+  "health": "ready",
+  "updated": 1795544958
+}
