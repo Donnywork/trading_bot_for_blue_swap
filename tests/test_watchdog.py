@@ -1,5 +1,7 @@
 """Watchdog alerting (watchdog.py): watch and alert, never touch anything."""
 
+import urllib.error
+
 import pytest
 
 import watchdog
@@ -122,6 +124,55 @@ def test_webhook_failure_never_stops_the_watchdog(settings, monkeypatch):
             post=failing_post,
         )
     assert any("webhook delivery failed" in line for line in lines)
+
+
+def test_webhook_failure_names_the_http_status(settings, monkeypatch):
+    halted = {
+        "updated": 1000,
+        "health": "halted",
+        "message": "Execution halted. reconcile",
+    }
+    lines = []
+
+    def forbidden_post(url, body):
+        raise urllib.error.HTTPError(url, 403, "Forbidden", None, None)
+
+    monkeypatch.setattr(watchdog, "read_state", lambda path, now: (halted, None))
+    with pytest.raises(_Stop):
+        watchdog.run(
+            settings,
+            now=lambda: 1000,
+            sleep=lambda seconds: (_ for _ in ()).throw(_Stop()),
+            read_state=lambda path, now: (halted, None),
+            emit=lines.append,
+            post=forbidden_post,
+        )
+    assert any("webhook delivery failed (403)" in line for line in lines)
+
+
+def test_post_webhook_identifies_itself(monkeypatch):
+    # Discord's edge 403s the default Python-urllib User-Agent, so the
+    # request has to carry a custom one.
+    captured = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout):
+        captured["user_agent"] = request.get_header("User-agent")
+        captured["content_type"] = request.get_header("Content-type")
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr(watchdog.urllib.request, "urlopen", fake_urlopen)
+    watchdog.post_webhook("https://discord.example/hook", b'{"content": "x"}')
+    assert captured["user_agent"] == "trading-bot-watchdog/1.0"
+    assert captured["content_type"] == "application/json"
+    assert captured["timeout"] == 10
 
 
 def test_config_parses_and_rejects_garbage():

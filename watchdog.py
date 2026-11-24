@@ -97,8 +97,16 @@ def classify(state, error, now, stale_after):
 
 
 def post_webhook(url, body):
+    # Discord's edge 403s the default Python-urllib User-Agent (observed
+    # 2026-11-24: curl got 204 from the same URL, urllib got 403), so the
+    # watchdog has to identify itself to get through.
     request = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "trading-bot-watchdog/1.0",
+        },
     )
     with urllib.request.urlopen(request, timeout=10):
         pass
@@ -114,10 +122,12 @@ def notify(severity, text, now, settings, emit, post):
         ).encode()
         try:
             post(settings["webhook"], body)
-        except OSError:
+        except OSError as error:
             # Delivery failure must never take the watchdog down; the log
-            # line above is the durable record.
-            emit(f"{stamp} UTC [info] webhook delivery failed")
+            # line above is the durable record. Only the kind/status is
+            # logged — exception text can embed the URL, never print it.
+            detail = getattr(error, "code", None) or type(error).__name__
+            emit(f"{stamp} UTC [info] webhook delivery failed ({detail})")
 
 
 def run(settings, now, sleep, read_state=read_state, emit=None, post=post_webhook):
