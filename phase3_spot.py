@@ -18,9 +18,11 @@ from runtime import ConfigurationError
 ADDRESS = Web3.to_checksum_address("0x418f86d4f99ce7fb7d045db23c933558072a02df")
 RUNTIME_HASH = "0x75ba42696e75209c695a55a45d01787baef785ee6c0545b1c4554f083e48e042"
 QUOTE, BASE = PHASE3.quote, PHASE3.base
-SIZE = 250 * WAD
+# These amounts are suggestions for the unsigned owner calls. Live sizing reads the vault.
+PROPOSED_SIZE = 1000 * WAD
 MIN_SIZE = 125 * WAD
-BASE_CAP = WAD // 2
+PROPOSED_EXIT_CAP = 3 * WAD // 2
+LEGACY_ENTRY_CEILING = 250 * WAD
 HOLD = 1800
 TRANSFER = Web3.keccak(text="Transfer(address,address,uint256)")
 
@@ -49,7 +51,9 @@ def inventory(directory):
         if (
             fill["side"] == "buy"
             and position is None
-            and MIN_SIZE <= fill["spent"] <= SIZE
+            and MIN_SIZE
+            <= fill["spent"]
+            <= fill.get("quote_cap_raw", LEGACY_ENTRY_CEILING)
         ):
             position = fill
         elif (
@@ -154,15 +158,15 @@ def owner_transactions():
         ]
     )
     for dest, contract, method, args in [
-        (ADDRESS, trading, "setTokenCap", [QUOTE, SIZE]),
-        (ADDRESS, trading, "setTokenCap", [BASE, BASE_CAP]),
+        (ADDRESS, trading, "setTokenCap", [QUOTE, PROPOSED_SIZE]),
+        (ADDRESS, trading, "setTokenCap", [BASE, PROPOSED_EXIT_CAP]),
         (
             "0x346B0c324963B91afb6f722d126E90506623bB8d",
             credit,
             "withdrawToOwner",
-            [QUOTE, SIZE],
+            [QUOTE, PROPOSED_SIZE],
         ),
-        (QUOTE, token, "transfer", [ADDRESS, SIZE]),
+        (QUOTE, token, "transfer", [ADDRESS, PROPOSED_SIZE]),
     ]:
         yield {
             "chainId": vault.CHAIN_ID,
@@ -256,7 +260,7 @@ class Spot:
                 return state | {"status": "waiting_for_confirmed_sale"}
             if not eligible_vault():
                 return state | {"status": "awaiting_competition_trading"}
-            side, amount = "buy", min(SIZE, qcap, cash)
+            side, amount = "buy", min(qcap, cash)
         tip = self.chain.contracts["spot"]
         src, dst = (QUOTE, BASE) if side == "buy" else (BASE, QUOTE)
         args = [src, dst, FEE, amount]
@@ -286,6 +290,8 @@ class Spot:
             "input_raw": amount,
             "minimum_raw": minimum,
         }
+        if side == "buy":
+            detail["quote_cap_raw"] = qcap
         if not self.trader.live:
             return state | detail | {"status": "simulated"}
         status = self.execute(block, block_hash, timestamp, key, data, detail)
@@ -340,7 +346,14 @@ class Spot:
                 self.directory / "pending.json",
                 None,
                 before_intent=final_check,
-                account_fill=lambda r: confirmed_fill(r, side, amount, minimum),
+                account_fill=lambda r: (
+                    confirmed_fill(r, side, amount, minimum)
+                    | (
+                        {"quote_cap_raw": detail["quote_cap_raw"]}
+                        if side == "buy"
+                        else {}
+                    )
+                ),
             )
             alert(
                 f"Phase 3 spot {side} confirmed ({detail['reason']}) in block {record['block']}, tx {record['tx_hash']}"

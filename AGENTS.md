@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Phase 3 spot entry size follows the smaller of the owner's on-chain quote cap and the trading vault's liquid f564. New buy receipts retain the observed cap for recovery. Pre-change receipts use the historical 250 f564 software ceiling. The unsigned starter allocation is 1,000 f564 with a 1.5 fETH exit cap.
+
 Phase 3 spot uses `phase3_auto.py --live --with-spot` and the registered legacy `TradingBot` at `0x418F86D4F99Ce7fB7d045dB23c933558072A02Df`. The operator trades only the Phase 3 pair at fee 3000 on confirmed signals. Preserve separate custody, receipt-derived single-position accounting, canonical fill checks and the shared liquidation sender lock, pending record and UTC gas budget. Per-address competition eligibility uses the addressed control API. See `docs/PHASE3_SPOT.md`.
 
 Phase 3 automation (2026-11-24) runs `phase3_auto.py --live` beside the read-only monitor. It previews whole-vault atomic liquidation and close on fresh pinned Sepolia state, rechecks on the sending provider and submits through `phase3_vault.broadcast` with the shared operator lock and durable pending record. The worker polls owner caps and borrower health, uses at most 1,000 f564 or 1 fETH per call and observes local liquid reserves of 6,000 f564 and 6 fETH. Native gas budgets are 0.001 Sepolia ETH per send and 0.01 per UTC day. `deploy/phase3/` holds unsigned owner requests. An uncertain broadcast halts for reconciliation. See `docs/PHASE3_VAULT.md#automatic-liquidations`.

@@ -2,7 +2,7 @@
 
 ### Phase 3 observation
 
-For spot trading, fund and configure the registered trading vault, then check the `spot.status` field in `logs/phase3/auto.json`. [Wallet calls and strategy rules](PHASE3_SPOT.md)
+For spot trading, fund and configure the registered trading vault, then check the `spot.status` field in `logs/phase3/auto.json`. The suggested buy cap is 1,000 f564 and the suggested sell cap is 1.5 fETH. [Wallet calls and strategy rules](PHASE3_SPOT.md)
 
 For automatic trading, follow [automatic liquidation setup](PHASE3_VAULT.md#automatic-liquidations). `logs/phase3/auto.json` reports the live worker's status, latest observed block, borrower count and owner caps.
 

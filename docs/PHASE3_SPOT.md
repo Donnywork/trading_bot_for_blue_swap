@@ -8,18 +8,18 @@ From the enrolled owner wallet on Sepolia, submit the following four transaction
 
 | Order | Destination | Action |
 |---|---|---|
-| 1 | TradingBot `0x418F…02Df` | Set the Phase 3 f564 input cap to 250 f564. |
-| 2 | TradingBot `0x418F…02Df` | Set the Phase 3 fETH input cap to 0.5 fETH so the worker can sell what it buys. |
-| 3 | Credit vault `0x346B…bB8d` | Withdraw 250 f564 to the enrolled wallet. |
-| 4 | Phase 3 f564 token `0xc319f958df8A74b077578b437C402dC7D7687864` | Transfer the 250 f564 from the wallet to the trading vault `0x418F86D4F99Ce7fB7d045dB23c933558072A02Df`. |
+| 1 | TradingBot `0x418F…02Df` | Set the Phase 3 f564 input cap to 1,000 f564. |
+| 2 | TradingBot `0x418F…02Df` | Set the Phase 3 fETH input cap to 1.5 fETH so the worker can sell what it buys. |
+| 3 | Credit vault `0x346B…bB8d` | Withdraw 1,000 f564 to the enrolled wallet. |
+| 4 | Phase 3 f564 token `0xc319f958df8A74b077578b437C402dC7D7687864` | Transfer the 1,000 f564 from the wallet to the trading vault `0x418F86D4F99Ce7fB7d045dB23c933558072A02Df`. |
 
-The trading vault already allows fee tier 3000. Funding it with f564 lets the first buy establish the fETH position. With the balances observed on November 24, this allocation leaves about 7,749.98 f564 and 8 fETH in the credit vault.
+The trading vault already allows fee tier 3000. With the empty spot vault and credit balances observed on November 24, funding 1,000 f564 leaves about 6,999.98 f564 and 8 fETH in the credit vault. If you already funded a smaller allocation, transfer only the difference needed to reach your chosen allocation.
 
 ## Entry and exit
 
 The worker looks at the latest mined pool state. It buys only when the last swap was an fETH sale in the previous six blocks and spot is at least 1.25% below the facility's 30-minute average. It simulates the trading vault's exact swap and checks that the minimum fill, valued at the average price after a future sale fee, would cover the profit target. Pool depth at exit and recovery of the price are uncertain. A 0.30% fee on each leg requires about a 0.603% price recovery just to break even before price impact or gas.
 
-The worker opens one position of 125–250 f564, limited by cash and owner caps. The exit sells the fETH received on the entry receipt. An executable quote triggers a sale at a 0.50% gain, a 1.50% loss, or after 30 minutes. These returns are in f564 before native gas. The entry and exit are separate transactions. On stop and timer exits the worker uses a minimum output 0.10% below its current quote, so losses can exceed 1.50%. A mined exit starts a 30-minute cooldown. The legacy TradingBot enforces the minimum output on chain but its swap method has no expiration. A submitted trade can mine later at any price that meets that minimum.
+The worker opens one position using the smaller of the spot vault's f564 balance and its owner-set f564 cap. The minimum entry is 125 f564. The exit sells the fETH received on the entry receipt. An executable quote triggers a sale at a 0.50% gain, a 1.50% loss, or after 30 minutes. At 1,000 f564 these thresholds correspond to +5 and −15 f564 before native gas. The entry and exit are separate transactions. On stop and timer exits the worker uses a minimum output 0.10% below its current quote, so losses can exceed 1.50%. A mined exit starts a 30-minute cooldown. The legacy TradingBot enforces the minimum output on chain but its swap method has no expiration. A submitted trade can mine later at any price that meets that minimum.
 
 ## Operation
 

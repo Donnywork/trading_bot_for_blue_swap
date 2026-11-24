@@ -23,24 +23,25 @@ def test_discount_and_exit_thresholds():
     assert spot.exit_reason(p, 10049, 1900) == "time_stop"
 
 
+@pytest.mark.parametrize(("cap", "cash"), [(250, 1000), (1500, 1100)])
 def test_single_pool_worker_recovers_and_sells_only_the_fill(
-    combined, tmp_path, monkeypatch
+    combined, tmp_path, monkeypatch, cap, cash
 ):
     e = combined
     w = e.w3
     q = e.a.address
     b = e.b.address
-    size = spot.SIZE
+    size = min(cap, cash) * WAD
     t = e.deploy(
         "TradingBot",
         e.owner,
         e.router.address,
         e.operator,
         [q, b],
-        [size, spot.BASE_CAP],
+        [cap * WAD, spot.PROPOSED_EXIT_CAP],
         [3000],
     )
-    e.a.functions.mint(t.address, size).transact()
+    e.a.functions.mint(t.address, cash * WAD).transact()
     e.b.functions.mint(t.address, WAD).transact()
     e.router.functions.setRoute(q, 3000, (1, 980, 10**30, 0, False)).transact()
     e.router.functions.setRoute(b, 3000, (995, 1, 10**30, 0, False)).transact()
@@ -126,12 +127,19 @@ def test_single_pool_worker_recovers_and_sells_only_the_fill(
     assert check()["side"] == "buy"
     fill, _ = spot.inventory(folder)
     assert fill["received"] == size // 980
+    assert fill["quote_cap_raw"] == cap * WAD
+    if cap == 250:
+        # A position from the original worker has no cap field; it must still exit.
+        path = next((folder / "actions").glob("*-buy-*.json"))
+        row = json.loads(path.read_text())
+        del row["spot_fill"]["quote_cap_raw"]
+        path.write_text(json.dumps(row))
     worker = spot.Spot(trader)
     assert check()["reason"] == "take_profit"
     assert spot.inventory(folder)[0] is None
     assert (
         e.b.functions.balanceOf(t.address).call() == WAD
-        and e.a.functions.balanceOf(t.address).call() > size
+        and e.a.functions.balanceOf(t.address).call() > cash * WAD
     )
     assert check()["status"] == "entry_cooldown"
     records = list((folder / "actions").glob("*.json"))
