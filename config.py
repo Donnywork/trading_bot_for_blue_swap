@@ -172,6 +172,20 @@ def fallback_urls():
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+_PACE = threading.local()
+
+
+def last_pace_wait_ms():
+    """Milliseconds the latest request on this thread spent waiting in pacing.
+
+    The pending hot path samples this right after its batched reads return,
+    splitting the batch's wall time into our own pacing (controllable) and
+    the provider round trip (only racing another endpoint can shrink it).
+    Urgent raw sends skip the wait and therefore record 0.0.
+    """
+    return getattr(_PACE, "last_wait_ms", None)
+
+
 class RpcAdapter(requests.adapters.HTTPAdapter):
     """Pace and count every HTTP attempt, underneath Web3's cache and retry loop."""
 
@@ -212,6 +226,7 @@ class RpcAdapter(requests.adapters.HTTPAdapter):
                 wait = max(wait, self.cu_next_at - now)
             if wait > 0:
                 time.sleep(wait)
+            _PACE.last_wait_ms = round(max(wait, 0.0) * 1000, 3)
             self.last_at = time.monotonic()
             # A batch reserves its call count against the per-second cap —
             # exactly the price of the same calls sent one by one. The old

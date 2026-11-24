@@ -271,6 +271,50 @@ def test_raw_sends_skip_the_pacing_wait_but_still_reserve(monkeypatch):
     assert sleeps == pytest.approx([0.4], abs=1e-9)
 
 
+def test_last_pace_wait_ms_reports_each_requests_wait(monkeypatch):
+    # The hot path must be able to tell its own pacing apart from the
+    # network round trip: the wait is removable locally (priority), the
+    # round trip is not (only a raced endpoint shrinks it). The helper
+    # answers per thread, so a background observer's waits never land in
+    # the execution thread's marks; the executor samples it immediately
+    # after its own batch, before any other request can overwrite it.
+    sleeps = fake_clock(monkeypatch)
+    monkeypatch.setattr(config._PACE, "last_wait_ms", None, raising=False)
+
+    def send(self, req, **kwargs):
+        reply = requests.Response()
+        reply.status_code = 200
+        reply._content = b'{"jsonrpc":"2.0","id":1,"result":"0x1"}'
+        return reply
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+    adapter = config.RpcAdapter(Decimal(20), None, Decimal(250))
+    heavy_batch = [
+        {"jsonrpc": "2.0", "id": i, "method": "eth_getBlockByNumber", "params": []}
+        for i in range(5)
+    ]
+    raw = {"jsonrpc": "2.0", "id": 1, "method": "eth_sendRawTransaction", "params": []}
+    follow = {"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []}
+    assert config.last_pace_wait_ms() is None
+    adapter.send(
+        requests.Request(
+            "POST", "http://rpc.test", data=json.dumps(heavy_batch)
+        ).prepare()
+    )
+    assert config.last_pace_wait_ms() == 0.0
+    adapter.send(
+        requests.Request("POST", "http://rpc.test", data=json.dumps(raw)).prepare()
+    )
+    assert config.last_pace_wait_ms() == 0.0  # an urgent send skips the wait
+    adapter.send(
+        requests.Request("POST", "http://rpc.test", data=json.dumps(follow)).prepare()
+    )
+    # The follow read waits out the batch's 100 CU reservation (0.4 s at
+    # 250 CU/s) — exactly what the hot path needs to see as its own cost.
+    assert sleeps == pytest.approx([0.4], abs=1e-9)
+    assert config.last_pace_wait_ms() == pytest.approx(400.0)
+
+
 # ---------------------------------------------------------------- failover
 
 

@@ -13,6 +13,7 @@ from web3.exceptions import TimeExhausted
 
 import arbitrage
 import bot_contract
+import config
 import control
 import event_fees
 import event_market as market
@@ -225,6 +226,16 @@ def test_pending_cycle_submits_bracket_rung_with_snapshot_limits(pending_env):
         "balance": 1,
         "nonce": 1,
     }
+
+
+def test_pending_cycle_splits_pacing_wait_from_round_trip(pending_env, monkeypatch):
+    # The batch's wall time must decompose into our own pacing and the
+    # provider round trip: only the first is ours to remove. The helper is
+    # sampled on the execution thread right after the batch returns.
+    monkeypatch.setattr(config, "last_pace_wait_ms", lambda: 12.3)
+    f = pending_env
+    result = f.ex.pending_cycle(f.decision, f.pinned)
+    assert result["timing"]["read_pace_wait_ms"] == 12.3
 
 
 def test_presend_refusal_cancels_the_sweep_too(pending_env):

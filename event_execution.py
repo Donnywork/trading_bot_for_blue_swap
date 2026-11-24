@@ -7,6 +7,7 @@ from web3.exceptions import TimeExhausted, Web3Exception
 
 import arbitrage
 import bot_contract
+import config
 import event_activity
 import event_fees
 import event_market as market
@@ -387,6 +388,10 @@ class Executor:
         header, balance, nonce = self.pending_reads(
             candidate["snapshot_block"], candidate["snapshot_hash"]
         )
+        # Split the batch's wall time into pacing wait and round trip: the
+        # wait is ours to remove (hot-path priority), the round trip is what
+        # only a second raced endpoint could shrink.
+        timing.data["read_pace_wait_ms"] = config.last_pace_wait_ms()
         if {plan["buy_fee"], plan["sell_fee"]} != set(market.POOLS) or {
             p.get("fee") for p in snapshot.get("profiles", [])
         } != set(market.POOLS):

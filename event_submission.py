@@ -16,6 +16,7 @@ class Timing:
             "first_seen_source": first_seen.get("source") if first_seen else None,
             "queue_wait_ms": None,
             "dispatch_ms": None,
+            "read_pace_wait_ms": None,
             "validation_started_at": clock(),
             "validation_complete_at": None,
             "broadcast_start_at": None,
