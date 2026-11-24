@@ -2,6 +2,8 @@
 
 ## Phase 3 monitor
 
+The independent [Phase 3 credit vault deployment and operator commands](PHASE3_VAULT.md) use the same checkout. The release contains compiled bytecode and ABI and runs on the server without `solc`.
+
 Start from the project directory with the Phase 2 sender stopped and its ledger reconciled. The Phase 3 registry contains the new tokens, single 3000-fee pool and credit facility. The monitor connects to a public Sepolia endpoint by default and validates their identities. To select a different endpoint, export `PHASE3_RPC_URL` in the monitor process environment. It does not load `.env`.
 
 ```sh

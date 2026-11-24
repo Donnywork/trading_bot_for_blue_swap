@@ -26,7 +26,11 @@ def sender(directory, service, *, live=True):
         return
     directory = Path(directory)
     with acquire(directory / "operator.lock"):
-        for marker in (directory / "HALTED", directory / "events/HALTED"):
+        for marker in (
+            directory / "HALTED",
+            directory / "events/HALTED",
+            directory / "phase3/pending.json",
+        ):
             if marker.exists():
                 raise SendBlocked(f"Reconcile {marker} before starting a live sender")
         if service != "legacy":
@@ -41,7 +45,8 @@ def require_flat(path, position_key, intent_key=None):
     try:
         data = json.loads(Path(path).read_text())
         occupied = data[position_key] is not None or (
-            intent_key and data[intent_key] is not None
+            intent_key
+            and (data[intent_key] is not None or data.get("intent_extra") is not None)
         )
     except FileNotFoundError:
         return

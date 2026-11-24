@@ -2,6 +2,8 @@
 
 ### Phase 3 observation
 
+For the credit vault, follow the [Phase 3 owner walkthrough](PHASE3_VAULT.md). It identifies the wallet for each action, the two Phase 3 tokens and the owner settings for borrowing and liquidation.
+
 After `uv sync`, run `uv run python phase3_monitor.py --once` for one snapshot or omit `--once` for continuous monitoring. No credentials or `.env` are needed. Inspect `logs/phase3/state.json` for the indexed block, market snapshot block, f564 per fETH spot and TWAP, credit utilization and borrower health. `events.sqlite3` holds event amounts in raw token units, transaction hashes and pool/credit transaction signers. A `degraded` status preserves the last successful market snapshot with its block number. Use the [server runbook](DEPLOY.md#phase-3-monitor) for Discord and restart instructions.
 
 **Use [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md) for the current bot.** Follow it in order: install and observe in paper mode, prepare one Phase2TradingBot, verify/register/fund it, simulate, then deliberately enable live trading. It contains the complete commands and wallet/limit examples. For Ubuntu service installation, continue with [DEPLOY](DEPLOY.md#phase-2-on-ubuntu).

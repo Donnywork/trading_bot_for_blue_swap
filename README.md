@@ -2,6 +2,8 @@
 
 **Phase 3 is underway.** Run `uv run python phase3_monitor.py` for the current single-pool market. It tracks every confirmed pool, token and credit-facility event, including previously unseen competitors. Read the [Phase 3 investigation](research/2026-11-24-phase3/README.md) and [monitor runbook](docs/DEPLOY.md#phase-3-monitor). The trading commands below target Phase 2.
 
+The [Phase 3 vault walkthrough](docs/PHASE3_VAULT.md) covers deployment, owner registration, funding, credit limits, and operator calls. Borrowing starts disabled. Phase 3 has its own verified address record and command line.
+
 A Python trading bot for **Sepolia (testnet only)**. The Phase 2 event service monitors two Uniswap V3 pools and trades through one `Phase2TradingBot` contract you own. The competition objective is portfolio return measured in f564. It can run on your laptop or under systemd on Ubuntu 24.04.
 
 > Testnet only. Nothing here has the safeguards real money would need. The strategies in `strategy.py` are placeholders, not trading advice.
