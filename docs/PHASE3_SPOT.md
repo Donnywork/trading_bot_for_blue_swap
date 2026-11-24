@@ -4,6 +4,8 @@
 
 ## Fund and enable spot trading
 
+Open the [local wallet setup page](http://127.0.0.1:8765/) on the computer with your wallet extension. Click **Connect wallet**, select your enrolled account on Sepolia, and review the four transactions below. After each wallet confirmation, click **Check status** to advance. To start the page from the project directory, run `python3 -m http.server 8765 --bind 127.0.0.1 --directory deploy/phase3`.
+
 From the enrolled owner wallet on Sepolia, submit the following four transactions in order. Each transaction carries zero native ETH. The operator pays gas on subsequent trades. The generated JSON supplies the destination and calldata for each row. You can reproduce it offline with `.venv/bin/python phase3_spot.py`. [Unsigned wallet calls](../deploy/phase3/spot-owner-transactions.json)
 
 | Order | Destination | Action |

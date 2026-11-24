@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fund Phase 3 spot trading</title>
+<style>
+  :root {color-scheme:light dark; font:17px/1.55 'Atkinson Hyperlegible Next', system-ui, sans-serif}
+  body {max-width:44rem;margin:4rem auto;padding:0 1.1rem}
+  h1 {line-height:1.1;margin-bottom:.5rem} ol {padding-left:1.5rem} li {padding:.5rem 0}
+  button {font:inherit;padding:.65rem 1rem;border-radius:.45rem;border:1px solid #738783;cursor:pointer}
+  #review,#connect {background:#186452;color:white} button:disabled {opacity:.55;cursor:default}
+  code {font-size:.87em;overflow-wrap:anywhere} output {display:block;margin:1.2rem 0;font-weight:600}
+  small {display:block} [hidden] {display:none!important}
+</style>
+<main>
+  <h1>Fund Phase 3 spot trading</h1>
+  <p>Allocate 1,000 Phase 3 f564 on Sepolia. Review each transaction in your wallet.</p>
+  <ol>
+    <li>Set the trading vault’s buy limit to <strong>1,000 f564</strong>.</li>
+    <li>Set its sell limit to <strong>1.5 fETH</strong>.</li>
+    <li>Withdraw <strong>1,000 f564</strong> from the credit vault to your enrolled wallet.</li>
+    <li>Transfer the <strong>1,000 f564</strong> from your wallet to the trading vault.</li>
+  </ol>
+  <details><summary>Wallet and vault addresses</summary>
+    <p>Enrolled wallet<br><code id="owner"></code></p>
+    <p>Credit vault<br><code id="credit"></code></p>
+    <p>Trading vault<br><code id="spot"></code></p>
+  </details>
+  <output id="status" aria-live="polite">Open this page in the browser where you use your enrolled wallet.</output>
+  <button id="connect">Connect wallet</button>
+  <button id="review" hidden></button>
+  <button id="refresh" hidden>Check status</button>
+  <p id="receipt"></p>
+</main>
+<script type="module">
+const OWNER='0xB6bf0Ba3F43D4386216Df037dcA1A1203038e135', CREDIT='0x346B0c324963B91afb6f722d126E90506623bB8d', SPOT='0x418F86D4F99Ce7fB7d045dB23c933558072A02Df';
+const QUOTE='0xc319f958df8A74b077578b437C402dC7D7687864', BASE='0xE00296A373Cd19E6aBAf085e50a393938879737D';
+const CHAIN='0xaa36a7', UNIT=10n**18n, TARGET=1000n*UNIT, EXIT=3n*UNIT/2n;
+const KEY=`phase3-spot:${CHAIN}:${OWNER}:${TARGET}`;
+const label=['Set 1,000 f564 buy limit','Set 1.5 fETH sell limit','Withdraw 1,000 f564 to my wallet','Send 1,000 f564 to trading vault'];
+const $=id=>document.getElementById(id);
+for (const [id,address] of Object.entries({owner:OWNER,credit:CREDIT,spot:SPOT})) $(id).textContent=address;
+const word=value=>value.replace(/^0x/,'').toLowerCase().padStart(64,'0');
+const data=(selector,address,amount)=>selector+word(address)+word(amount.toString(16));
+const calls=[
+  {to:SPOT,data:data('0x1d47e4a3',QUOTE,TARGET)}, {to:SPOT,data:data('0x1d47e4a3',BASE,EXIT)},
+  {to:CREDIT,data:data('0x47c62a0d',QUOTE,TARGET)}, {to:QUOTE,data:data('0xa9059cbb',SPOT,TARGET)}
+];
+let wallet, saved, visibleStep=-1;
+const rpc=(method,params=[])=>wallet.request({method,params});
+const err=message=>{throw new Error(message)};
+const save=()=>localStorage.setItem(KEY,JSON.stringify(saved));
+function load(){saved=JSON.parse(localStorage.getItem(KEY)||'{"done":[],"pending":null}');}
+function link(hash){
+  $('receipt').replaceChildren();
+  if(!/^0x[\da-f]{64}$/i.test(hash||'')) return;
+  const a=document.createElement('a'); a.href='https://sepolia.etherscan.io/tx/'+hash;
+  a.target='_blank'; a.rel='noopener'; a.textContent='View transaction on Sepolia Etherscan'; $('receipt').append(a);
+}
+async function identity(){
+  const accounts=await rpc('eth_accounts');
+  if(accounts[0]?.toLowerCase()!==OWNER.toLowerCase()) err('Select your enrolled wallet '+OWNER+' and click Check status.');
+  if((await rpc('eth_chainId')).toLowerCase()!==CHAIN) err('Select Ethereum Sepolia in your wallet and click Check status.');
+}
+async function next(){
+  load(); await identity();
+  if(saved.pending){
+    const {hash,step}=saved.pending; link(hash);
+    if(!hash) err('Check your wallet activity before continuing. A wallet request is unresolved.');
+    const r=await rpc('eth_getTransactionReceipt',[hash]);
+    if(!r) err('Waiting for confirmation. Click Check status after your wallet shows the transaction as confirmed.');
+    if(BigInt(r.status)===1n) saved.done.push(step);
+    saved.pending=null; save();
+    if(BigInt(r.status)!==1n) err('The transaction reverted. Click Check status to review this step again.');
+  }
+  const block=await rpc('eth_blockNumber');
+  const read=async(to,selector,address)=>BigInt(await rpc('eth_call',[{to,data:selector+word(address)},block]));
+  const [buy,sell,cash,base,owned,credit]=await Promise.all([
+    read(SPOT,'0x7bcd4ff0',QUOTE),read(SPOT,'0x7bcd4ff0',BASE),read(QUOTE,'0x70a08231',SPOT),
+    read(BASE,'0x70a08231',SPOT),read(QUOTE,'0x70a08231',OWNER),read(QUOTE,'0x70a08231',CREDIT)]);
+  if(buy<TARGET) return 0;
+  if(sell<EXIT) return 1;
+  if(saved.done.includes(3)||cash>=TARGET) return -1;
+  if(base>0n||cash>0n) err('The trading vault already holds tokens. Check its balance and position before adding more funds.');
+  if(owned>=TARGET) return 3;
+  if(saved.done.includes(2)) err('Withdrawal already confirmed. Check the enrolled wallet’s f564 balance before funding again.');
+  if(credit<TARGET+6000n*UNIT) err('Withdrawing 1,000 f564 would leave less than the 6,000 f564 credit reserve.');
+  return 2;
+}
+async function refresh(){
+  visibleStep=-1; $('review').hidden=true;
+  try {
+    const step=await next(); visibleStep=step;
+    if(step<0){$('status').textContent='Funding complete. The server picks up the balances and caps automatically.';return;}
+    $('status').textContent=`Step ${step+1} of 4. Your wallet will ask you to confirm.`;
+    $('review').textContent=label[step]; $('review').hidden=false;
+  }catch(e){$('status').textContent=e.message;}
+}
+async function submit(step){
+  if(await next()!==step) {await refresh();return;}
+  const tx={...calls[step],from:OWNER,value:'0x0',chainId:CHAIN};
+  await rpc('eth_call',[{from:OWNER,to:tx.to,data:tx.data,value:'0x0'},'latest']);
+  await identity(); saved.pending={step}; save();
+  try {
+    const hash=await rpc('eth_sendTransaction',[tx]);
+    saved.pending.hash=hash;save();link(hash);
+  }catch(e){if(e.code===4001){saved.pending=null;save();}throw e;}
+  await refresh();
+}
+$('connect').onclick=async()=>{
+  try {
+    wallet=window.ethereum;
+    if(!wallet) err('Open this link in your desktop browser with your wallet extension enabled.');
+    await rpc('eth_requestAccounts');
+    $('refresh').hidden=false;
+    if((await rpc('eth_chainId')).toLowerCase()!==CHAIN) await rpc('wallet_switchEthereumChain',[{chainId:CHAIN}]);
+    $('connect').hidden=true;
+    wallet.on?.('accountsChanged',refresh); wallet.on?.('chainChanged',refresh);
+    await refresh();
+  }catch(e){$('status').textContent=e.message;}
+};
+$('refresh').onclick=refresh;
+$('review').onclick=async()=>{
+  const step=visibleStep; if(step<0)return;
+  $('review').disabled=true; $('refresh').disabled=true;
+  try{await navigator.locks.request(KEY,{ifAvailable:true},lock=>{
+    if(!lock) err('A setup request is open in another tab.');return submit(step);
+  });}catch(e){$('status').textContent=e.message; $('review').hidden=true;}
+  finally{$('review').disabled=false; $('refresh').disabled=false;}
+};
+</script>
+</html>
