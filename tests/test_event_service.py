@@ -23,7 +23,7 @@ import operator_lock
 import rpc_metrics as rpc
 import strategy
 from event_execution import Executor, sizes, sizes_near
-from event_feed import Feed, endpoint
+from event_feed import Feed, endpoint, race_endpoint
 from event_service import Service
 from event_settings import EventSettings, token_amount
 from event_snapshot import Snapshots, SnapshotUnavailable, apply_logs
@@ -217,6 +217,181 @@ def test_subscription_backlog_retains_notification_arrival_time(monkeypatch):
     assert feed.queue.get_nowait()["received"] == 100
     assert feed.queue.get_nowait()["received"] == 105
     assert feed.queue.empty()
+
+
+def race_socket(replies, stop, sent=None):
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def send(self, value):
+            if sent is not None:
+                sent.append(json.loads(value))
+
+        def recv(self, **kwargs):
+            reply = replies.pop(0)
+            if not replies:
+                stop.set()
+            return json.dumps(reply)
+
+    return Socket()
+
+
+RACE_URI = "wss://race-placeholder"
+
+
+def test_primary_pending_is_tagged_and_claimed(monkeypatch):
+    # The primary's pendings are tagged with their source and take the
+    # shared claim, so a later racer copy of the same hash drops out.
+    stop = threading.Event()
+    replies = [
+        {"id": 1, "result": "0xaa36a7"},
+        {"id": 2, "result": "p"},
+        {"id": 3, "result": "m"},
+        {"id": 4, "result": "h"},
+        {
+            "params": {
+                "subscription": "p",
+                "result": {"hash": HASH, "from": market.MARKET_BOT},
+            }
+        },
+    ]
+    monkeypatch.setattr(
+        event_feed, "connect", lambda *a, **k: race_socket(replies, stop)
+    )
+    feed = Feed("unused", [market.MARKET_BOT], stop)
+    feed.run()
+    event = feed.queue.get_nowait()
+    assert event["kind"] == "pending" and event["source"] == "primary"
+    assert feed.claim_pending(HASH) is False
+
+
+def test_racer_delivers_first_and_primary_duplicate_drops(monkeypatch):
+    stop = threading.Event()
+    replies = [
+        {"id": 1, "result": "0xaa36a7"},
+        {"id": 2, "result": "p"},
+        {
+            "params": {
+                "subscription": "p",
+                "result": {"hash": HASH, "from": market.MARKET_BOT},
+            }
+        },
+    ]
+    monkeypatch.setattr(
+        event_feed, "connect", lambda *a, **k: race_socket(replies, stop)
+    )
+    feed = Feed("unused", [market.MARKET_BOT], stop)
+    racer = event_feed.PendingRacer(feed, RACE_URI)
+    racer.run()
+    event = feed.queue.get_nowait()
+    assert event["kind"] == "pending" and event["source"] == "racer"
+    assert event["transaction"]["hash"] == HASH
+    assert racer.stats["delivered"] == 1
+    # The primary's later copy of the same hash loses the shared claim.
+    assert feed.claim_pending(HASH) is False
+
+
+def test_racer_failure_never_invalidates_primary_state(monkeypatch):
+    stop = threading.Event()
+
+    def boom(*args, **kwargs):
+        stop.set()
+        raise OSError("race endpoint down")
+
+    monkeypatch.setattr(event_feed, "connect", boom)
+    feed = Feed("unused", [], stop)
+    feed.generation, feed.last_error = 7, "primary state"
+    feed.ready.set()
+    feed.gap.clear()
+    feed.racer = event_feed.PendingRacer(feed, RACE_URI)
+    feed.racer.run()
+    assert feed.racer.error  # recorded for status, nothing more
+    assert feed.generation == 7
+    assert feed.ready.is_set() and not feed.gap.is_set()
+    assert feed.last_error == "primary state"
+    assert feed.queue.empty()
+    assert not feed.racer.connected.is_set()
+
+
+def test_racer_overflow_drops_without_invalidating_work():
+    stop = threading.Event()
+    feed = Feed("unused", [market.MARKET_BOT], stop, capacity=1)
+    feed.queue.put_nowait({"kind": "head"})
+    feed.generation = 3
+    feed.ready.set()
+    feed.gap.clear()
+    racer = event_feed.PendingRacer(feed, RACE_URI)
+    racer.deliver({"hash": HASH, "from": market.MARKET_BOT}, 1.0, 1.0)
+    assert feed.queue.qsize() == 1  # not enqueued
+    assert racer.stats["overflow"] == 1
+    assert feed.ready.is_set() and not feed.gap.is_set()
+    # The claim was released so the primary's copy can still deliver.
+    assert feed.claim_pending(HASH)
+
+
+def test_racer_filters_non_signers_without_claiming():
+    stop = threading.Event()
+    feed = Feed("unused", [market.MARKET_BOT], stop)
+    racer = event_feed.PendingRacer(feed, RACE_URI)
+    racer.deliver({"hash": HASH, "from": "0x" + "77" * 20}, 1.0, 1.0)
+    assert feed.queue.empty()
+    assert racer.stats["filtered"] == 1
+    assert feed.claim_pending(HASH)  # never claimed by a filtered tx
+
+
+def test_racer_chain_mismatch_is_refused(monkeypatch):
+    stop = threading.Event()
+    replies = [{"id": 1, "result": "0x1"}]
+    monkeypatch.setattr(
+        event_feed, "connect", lambda *a, **k: race_socket(replies, stop)
+    )
+    feed = Feed("unused", [], stop)
+    racer = event_feed.PendingRacer(feed, RACE_URI)
+    racer.run()
+    assert racer.error and feed.queue.empty()
+
+
+def test_racer_hash_only_fetches_in_flight(monkeypatch):
+    # A hash-only endpoint must not block the notification stream on its
+    # sender fetch: the stamp is the notification arrival, the fetch runs
+    # as an in-flight request, and the delivery uses the original stamps.
+    stop = threading.Event()
+    replies = [
+        {"id": 1, "result": "0xaa36a7"},
+        {"id": 2, "error": {"message": "unsupported parameter"}},
+        {"id": 2, "result": "p"},
+        {"params": {"subscription": "p", "result": HASH}},
+        {"id": 3, "result": {"hash": HASH, "from": market.MARKET_BOT}},
+    ]
+    sent = []
+    monkeypatch.setattr(
+        event_feed, "connect", lambda *a, **k: race_socket(replies, stop, sent)
+    )
+    feed = Feed("unused", [market.MARKET_BOT], stop)
+    racer = event_feed.PendingRacer(feed, RACE_URI)
+    racer.run()
+    event = feed.queue.get_nowait()
+    assert event["kind"] == "pending" and event["source"] == "racer"
+    assert event["transaction"]["hash"] == HASH
+    fetches = [m for m in sent if m.get("method") == "eth_getTransactionByHash"]
+    assert len(fetches) == 1 and fetches[0]["params"] == [HASH]
+
+
+def test_race_endpoint_env_parsing():
+    assert race_endpoint({}) is None
+    assert race_endpoint({"EVENT_PENDING_RACE_URL": "  "}) is None
+    assert (
+        race_endpoint({"EVENT_PENDING_RACE_URL": "wss://example.test/ws"})
+        == "wss://example.test/ws"
+    )
+    from runtime import ConfigurationError
+
+    with pytest.raises(ConfigurationError):
+        race_endpoint({"EVENT_PENDING_RACE_URL": "https://not-a-websocket"})
 
 
 def test_service_switch_refuses_other_inventory_and_corrupt_ledger(tmp_path):
@@ -1472,18 +1647,21 @@ def test_pending_decision_records_queue_wait_not_plumbing(tmp_path, snapshot):
             "generation": svc.generation,
             "received": arrived,
             "received_mono": time.monotonic() - 0.075,
+            "source": "racer",
         }
     )
     row = svc.recent[-1]
     assert row["status"] == "prepared"
     assert 70 <= row["queue_wait_ms"] <= 90
     assert row["feed_arrival"] == arrived
+    assert row["feed_source"] == "racer"
     assert "_dequeue_mono" not in row
     stored = json.loads(
         (tmp_path / "events" / "decisions.jsonl").read_text().splitlines()[-1]
     )
     assert stored["queue_wait_ms"] == row["queue_wait_ms"]
     assert stored["feed_arrival"] == arrived
+    assert stored["feed_source"] == "racer"
     assert "_dequeue_mono" not in stored
 
 

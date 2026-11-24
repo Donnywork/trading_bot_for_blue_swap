@@ -24,7 +24,7 @@ import operator_lock
 import rpc_metrics as rpc
 import strategy
 from event_engine import PaperEngine
-from event_feed import Feed, endpoint
+from event_feed import Feed, endpoint, race_endpoint
 from event_modes import Modes
 from event_observer import Observer
 from event_settings import EventSettings
@@ -606,6 +606,7 @@ class Service:
         # without it, decisions carry no arrival time to join on at all.
         decision["queue_wait_ms"] = queue_wait_ms
         decision["feed_arrival"] = event.get("received")
+        decision["feed_source"] = event.get("source")
         decision["_dequeue_mono"] = dequeue
         self.record(decision)
         self.maybe_execute(decision)
@@ -900,7 +901,11 @@ def main():
             raise
         snapshots = Snapshots(w3, pools, DIRECTORY / "snapshot.json", stop.is_set)
         feed = Feed(
-            uri, settings.market_bots + settings.competitors, stop, metrics=metrics
+            uri,
+            settings.market_bots + settings.competitors,
+            stop,
+            metrics=metrics,
+            race_uri=race_endpoint(),
         )
         Service(
             executor.settings,
