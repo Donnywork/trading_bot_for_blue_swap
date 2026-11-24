@@ -1,5 +1,7 @@
 # Phase 3 credit vault on Sepolia
 
+**Deployed vault** `0x346B0c324963B91afb6f722d126E90506623bB8d`. Block 12,204,515 confirmed the deployment. An independent Sepolia read matched the runtime bytecode and immutable settings to the release and confirmed that the enrolled wallet `0xB6bf0Ba3F43D4386216Df037dcA1A1203038e135` owns the vault. [Deployment receipt](https://sepolia.etherscan.io/tx/0x69316323c0953196ea1e130219f04298f35a3f7f07defa0877bd169b124fcbe5)
+
 The enrolled wallet owns the vault. The server's operator pays gas and sends a specific vault action. The credit facility accounts for collateral and debt under the vault address. Portfolio registration is a separate owner action on the competition site.
 
 ## Install and verify
