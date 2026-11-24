@@ -8,6 +8,7 @@ from eth_tester.exceptions import TransactionFailed
 
 import bot_contract
 import operator_lock
+import phase3_auto as auto
 import phase3_vault as cli
 
 A = 10**18
@@ -70,6 +71,83 @@ def e(vault_lab):
 
 def test_release_matches_compilation(e):
     assert e.artifact == json.loads(cli.RELEASE.read_text())
+
+
+def test_worker_sizes_simulates_and_executes_atomic_close(e, monkeypatch, tmp_path):
+    lab, w3 = e.lab, e.w3
+    directory = tmp_path / "phase3"
+    directory.mkdir()
+    trader = auto.Trader.__new__(auto.Trader)
+    contracts = {
+        "credit": lab.credit,
+        "pool": lab.pool,
+        "vault": e.vault,
+        "fETH": lab.feth,
+        "f564": lab.f564,
+    }
+
+    def header(tag):
+        h = w3.eth.get_block(tag)
+        return h.number, w3.to_hex(h.hash), h.timestamp
+
+    def views(block, specs):
+        return [
+            getattr(contracts[label].functions, name)(*args).call(
+                block_identifier=block
+            )
+            for label, name, *args in specs
+        ]
+
+    trader.chain = SimpleNamespace(header=header, views=views)
+    trader.validated, trader.last_hash = True, None
+    trader.live, trader.directory, trader.artifact = True, directory, e.artifact
+    trader.vault, trader.address, trader.sender = e.vault, e.vault.address, w3
+    trader.signer = w3.eth.account.from_key(e.tester.backend.account_keys[6].to_bytes())
+    assert trader.signer.address == e.operator
+    monkeypatch.setattr(auto, "TOKENS", (e.q, e.b))
+    monkeypatch.setattr(cli, "OPERATOR", e.operator)
+    monkeypatch.setattr(cli, "CHAIN_ID", w3.eth.chain_id)
+    monkeypatch.setattr(cli, "verify", lambda *args: e.vault)
+    monkeypatch.setattr(auto, "END", 2**32)
+    # Keep the strategy clock aligned with the time-travelled local price oracle.
+    monkeypatch.setattr(auto, "time", SimpleNamespace(time=lambda: header("latest")[2]))
+    monkeypatch.setattr(auto, "alert", lambda *args: None)
+    # The local chain charges arbitrary native gas, unlike the Sepolia fee fixture.
+    monkeypatch.setattr(auto, "MAX_GAS_COST", 10**18)
+    monkeypatch.setattr(auto, "DAILY_GAS", 10**18)
+    assert trader.step()["status"] == "awaiting_owner_limits"
+    e.vault.functions.setLimits(e.q, (0, 6000 * A, 1000 * A)).transact(
+        {"from": e.owner}
+    )
+    assert trader.step()["status"] == "watching"
+    borrower = {"from": lab.bob}
+    lab.c.deposit(e.b, 20 * A).transact(borrower)
+    lab.c.borrow(e.q, 11900 * A).transact(borrower)
+    lab.set_price(700)
+    e.router.functions.setRoute(e.b, 3000, (700, 1, 100 * A, 0, False)).transact()
+    base_before = lab.feth.functions.balanceOf(e.vault.address).call()
+    result = trader.step()
+    assert result["status"] == "confirmed" and result["borrower"] == lab.bob
+    records = list((directory / "actions").glob("auto-*.json"))
+    assert len(records) == 1 and json.loads(records[0].read_text())["gas_cost_wei"] > 0
+    assert lab.f564.functions.balanceOf(e.vault.address).call() > 10010 * A
+    assert lab.feth.functions.balanceOf(e.vault.address).call() == base_before
+    assert not (directory / "pending.json").exists()
+
+
+def test_auto_reserves_and_native_budget(tmp_path):
+    assert auto.capacity(6800 * A, (0, 0, 5000 * A), 0) == 800 * A
+    assert auto.capacity(8 * A, (0, 7 * A, 0), 1) == 0
+    assert auto.capacity(8 * A, (0, 8 * A, 4 * A), 1) == 0
+    assert auto.capacity(8 * A, (0, 0, 4 * A), 1) == A
+    actions = tmp_path / "actions"
+    actions.mkdir()
+    (actions / "auto-20261124-ab.json").write_text(
+        json.dumps({"gas_cost_wei": auto.DAILY_GAS - 100})
+    )
+    auto.fee_budget(tmp_path, "20261124", 100)
+    with pytest.raises(cli.ConfigurationError, match="daily operator gas"):
+        auto.fee_budget(tmp_path, "20261124", 101)
 
 
 def test_operator_access_and_owner_custody(e):

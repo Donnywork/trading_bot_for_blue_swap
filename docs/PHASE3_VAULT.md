@@ -39,3 +39,17 @@ For example, a deposit request for 2 fETH is shown below. With the initial reser
 Use `.venv/bin/python phase3_vault.py simulate request.json` for an operator preview. `.venv/bin/python phase3_vault.py submit request.json` is the explicit signed action and requires `DRY_RUN=false`. The CLI verifies the contract, simulates the operator call, records intent before sending and checks the mined receipt. An action ID is single-use. Monitor observations alone do not create requests. After repayment, read actual remaining debt before withdrawing all collateral.
 
 If `logs/phase3/pending.json` remains after a timeout or a crash, reconcile its operator, nonce and calldata hash on Sepolia. Preserve the file and deployment/action records until the canonical receipt and resulting state are independently verified. The shared lock blocks another live sender during reconciliation.
+
+## Automatic liquidations
+
+The worker checks fresh Sepolia heads for borrowers with health below 1.00. It previews `liquidateAndClose` using exact integer amounts, including the sale of the seized collateral. It checks the tightened calldata on the sending provider and submits through the vault's receipted sender. It tries smaller amounts when a larger close fails. Native gas comes from the operator. The worker budgets at most 0.001 Sepolia ETH per send and 0.01 per UTC day. The protocol bonus and realized token gains depend on the actual loan and pool price.
+
+**Owner setup.** Send two zero-value transactions on Sepolia from the enrolled owner wallet to `0x346B0c324963B91afb6f722d126E90506623bB8d`. The [prepared wallet calls](PHASE3_OWNER_CALLS.md) contain the exact calldata. One approves up to 1,000 f564 per liquidation and keeps 6,000 f564 liquid. The other approves up to 1 fETH and keeps 6 fETH liquid. Both debt caps are zero. The worker detects each permission as its transaction mines. The contract grants permission for both kinds of liquidation when the cap is positive. This worker exclusively builds `liquidateAndClose` transactions.
+
+To preview once, run `.venv/bin/python phase3_auto.py --once`. To start the live service from the server checkout, run:
+
+```sh
+tmux new-session -d -s phase3-auto 'set -a; . "$HOME/.watchdog-webhook"; set +a; exec .venv/bin/python -u phase3_auto.py --live'
+```
+
+The live command requires the configured operator and `DRY_RUN=false`. Read `logs/phase3/auto.json` for status. `awaiting_owner_limits` means the worker is watching for permissions. `watching` means it found no eligible borrower. `confirmed` includes a transaction hash, and `logs/phase3/actions/auto-*.json` records mined results and gas costs. For `halted_reconcile`, inspect the existing halt markers and pending record. To stop submissions immediately from this worker, stop its tmux session and check any in-flight transaction. Setting the on-chain liquidation caps back to zero disables future liquidations by the vault. Relaunch the tmux process after a host reboot. The worker stops at the scheduled end of Phase 3.

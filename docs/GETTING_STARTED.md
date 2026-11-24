@@ -2,6 +2,8 @@
 
 ### Phase 3 observation
 
+For automatic trading, follow [automatic liquidation setup](PHASE3_VAULT.md#automatic-liquidations). `logs/phase3/auto.json` reports the live worker's status, latest observed block, borrower count and owner caps.
+
 For the credit vault, follow the [Phase 3 owner walkthrough](PHASE3_VAULT.md). It identifies the wallet for each action, the two Phase 3 tokens and the owner settings for borrowing and liquidation.
 
 After `uv sync`, run `uv run python phase3_monitor.py --once` for one snapshot or omit `--once` for continuous monitoring. No credentials or `.env` are needed. Inspect `logs/phase3/state.json` for the indexed block, market snapshot block, f564 per fETH spot and TWAP, credit utilization and borrower health. `events.sqlite3` holds event amounts in raw token units, transaction hashes and pool/credit transaction signers. A `degraded` status preserves the last successful market snapshot with its block number. Use the [server runbook](DEPLOY.md#phase-3-monitor) for Discord and restart instructions.

@@ -1,0 +1,5 @@
+{
+  "id": "enable-feth-liquidations",
+  "function": "setLimits",
+  "args": ["0xE00296A373Cd19E6aBAf085e50a393938879737D", [0, 6000000000000000000, 1000000000000000000]]
+}

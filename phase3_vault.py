@@ -135,7 +135,7 @@ def binding(directory):
     return Web3.to_checksum_address(record["address"])
 
 
-def broadcast(w3, signer, tx, destination, pending, artifact):
+def broadcast(w3, signer, tx, destination, pending, artifact, *, before_intent=None):
     if destination.exists() or pending.exists():
         raise ConfigurationError(
             "deployment or request already recorded; reconcile before sending"
@@ -159,6 +159,8 @@ def broadcast(w3, signer, tx, destination, pending, artifact):
     ):
         raise ConfigurationError("gas budget insufficient or fee ceiling exceeded")
     tx.update(maxPriorityFeePerGas=priority, maxFeePerGas=fee)
+    if before_intent is not None:
+        before_intent(gas * fee)
     intent = {
         "status": "intent",
         "chain_id": CHAIN_ID,
@@ -190,6 +192,8 @@ def broadcast(w3, signer, tx, destination, pending, artifact):
         block_hash=Web3.to_hex(receipt["blockHash"]),
         tx_hash=Web3.to_hex(receipt["transactionHash"]),
     )
+    if "gasUsed" in receipt and "effectiveGasPrice" in receipt:
+        record["gas_cost_wei"] = receipt["gasUsed"] * receipt["effectiveGasPrice"]
     if success and "to" not in tx:
         address = receipt["contractAddress"]
         verify(w3, artifact, address, record["block"], initial=True)
@@ -200,6 +204,7 @@ def broadcast(w3, signer, tx, destination, pending, artifact):
     print(json.dumps(record, indent=2))
     if not success:
         raise ConfigurationError("transaction reverted; see receipt")
+    return record
 
 
 def main():
