@@ -193,3 +193,42 @@ def test_unknown_send_blocks_other_commands_and_reuse(tmp_path, monkeypatch):
         pytest.fail("sender reopened")
     with pytest.raises(ValueError, match="already recorded"):
         cli.broadcast(w3, signer, {"data": "0xff"}, dest, pending, {})
+
+
+def test_creation_gas_fits_sepolia_and_fee_budget(tmp_path, monkeypatch):
+    signer = SimpleNamespace(address=cli.OPERATOR)
+    eth = SimpleNamespace(
+        estimate_gas=lambda tx: 15_287_046,
+        get_transaction_count=lambda *a: 4,
+        max_priority_fee=2,
+        get_block=lambda n: {"baseFeePerGas": 17},
+        get_balance=lambda a: 10**18,
+    )
+
+    def inspect(w3, account, tx, gas_buffer):
+        assert tx["gas"] == 2**24 and gas_buffer == 1
+        assert tx["gas"] * tx["maxFeePerGas"] <= 10**15
+        raise bot_contract.NotSent("stop before signing")
+
+    monkeypatch.setattr(bot_contract, "send_tx", inspect)
+    pending = tmp_path / "pending.json"
+    with pytest.raises(bot_contract.NotSent):
+        cli.broadcast(
+            SimpleNamespace(eth=eth),
+            signer,
+            {"data": "0xfa"},
+            tmp_path / "deployment.json",
+            pending,
+            {},
+        )
+    assert not pending.exists()
+    eth.get_block = lambda n: {"baseFeePerGas": 10**9}
+    with pytest.raises(ValueError, match="gas budget"):
+        cli.broadcast(
+            SimpleNamespace(eth=eth),
+            signer,
+            {"data": "0xfa"},
+            tmp_path / "deployment.json",
+            pending,
+            {},
+        )

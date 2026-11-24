@@ -140,16 +140,22 @@ def broadcast(w3, signer, tx, destination, pending, artifact):
         raise ConfigurationError(
             "deployment or request already recorded; reconcile before sending"
         )
+    creation = "to" not in tx
     estimate = w3.eth.estimate_gas(tx)
+    # The constructor has deterministic work. Sepolia estimated 15.29M for this
+    # bytecode, within the 2**24 transaction limit; swaps retain their 2x buffer.
+    gas = min(2**24, (estimate * 110 + 99) // 100) if creation else estimate * 2
     tx = dict(
-        tx, nonce=w3.eth.get_transaction_count(signer.address, "pending"), gas=estimate
+        tx, nonce=w3.eth.get_transaction_count(signer.address, "pending"), gas=gas
     )
-    priority = min(w3.eth.max_priority_fee, 2 * 10**9)
+    priority = min(w3.eth.max_priority_fee, 10**6 if creation else 2 * 10**9)
     fee = w3.eth.get_block("latest")["baseFeePerGas"] * 2 + priority
     if (
         fee > 100 * 10**9
-        or estimate * 2 > 10_000_000
-        or w3.eth.get_balance(signer.address) < estimate * 2 * fee
+        or estimate > gas
+        or gas > (2**24 if creation else 10_000_000)
+        or (creation and gas * fee > 10**15)
+        or w3.eth.get_balance(signer.address) < gas * fee
     ):
         raise ConfigurationError("gas budget insufficient or fee ceiling exceeded")
     tx.update(maxPriorityFeePerGas=priority, maxFeePerGas=fee)
@@ -168,7 +174,7 @@ def broadcast(w3, signer, tx, destination, pending, artifact):
         stream.flush()
         os.fsync(stream.fileno())
     try:
-        receipt = bot_contract.send_tx(w3, signer, tx, gas_buffer=2)
+        receipt = bot_contract.send_tx(w3, signer, tx, gas_buffer=1)
     except bot_contract.NotSent:
         pending.unlink()
         raise
