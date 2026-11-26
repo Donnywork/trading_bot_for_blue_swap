@@ -63,3 +63,52 @@ def test_status_while_wallet_prompts_are_open():
         expect(page.locator("#review")).to_be_hidden()
         assert page.evaluate("window.sends") == 1
         browser.close()
+
+
+@pytest.mark.skipif(
+    os.environ.get("PHASE2_BROWSER_TESTS") != "1", reason="Run make test-browser"
+)
+def test_status_429_uses_public_reads_and_never_retries_wallet_submission():
+    page_path = Path(__file__).resolve().parents[1] / "deploy/phase3/index.html"
+    public_methods = []
+
+    def public_reply(route):
+        req = route.request.post_data_json
+        method = req["method"]
+        public_methods.append(method)
+        result = {
+            "eth_chainId": "0xaa36a7",
+            "eth_blockNumber": "0x123",
+            "eth_call": "0x" + "0" * 64,
+        }[method]
+        route.fulfill(
+            json={"jsonrpc": "2.0", "id": req["id"], "result": result},
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.route(
+            "http://127.0.0.1:8765/", lambda route: route.fulfill(path=page_path)
+        )
+        page.route("https://ethereum-sepolia.publicnode.com/", public_reply)
+        page.add_init_script("""
+          window.sends=0;
+          window.ethereum={request:async ({method})=>{
+            if(method==='eth_accounts')return ['0xB6bf0Ba3F43D4386216Df037dcA1A1203038e135'];
+            if(method==='eth_chainId')return '0xaa36a7';
+            if(method==='eth_sendTransaction')window.sends++;
+            throw Error('RPC request failed: 429');
+          }};
+        """)
+        page.goto("http://127.0.0.1:8765/")
+        button = page.get_by_role("button", name="Set 1,000 f564 buy limit")
+        expect(button).to_be_visible()
+        assert public_methods == ["eth_chainId", "eth_blockNumber", "eth_call"]
+        button.click()
+        expect(page.locator("#status")).to_contain_text("Submission outcome unknown")
+        page.get_by_role("button", name="Check status").click()
+        expect(page.locator("#status")).to_contain_text("no transaction hash yet")
+        assert page.evaluate("window.sends") == 1
+        browser.close()

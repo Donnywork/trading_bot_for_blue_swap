@@ -48,6 +48,36 @@ const calls=[
 ];
 let wallet, visibleStep=-1, checkNumber=0, sending=false, sendStatus='';
 const rpc=(method,params=[])=>wallet.request({method,params});
+const publicEndpoint='https://ethereum-sepolia.publicnode.com';
+let publicReadsUntil=0;
+function rateLimited(error){
+  return error?.code===429 || /\b429\b|rate.?limit|too many requests/i.test(error?.message??'') ||
+    error?.data?.originalError?.code===429;
+}
+function message(error){
+  return rateLimited(error)
+    ? 'Your wallet’s Sepolia RPC is rate-limited. In the wallet’s Sepolia network settings, select '+publicEndpoint+' as the RPC URL, then click Check status.'
+    : error.message;
+}
+async function publicRead(method,params){
+  if(!['eth_chainId','eth_blockNumber','eth_call','eth_getTransactionReceipt'].includes(method)) throw Error('Expected a read-only request.');
+  const response=await fetch(publicEndpoint,{
+    method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',credentials:'omit',
+    body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(8000)
+  });
+  if(!response.ok) throw Error(`Public Sepolia RPC returned HTTP ${response.status}. Try Check status again in a minute.`);
+  const reply=await response.json();
+  if(reply.error || !Object.hasOwn(reply,'result')) throw Error('The public Sepolia RPC could not complete this check. Try Check status again in a minute.');
+  return reply.result;
+}
+async function withReadProvider(read){
+  if(Date.now()>=publicReadsUntil){
+    try{return await read(rpc);}catch(e){if(!rateLimited(e)) throw e;}
+    publicReadsUntil=Date.now()+60000;
+  }
+  if(await publicRead('eth_chainId',[])!==CHAIN) throw Error('Public RPC returned an unexpected network.');
+  return read(publicRead);
+}
 const err=message=>{throw new Error(message)};
 const save=state=>localStorage.setItem(KEY,JSON.stringify(state));
 const load=()=>JSON.parse(localStorage.getItem(KEY)||'{"done":[],"pending":null}');
@@ -76,26 +106,27 @@ async function next(){
   if(saved.pending){
     const {hash,step}=saved.pending; link(hash);
     if(!hash) err('Open your wallet extension and check its pending requests and Activity. This page has no transaction hash yet.');
-    const r=await rpc('eth_getTransactionReceipt',[hash]);
+    const r=await withReadProvider(read=>read('eth_getTransactionReceipt',[hash]));
     if(!r) err('Waiting for confirmation. Click Check status after your wallet shows the transaction as confirmed.');
     if(BigInt(r.status)===1n) saved.done.push(step);
     saved.pending=null;
     if(load().pending?.hash===hash) save(saved);
     if(BigInt(r.status)!==1n) err('The transaction reverted. Click Check status to review this step again.');
   }
-  const block=await rpc('eth_blockNumber');
-  const read=async(to,selector,address)=>BigInt(await rpc('eth_call',[{to,data:selector+word(address)},block]));
-  const [buy,sell,cash,base,owned,credit]=await Promise.all([
-    read(SPOT,'0x7bcd4ff0',QUOTE),read(SPOT,'0x7bcd4ff0',BASE),read(QUOTE,'0x70a08231',SPOT),
-    read(BASE,'0x70a08231',SPOT),read(QUOTE,'0x70a08231',OWNER),read(QUOTE,'0x70a08231',CREDIT)]);
-  if(buy<TARGET) return 0;
-  if(sell<EXIT) return 1;
-  if(saved.done.includes(3)||cash>=TARGET) return -1;
-  if(base>0n||cash>0n) err('The trading vault already holds tokens. Check its balance and position before adding more funds.');
-  if(owned>=TARGET) return 3;
-  if(saved.done.includes(2)) err('Withdrawal already confirmed. Check the enrolled wallet’s f564 balance before funding again.');
-  if(credit<TARGET+6000n*UNIT) err('Withdrawing 1,000 f564 would leave less than the 6,000 f564 credit reserve.');
-  return 2;
+  return withReadProvider(async provider=>{
+    const block=await provider('eth_blockNumber',[]);
+    const read=async(to,selector,address)=>BigInt(await provider('eth_call',[{to,data:selector+word(address)},block]));
+    if(await read(SPOT,'0x7bcd4ff0',QUOTE)<TARGET) return 0;
+    if(await read(SPOT,'0x7bcd4ff0',BASE)<EXIT) return 1;
+    if(saved.done.includes(3)) return -1;
+    const cash=await read(QUOTE,'0x70a08231',SPOT);
+    if(cash>=TARGET) return -1;
+    if(cash>0n||await read(BASE,'0x70a08231',SPOT)>0n) err('The trading vault already holds tokens. Check its balance and position before adding more funds.');
+    if(await read(QUOTE,'0x70a08231',OWNER)>=TARGET) return 3;
+    if(saved.done.includes(2)) err('Withdrawal already confirmed. Check the enrolled wallet’s f564 balance before funding again.');
+    if(await read(QUOTE,'0x70a08231',CREDIT)<TARGET+6000n*UNIT) err('Withdrawing 1,000 f564 would leave less than the 6,000 f564 credit reserve.');
+    return 2;
+  });
 }
 async function refresh(){
   const check=++checkNumber;
@@ -113,13 +144,13 @@ async function refresh(){
     if(step<0){$('status').textContent='Funding complete. The server picks up the balances and caps automatically.';return;}
     $('status').textContent=`Step ${step+1} of 4. Your wallet will ask you to confirm.`;
     $('review').textContent=label[step]; $('review').hidden=false;
-  }catch(e){if(check===checkNumber) $('status').textContent=e.message;}
+  }catch(e){if(check===checkNumber) $('status').textContent=message(e);}
   finally{clearTimeout(timer);}
 }
 async function submit(step){
   if(await next()!==step) return;
   const tx={...calls[step],from:OWNER,value:'0x0',chainId:CHAIN};
-  await rpc('eth_call',[{from:OWNER,to:tx.to,data:tx.data,value:'0x0'},'latest']);
+  await withReadProvider(read=>read('eth_call',[{from:OWNER,to:tx.to,data:tx.data,value:'0x0'},'latest']));
   await identity(); const saved=load();
   if(saved.pending) err('A request is already pending. Click Check status.');
   saved.pending={step}; save(saved);
@@ -128,7 +159,11 @@ async function submit(step){
   try {
     const hash=await rpc('eth_sendTransaction',[tx]);
     saved.pending.hash=hash;save(saved);link(hash);
-  }catch(e){if(e.code===4001){saved.pending=null;save(saved);}throw e;}
+  }catch(e){
+    if(e.code===4001){saved.pending=null;save(saved);}
+    else if(rateLimited(e)) err('Submission outcome unknown. Check wallet Activity for a Sepolia transaction hash before attempting this step again.');
+    throw e;
+  }
 }
 $('connect').onclick=async()=>{
   $('connect').disabled=true;
@@ -142,7 +177,7 @@ $('connect').onclick=async()=>{
     }
     $('connect').hidden=true;
     await refresh();
-  }catch(e){$('status').textContent=e.message;}
+  }catch(e){$('status').textContent=message(e);}
   finally{$('connect').disabled=false;}
 };
 $('refresh').onclick=refresh;
@@ -153,7 +188,7 @@ $('review').onclick=async()=>{
   $('status').textContent=sendStatus; $('review').hidden=true;
   try{await navigator.locks.request(KEY,{ifAvailable:true},lock=>{
     if(!lock) err('A setup request is open in another tab.');return submit(step);
-  });}catch(e){$('status').textContent=e.message; return;}
+  });}catch(e){$('status').textContent=message(e); return;}
   finally{sending=false;}
   await refresh();
 };
