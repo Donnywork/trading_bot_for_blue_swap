@@ -2,6 +2,8 @@
 
 ## Phase 3 monitor
 
+With a healthy monitor, run `.venv/bin/python phase3_lp_paper.py start` once from the checkout. This verifies the LP NFT on public Sepolia and pins the forward baseline. Then run `tmux new-session -d -s phase3-lp-paper '.venv/bin/python -u phase3_lp_paper.py watch'`. The watcher reads the monitor journal every 30 seconds. Use `.venv/bin/python phase3_lp_paper.py status` for the latest result and check its `updated` time. To resume after a restart, launch `watch` with the same `logs/phase3/lp-paper/start.json`. To stop the paper experiment, stop just the `phase3-lp-paper` session. [Interpreting the comparison](PHASE3_SPOT.md#forward-liquidity-experiment)
+
 The combined worker uses `.venv/bin/python -u phase3_auto.py --live --with-spot` in the `phase3-auto` session. Run `--once --with-spot` for a read-only preflight. Inspect `logs/phase3/auto.json` for liquidation status and its `spot` field for the second vault. [Spot runbook](PHASE3_SPOT.md)
 
 The worker reads the spot vault's on-chain token caps and quote balance each head. Owner changes take effect without restarting the worker.

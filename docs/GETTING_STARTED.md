@@ -2,6 +2,8 @@
 
 ### Phase 3 observation
 
+Run `.venv/bin/python phase3_lp_paper.py status` on the monitor host for the forward comparison of full-range and concentrated liquidity. `status: unavailable` means the watcher could not validate the latest comparison. Check the monitor's freshness and its journal before interpreting results. [Paper experiment](PHASE3_SPOT.md#forward-liquidity-experiment)
+
 For spot trading, fund and configure the registered trading vault, then check the `spot.status` field in `logs/phase3/auto.json`. The suggested buy cap is 1,000 f564 and the suggested sell cap is 1.5 fETH. [Wallet calls and strategy rules](PHASE3_SPOT.md)
 
 For automatic trading, follow [automatic liquidation setup](PHASE3_VAULT.md#automatic-liquidations). `logs/phase3/auto.json` reports the live worker's status, latest observed block, borrower count and owner caps.

@@ -24,6 +24,7 @@ MIN_SIZE = 125 * WAD
 PROPOSED_EXIT_CAP = 3 * WAD // 2
 LEGACY_ENTRY_CEILING = 250 * WAD
 HOLD = 1800
+ENTRY_DISCOUNT_BPS = 125
 TRANSFER = Web3.keccak(text="Transfer(address,address,uint256)")
 
 
@@ -96,7 +97,8 @@ def discounted(sqrt_price, oracle):
         window >= 1800
         and price > 0
         and sqrt_price > 0
-        and (1 << 192) * WAD * 10000 <= sqrt_price**2 * price * 9875
+        and (1 << 192) * WAD * 10000
+        <= sqrt_price**2 * price * (10000 - ENTRY_DISCOUNT_BPS)
     )
 
 

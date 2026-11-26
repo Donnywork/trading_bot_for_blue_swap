@@ -8,6 +8,8 @@ The [Phase 3 vault walkthrough](docs/PHASE3_VAULT.md) covers deployment, owner r
 
 Add `--with-spot` for single-pool trades after confirmed fETH sales. The owner sets the buy size through the trading vault's f564 cap and funding. [Spot strategy and owner setup](docs/PHASE3_SPOT.md)
 
+Use `phase3_lp_paper.py status` on the monitor host to see how concentrating half of the owner's liquidity performs against keeping the full-range position. [Forward LP experiment](docs/PHASE3_SPOT.md#forward-liquidity-experiment)
+
 A Python trading bot for **Sepolia (testnet only)**. The Phase 2 event service monitors two Uniswap V3 pools and trades through one `Phase2TradingBot` contract you own. The competition objective is portfolio return measured in f564. It can run on your laptop or under systemd on Ubuntu 24.04.
 
 > Testnet only. Nothing here has the safeguards real money would need. The strategies in `strategy.py` are placeholders, not trading advice.
