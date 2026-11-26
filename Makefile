@@ -12,7 +12,7 @@ test:
 	uv run pytest
 
 test-browser:
-	PHASE2_BROWSER_TESTS=1 uv run pytest tests/test_phase2_browser.py
+	PHASE2_BROWSER_TESTS=1 uv run pytest tests/test_phase2_browser.py tests/test_phase3_wallet_browser.py
 
 run:
 	uv run python main.py

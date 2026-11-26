@@ -29,7 +29,7 @@
   <output id="status" aria-live="polite">Open this page in the browser where you use your enrolled wallet.</output>
   <button id="connect">Connect wallet</button>
   <button id="review" hidden></button>
-  <button id="refresh" hidden>Check status</button>
+  <button id="refresh">Check status</button>
   <p id="receipt"></p>
 </main>
 <script type="module">
@@ -46,11 +46,18 @@ const calls=[
   {to:SPOT,data:data('0x1d47e4a3',QUOTE,TARGET)}, {to:SPOT,data:data('0x1d47e4a3',BASE,EXIT)},
   {to:CREDIT,data:data('0x47c62a0d',QUOTE,TARGET)}, {to:QUOTE,data:data('0xa9059cbb',SPOT,TARGET)}
 ];
-let wallet, saved, visibleStep=-1;
+let wallet, visibleStep=-1, checkNumber=0, sending=false, sendStatus='';
 const rpc=(method,params=[])=>wallet.request({method,params});
 const err=message=>{throw new Error(message)};
-const save=()=>localStorage.setItem(KEY,JSON.stringify(saved));
-function load(){saved=JSON.parse(localStorage.getItem(KEY)||'{"done":[],"pending":null}');}
+const save=state=>localStorage.setItem(KEY,JSON.stringify(state));
+const load=()=>JSON.parse(localStorage.getItem(KEY)||'{"done":[],"pending":null}');
+function useWallet(){
+  if(wallet) return;
+  wallet=window.ethereum;
+  if(!wallet) err('Open this page in the desktop browser where your wallet extension is enabled.');
+  wallet.on?.('accountsChanged',refresh);
+  wallet.on?.('chainChanged',refresh);
+}
 function link(hash){
   $('receipt').replaceChildren();
   if(!/^0x[\da-f]{64}$/i.test(hash||'')) return;
@@ -59,18 +66,21 @@ function link(hash){
 }
 async function identity(){
   const accounts=await rpc('eth_accounts');
+  if(!accounts.length) err('Click Connect wallet, then approve the connection in your wallet extension.');
   if(accounts[0]?.toLowerCase()!==OWNER.toLowerCase()) err('Select your enrolled wallet '+OWNER+' and click Check status.');
   if((await rpc('eth_chainId')).toLowerCase()!==CHAIN) err('Select Ethereum Sepolia in your wallet and click Check status.');
 }
 async function next(){
-  load(); await identity();
+  await identity();
+  const saved=load();
   if(saved.pending){
     const {hash,step}=saved.pending; link(hash);
-    if(!hash) err('Check your wallet activity before continuing. A wallet request is unresolved.');
+    if(!hash) err('Open your wallet extension and check its pending requests and Activity. This page has no transaction hash yet.');
     const r=await rpc('eth_getTransactionReceipt',[hash]);
     if(!r) err('Waiting for confirmation. Click Check status after your wallet shows the transaction as confirmed.');
     if(BigInt(r.status)===1n) saved.done.push(step);
-    saved.pending=null; save();
+    saved.pending=null;
+    if(load().pending?.hash===hash) save(saved);
     if(BigInt(r.status)!==1n) err('The transaction reverted. Click Check status to review this step again.');
   }
   const block=await rpc('eth_blockNumber');
@@ -88,45 +98,65 @@ async function next(){
   return 2;
 }
 async function refresh(){
+  const check=++checkNumber;
   visibleStep=-1; $('review').hidden=true;
+  if(sending){$('status').textContent=sendStatus;return;}
+  $('status').textContent='Checking your wallet and Sepolia balances…';
+  const timer=setTimeout(()=>{
+    if(check===checkNumber) $('status').textContent='Your wallet is taking longer to respond. Open the extension to check for a request, then click Check status again.';
+  },8000);
   try {
-    const step=await next(); visibleStep=step;
+    useWallet();
+    const step=await next();
+    if(check!==checkNumber) return;
+    $('connect').hidden=true; visibleStep=step;
     if(step<0){$('status').textContent='Funding complete. The server picks up the balances and caps automatically.';return;}
     $('status').textContent=`Step ${step+1} of 4. Your wallet will ask you to confirm.`;
     $('review').textContent=label[step]; $('review').hidden=false;
-  }catch(e){$('status').textContent=e.message;}
+  }catch(e){if(check===checkNumber) $('status').textContent=e.message;}
+  finally{clearTimeout(timer);}
 }
 async function submit(step){
-  if(await next()!==step) {await refresh();return;}
+  if(await next()!==step) return;
   const tx={...calls[step],from:OWNER,value:'0x0',chainId:CHAIN};
   await rpc('eth_call',[{from:OWNER,to:tx.to,data:tx.data,value:'0x0'},'latest']);
-  await identity(); saved.pending={step}; save();
+  await identity(); const saved=load();
+  if(saved.pending) err('A request is already pending. Click Check status.');
+  saved.pending={step}; save(saved);
+  sendStatus='Open your wallet extension to confirm or reject the transaction. Waiting for your wallet…';
+  $('status').textContent=sendStatus;
   try {
     const hash=await rpc('eth_sendTransaction',[tx]);
-    saved.pending.hash=hash;save();link(hash);
-  }catch(e){if(e.code===4001){saved.pending=null;save();}throw e;}
-  await refresh();
+    saved.pending.hash=hash;save(saved);link(hash);
+  }catch(e){if(e.code===4001){saved.pending=null;save(saved);}throw e;}
 }
 $('connect').onclick=async()=>{
+  $('connect').disabled=true;
   try {
-    wallet=window.ethereum;
-    if(!wallet) err('Open this link in your desktop browser with your wallet extension enabled.');
+    useWallet();
+    $('status').textContent='Open your wallet extension to approve the connection.';
     await rpc('eth_requestAccounts');
-    $('refresh').hidden=false;
-    if((await rpc('eth_chainId')).toLowerCase()!==CHAIN) await rpc('wallet_switchEthereumChain',[{chainId:CHAIN}]);
+    if((await rpc('eth_chainId')).toLowerCase()!==CHAIN){
+      $('status').textContent='Approve the switch to Ethereum Sepolia in your wallet extension.';
+      await rpc('wallet_switchEthereumChain',[{chainId:CHAIN}]);
+    }
     $('connect').hidden=true;
-    wallet.on?.('accountsChanged',refresh); wallet.on?.('chainChanged',refresh);
     await refresh();
   }catch(e){$('status').textContent=e.message;}
+  finally{$('connect').disabled=false;}
 };
 $('refresh').onclick=refresh;
 $('review').onclick=async()=>{
-  const step=visibleStep; if(step<0)return;
-  $('review').disabled=true; $('refresh').disabled=true;
+  const step=visibleStep; if(step<0||sending)return;
+  ++checkNumber; visibleStep=-1; sending=true;
+  sendStatus='Checking this transaction before opening your wallet…';
+  $('status').textContent=sendStatus; $('review').hidden=true;
   try{await navigator.locks.request(KEY,{ifAvailable:true},lock=>{
     if(!lock) err('A setup request is open in another tab.');return submit(step);
-  });}catch(e){$('status').textContent=e.message; $('review').hidden=true;}
-  finally{$('review').disabled=false; $('refresh').disabled=false;}
+  });}catch(e){$('status').textContent=e.message; return;}
+  finally{sending=false;}
+  await refresh();
 };
+if(window.ethereum) refresh();
 </script>
 </html>
