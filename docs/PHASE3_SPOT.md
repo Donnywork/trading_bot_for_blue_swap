@@ -33,6 +33,8 @@ Spot trades share the liquidation sender lock and the 0.001 Sepolia ETH per-send
 
 ## Forward liquidity experiment
 
+The owner's [half-position wallet page](http://127.0.0.1:8765/lp-half.html) uses the same local server as spot setup. For NFT 234996 it prepares two limited approvals to the Sepolia Uniswap V3 position manager and one atomic decrease, collection and mint. The reviewed sequence uses owner nonces 134–136. Review each request and click **Check status** after confirmation. The page verifies the owner and range of the new NFT and the remaining half of NFT 234996. A changed nonce, changed original position or failed simulation calls for a fresh review. The paper comparison ends when the owner removes reference liquidity.
+
 `phase3_lp_paper.py` compares the owner's full-range LP NFT 234996 with moving half its liquidity into 991.93–1,009.95 f564/fETH (ticks −69180 and −69000). Both start with the same tokens. The narrower position keeps any leftover tokens idle. The experiment begins at the pinned block in `logs/phase3/lp-paper/start.json`. Restart `watch` to resume from that same block. See the [launch commands](DEPLOY.md#phase-3-monitor).
 
 `result.json` reports the two LP values in f564 at the facility's 30-minute average price. `split_minus_full_f564` includes the difference in inventory value and accumulated fees. `edge_excluding_top_participant_fees_f564` removes the largest positive fee advantage from any single non-market-bot signer while keeping the observed price path. It measures how much one trader contributed. Both estimates assume the observed swaps and price path, exclude rebalance gas, and model only this LP allocation. Fees from before the experiment are common to both allocations and are excluded.

@@ -68,6 +68,212 @@ def test_status_while_wallet_prompts_are_open():
 @pytest.mark.skipif(
     os.environ.get("PHASE2_BROWSER_TESTS") != "1", reason="Run make test-browser"
 )
+def test_half_lp_owner_calls_and_reload():
+    import time
+
+    from eth_abi import decode, encode
+    from web3 import Web3
+
+    from phase3_lp_paper import BAND, FULL, MANAGER, NFT, OWNER
+    from phase_markets import PHASE3
+
+    root = Path(__file__).resolve().parents[1] / "deploy/phase3"
+    manager = MANAGER.lower()
+    tokens = [PHASE3.quote.lower(), PHASE3.base.lower()]
+    unit = 10**18
+    original = 63245875460548078554
+    new_id = 235199
+    caps = [790 * unit, 999 * unit // 1000]
+    sends = []
+    now = int(time.time())
+    approve_before_mint = []
+
+    def sel(sig):
+        return Web3.keccak(text=sig)[:4]
+
+    def raw(types, vals):
+        return "0x" + encode(types, vals).hex()
+
+    def position(id):
+        narrow = id == new_id
+        liquidity = 10**18 if narrow else original // 2 if len(sends) == 3 else original
+        return raw(
+            [
+                "uint96",
+                "address",
+                "address",
+                "address",
+                "uint24",
+                "int24",
+                "int24",
+                "uint128",
+                "uint256",
+                "uint256",
+                "uint128",
+                "uint128",
+            ],
+            [
+                0,
+                "0x" + "0" * 40,
+                *tokens,
+                3000,
+                *(BAND if narrow else FULL),
+                liquidity,
+                0,
+                0,
+                0,
+                0,
+            ],
+        )
+
+    def calldata(tx):
+        return bytes.fromhex(tx["data"][2:])
+
+    def inspect_rebalance(data):
+        assert data[:4] == sel("multicall(bytes[])")
+        (calls,) = decode(["bytes[]"], data[4:])
+        assert len(calls) == 3
+        for payload, method, fields in zip(
+            calls,
+            ["decreaseLiquidity", "collect", "mint"],
+            [
+                (
+                    "uint256,uint128,uint256,uint256,uint256",
+                    [NFT, original // 2, 998 * unit, caps[1], now + 300],
+                ),
+                (
+                    "uint256,address,uint128,uint128",
+                    [NFT, OWNER, 2**128 - 1, 2**128 - 1],
+                ),
+                (
+                    "address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256",
+                    [
+                        *tokens,
+                        3000,
+                        *BAND,
+                        *caps,
+                        783 * unit,
+                        994 * unit // 1000,
+                        OWNER,
+                        now + 300,
+                    ],
+                ),
+            ],
+            strict=True,
+        ):
+            schema, expected = fields
+            assert payload[:4] == sel(f"{method}(({schema}))")
+            assert decode([f"({schema})"], payload[4:]) == (tuple(expected),)
+
+    def rpc(req):
+        method = req["method"]
+        params = req.get("params", [])
+        if method == "eth_accounts":
+            return [OWNER]
+        if method == "eth_chainId":
+            return "0xaa36a7"
+        if method == "eth_getBlockByNumber":
+            return {"number": "0x12", "timestamp": hex(now)}
+        if method == "eth_getTransactionCount":
+            return hex(134 + len(sends))
+        if method == "eth_getTransactionReceipt":
+            i = sends.index(params[0])
+            return {
+                "status": "0x1",
+                "transactionHash": sends[i],
+                "to": [*tokens, manager][i],
+                "from": OWNER,
+                "logs": []
+                if i < 2
+                else [
+                    {
+                        "address": manager,
+                        "topics": [
+                            Web3.keccak(
+                                text="Transfer(address,address,uint256)"
+                            ).to_0x_hex(),
+                            raw(["uint256"], [0]),
+                            raw(["address"], [OWNER]),
+                            raw(["uint256"], [new_id]),
+                        ],
+                    }
+                ],
+            }
+        tx = params[0]
+        data = calldata(tx)
+        sig = data[:4]
+        if method == "eth_sendTransaction":
+            i = len(sends)
+            assert (
+                tx["nonce"] == hex(134 + i)
+                and tx["from"] == OWNER
+                and tx["chainId"] == "0xaa36a7"
+                and tx["value"] == "0x0"
+            )
+            assert tx["to"] == [*tokens, manager][i]
+            if i < 2:
+                assert sig == sel("approve(address,uint256)") and decode(
+                    ["address", "uint256"], data[4:]
+                ) == (manager, caps[i])
+            else:
+                inspect_rebalance(data)
+            sends.append("0x" + str(i + 1) * 64)
+            return sends[-1]
+        assert method == "eth_call"
+        if sig == sel("ownerOf(uint256)"):
+            return raw(["address"], [OWNER])
+        if sig == sel("positions(uint256)"):
+            return position(int.from_bytes(data[4:]))
+        if sig == sel("allowance(address,address)"):
+            return raw(["uint256"], [caps[tokens.index(tx["to"])]])
+        if sig == sel("approve(address,uint256)"):
+            return raw(["bool"], [True])
+        inspect_rebalance(data)
+        approve_before_mint.append(len(sends))
+        return raw(
+            ["bytes[]"],
+            [
+                [
+                    encode(["uint256"] * 2, [1000 * unit, unit]),
+                    encode(["uint256"] * 2, [1000 * unit, unit]),
+                    encode(["uint256"] * 4, [new_id, 10**18, 786 * unit, caps[1]]),
+                ]
+            ],
+        )
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.expose_function("mockRpc", rpc)
+        url = "http://127.0.0.1:8765/lp-half.html"
+        page.route(
+            "http://127.0.0.1:8765/lp-half.*",
+            lambda route: route.fulfill(path=root / route.request.url.split("/")[-1]),
+        )
+        page.add_init_script("window.ethereum={request:window.mockRpc}")
+        page.goto(url)
+        for index, label in enumerate(
+            [
+                "Approve 790 f564",
+                "Approve 0.999 fETH",
+                "Move half and mint new LP",
+            ]
+        ):
+            page.get_by_role("button", name=label).click()
+            expect(page.locator("#status")).to_contain_text(
+                f"Step {index + 2} of 3" if index < 2 else "Confirmed."
+            )
+            page.reload()
+        expect(page.locator("#status")).to_contain_text(
+            f"Confirmed. New LP NFT #{new_id}"
+        )
+        assert approve_before_mint == [2] and len(sends) == 3
+        browser.close()
+
+
+@pytest.mark.skipif(
+    os.environ.get("PHASE2_BROWSER_TESTS") != "1", reason="Run make test-browser"
+)
 def test_status_429_uses_public_reads_and_never_retries_wallet_submission():
     page_path = Path(__file__).resolve().parents[1] / "deploy/phase3/index.html"
     public_methods = []
