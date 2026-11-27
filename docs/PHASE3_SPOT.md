@@ -33,6 +33,8 @@ Spot trades share the liquidation sender lock and the 0.001 Sepolia ETH per-send
 
 ## Forward liquidity experiment
 
+The [dip-position wallet page](http://127.0.0.1:8765/lp-dip.html) uses the enrolled wallet's f564 to mint a separate position at ticks −69060 to −69000. On Sepolia the owner approves 700 f564 at nonce 142 and mints at nonce 143, supplying zero fETH. Above 997.90 f564 per fETH the position holds f564. It begins buying fETH and earning fees as swaps bring the price into the 991.93–997.90 range. After confirmation, **Check status** verifies the wallet's new NFT.
+
 The [tighter range wallet page](http://127.0.0.1:8765/lp-tight.html) prepares the second rebalance. It uses the remaining liquidity in NFT 234996 to fund a new position between 997.90 and 1,003.91 f564 per fETH. It approves up to 515 f564 and 0.999 fETH. The transaction returns unused tokens to the enrolled wallet and verifies that the source NFT has zero liquidity after the mint. This plan uses wallet nonces 139–141. Serve it with the same local server as the spot setup page.
 
 The owner's [half-position wallet page](http://127.0.0.1:8765/lp-half.html) uses the same local server as spot setup. For NFT 234996 it prepares two limited approvals to the Sepolia Uniswap V3 position manager and one atomic decrease, collection and mint. The reviewed sequence uses owner nonces 134–136. Review each request and click **Check status** after confirmation. The page verifies the owner and range of the new NFT and the remaining half of NFT 234996. A changed nonce, changed original position or failed simulation calls for a fresh review. The paper comparison ends when the owner removes reference liquidity.

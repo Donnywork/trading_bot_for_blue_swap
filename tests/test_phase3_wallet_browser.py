@@ -68,8 +68,8 @@ def test_status_while_wallet_prompts_are_open():
 @pytest.mark.skipif(
     os.environ.get("PHASE2_BROWSER_TESTS") != "1", reason="Run make test-browser"
 )
-@pytest.mark.parametrize("tight", [False, True], ids=["half", "remainder"])
-def test_lp_owner_calls_and_reload(tight):
+@pytest.mark.parametrize("page_name", ["half", "tight", "dip"])
+def test_lp_owner_calls_and_reload(page_name):
     import time
 
     from eth_abi import decode, encode
@@ -82,12 +82,17 @@ def test_lp_owner_calls_and_reload(tight):
     manager = MANAGER.lower()
     tokens = [PHASE3.quote.lower(), PHASE3.base.lower()]
     unit = 10**18
+    tight = page_name == "tight"
+    dip = page_name == "dip"
     original = 31622937730274039277 if tight else 63245875460548078554
     remaining = 0 if tight else original // 2
-    dest_band = (-69120, -69060) if tight else BAND
-    nonce = 139 if tight else 134
+    dest_band = {"dip": (-69060, -69000), "tight": (-69120, -69060), "half": BAND}[
+        page_name
+    ]
+    nonce = {"dip": 142, "tight": 139, "half": 134}[page_name]
     new_id = 235199
-    caps = [(515 if tight else 790) * unit, 999 * unit // 1000]
+    caps = [700 * unit] if dip else [(515 if tight else 790) * unit, 999 * unit // 1000]
+    destinations = [*tokens[: len(caps)], manager]
     sends = []
     now = int(time.time())
     approve_before_mint = []
@@ -99,6 +104,7 @@ def test_lp_owner_calls_and_reload(tight):
         return "0x" + encode(types, vals).hex()
 
     def position(id):
+        assert id == new_id or (not dip and id == NFT)
         narrow = id == new_id
         liquidity = 10**18 if narrow else remaining if len(sends) == 3 else original
         return raw(
@@ -134,6 +140,23 @@ def test_lp_owner_calls_and_reload(tight):
         return bytes.fromhex(tx["data"][2:])
 
     def inspect_rebalance(data):
+        if dip:
+            schema = "(address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256)"
+            assert data[:4] == sel(f"mint({schema})")
+            assert decode([schema], data[4:]) == (
+                (
+                    *tokens,
+                    3000,
+                    *dest_band,
+                    caps[0],
+                    0,
+                    caps[0] - 1,
+                    0,
+                    OWNER,
+                    now + 300,
+                ),
+            )
+            return
         assert data[:4] == sel("multicall(bytes[])")
         (calls,) = decode(["bytes[]"], data[4:])
         assert len(calls) == 3
@@ -185,10 +208,10 @@ def test_lp_owner_calls_and_reload(tight):
             return {
                 "status": "0x1",
                 "transactionHash": sends[i],
-                "to": [*tokens, manager][i],
+                "to": destinations[i],
                 "from": OWNER,
                 "logs": []
-                if i < 2
+                if i < len(caps)
                 else [
                     {
                         "address": manager,
@@ -214,8 +237,8 @@ def test_lp_owner_calls_and_reload(tight):
                 and tx["chainId"] == "0xaa36a7"
                 and tx["value"] == "0x0"
             )
-            assert tx["to"] == [*tokens, manager][i]
-            if i < 2:
+            assert tx["to"] == destinations[i]
+            if i < len(caps):
                 assert sig == sel("approve(address,uint256)") and decode(
                     ["address", "uint256"], data[4:]
                 ) == (manager, caps[i])
@@ -224,6 +247,15 @@ def test_lp_owner_calls_and_reload(tight):
             sends.append("0x" + str(i + 1) * 64)
             return sends[-1]
         assert method == "eth_call"
+        if dip and sig == sel("balanceOf(address)"):
+            assert tx["to"] == tokens[0] and decode(["address"], data[4:]) == (OWNER,)
+            return raw(["uint256"], [703 * unit])
+        if dip and sig == sel("slot0()"):
+            assert tx["to"] == PHASE3.pools[0][1].lower()
+            return raw(
+                ["uint160", "int24", "uint16", "uint16", "uint16", "uint8", "bool"],
+                [2**96, -69082, 1, 2, 2, 0, True],
+            )
         if sig == sel("ownerOf(uint256)"):
             return raw(["address"], [OWNER])
         if sig == sel("positions(uint256)"):
@@ -234,6 +266,8 @@ def test_lp_owner_calls_and_reload(tight):
             return raw(["bool"], [True])
         inspect_rebalance(data)
         approve_before_mint.append(len(sends))
+        if dip:
+            return raw(["uint256"] * 4, [new_id, 10**18, caps[0], 0])
         return raw(
             ["bytes[]"],
             [
@@ -252,7 +286,7 @@ def test_lp_owner_calls_and_reload(tight):
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.expose_function("mockRpc", rpc)
-        filename = "lp-tight.html" if tight else "lp-half.html"
+        filename = f"lp-{page_name}.html"
         url = "http://127.0.0.1:8765/" + filename
         page.route(
             "http://127.0.0.1:8765/lp-*",
@@ -262,24 +296,29 @@ def test_lp_owner_calls_and_reload(tight):
         )
         page.add_init_script("window.ethereum={request:window.mockRpc}")
         page.goto(url)
-        for index, label in enumerate(
-            [
+        labels = (
+            ["Approve 700 f564", "Mint the 700 f564 dip position"]
+            if dip
+            else [
                 f"Approve {caps[0] // unit} f564",
                 "Approve 0.999 fETH",
                 "Move remaining full-range liquidity"
                 if tight
                 else "Move half and mint new LP",
             ]
-        ):
+        )
+        for index, label in enumerate(labels):
             page.get_by_role("button", name=label).click()
             expect(page.locator("#status")).to_contain_text(
-                f"Step {index + 2} of 3" if index < 2 else "Confirmed."
+                f"Step {index + 2} of {len(labels)}"
+                if index < len(caps)
+                else "Confirmed."
             )
             page.reload()
         expect(page.locator("#status")).to_contain_text(
             f"Confirmed. New LP NFT #{new_id}"
         )
-        assert approve_before_mint == [2] and len(sends) == 3
+        assert approve_before_mint == [len(caps)] and len(sends) == len(labels)
         browser.close()
 
 

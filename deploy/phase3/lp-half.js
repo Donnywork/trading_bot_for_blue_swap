@@ -5,14 +5,18 @@ const quote = '0xc319f958df8a74b077578b437c402dc7d7687864';
 const base = '0xe00296a373cd19e6abaf085e50a393938879737d';
 const plans = {
   'lp-half.html': {initial:63245875460548078554n, remaining:31622937730274039277n, ticks:[-69180,-69000], quoteCap:790n, quoteMin:783n, nonce:134, action:'Move half and mint new LP', result:'Half the original liquidity remains in #234996.'},
-  'lp-tight.html': {initial:31622937730274039277n, remaining:0n, ticks:[-69120,-69060], quoteCap:515n, quoteMin:505n, nonce:139, action:'Move remaining full-range liquidity', result:'All remaining full-range liquidity was removed from #234996.'}
+  'lp-tight.html': {initial:31622937730274039277n, remaining:0n, ticks:[-69120,-69060], quoteCap:515n, quoteMin:505n, nonce:139, action:'Move remaining full-range liquidity', result:'All remaining full-range liquidity was removed from #234996.'},
+  'lp-dip.html': {walletOnly:true, ticks:[-69060,-69000], quoteCap:700n, nonce:142, action:'Mint the 700 f564 dip position', result:'Your dip position is ready.'}
 };
 const plan = plans[location.pathname.split('/').pop()];
 const chain = '0xaa36a7', tokenId = 234996n, original = plan.initial;
-const unit = 10n**18n, desired0 = plan.quoteCap*unit, desired1 = 999n*unit/1000n;
-const min0 = plan.quoteMin*unit, min1 = 994n*unit/1000n, max128 = (1n<<128n)-1n;
-const firstNonce = plan.nonce, labels = [`Approve ${plan.quoteCap} f564`, 'Approve 0.999 fETH', plan.action];
-const key = `phase3-lp:${chain}:${owner}:${tokenId}:${firstNonce}`;
+const unit = 10n**18n, desired0 = plan.quoteCap*unit, desired1 = plan.walletOnly ? 0n : 999n*unit/1000n;
+const min0 = plan.walletOnly ? desired0-1n : plan.quoteMin*unit, min1 = plan.walletOnly ? 0n : 994n*unit/1000n;
+const max128 = (1n<<128n)-1n;
+const firstNonce = plan.nonce, approvals = plan.walletOnly ? [quote] : [quote,base];
+const destinations = [...approvals,manager], mintStep = approvals.length;
+const labels = [`Approve ${plan.quoteCap} f564`, ...(!plan.walletOnly ? ['Approve 0.999 fETH'] : []), plan.action];
+const key = `phase3-lp:${chain}:${owner}:${plan.walletOnly ? 'dip' : tokenId}:${firstNonce}`;
 const $ = id => document.getElementById(id);
 const fail = text => {throw Error(text);};
 const word = value => BigInt.asUintN(256, BigInt(value)).toString(16).padStart(64,'0');
@@ -38,18 +42,25 @@ function multicall(calls){
 }
 
 function request(step,deadline){
-  if(step<2) return {to:[quote,base][step],data:call('095ea7b3',manager,[desired0,desired1][step])};
+  if(step<mintStep) return {to:approvals[step],data:call('095ea7b3',manager,[desired0,desired1][step])};
+  const mint=call('88316456',quote,base,3000,...plan.ticks,desired0,desired1,min0,min1,owner,deadline);
+  if(plan.walletOnly) return {to:manager,data:mint};
   return {to:manager,data:multicall([
     call('0c49ccbe',tokenId,original-plan.remaining,998n*unit,desired1,deadline),
     call('fc6f7865',tokenId,owner,max128,max128),
-    call('88316456',quote,base,3000,...plan.ticks,desired0,desired1,min0,min1,owner,deadline)
+    mint
   ])};
 }
 
 function verifySimulation(step,raw){
   const v=words(raw);
-  if(step<2){
+  if(step<mintStep){
     if(v.length!==1 || v[0]!==1n) fail('Approval simulation failed.');
+    return;
+  }
+  if(plan.walletOnly){
+    const [id,liquidity,amount0,amount1]=v;
+    if(v.length!==4 || !id || !liquidity || amount0<min0 || amount0>desired0 || amount1!==0n) fail('The simulated mint differs from the 700 f564 deposit.');
     return;
   }
   // ABI-encoded bytes[] with three static outputs: decrease, collect, mint.
@@ -113,9 +124,9 @@ async function next(){
     receiptLink(pending.hash);
     const r=await read('eth_getTransactionReceipt',[pending.hash]);
     if(!r) fail('Waiting for your transaction to confirm. Click Check status after confirmation.');
-    if(r.transactionHash.toLowerCase()!==pending.hash.toLowerCase() || r.from.toLowerCase()!==owner || r.to.toLowerCase()!==[quote,base,manager][pending.step]) fail('Wallet receipt differs from the requested transaction.');
+    if(r.transactionHash.toLowerCase()!==pending.hash.toLowerCase() || r.from.toLowerCase()!==owner || r.to.toLowerCase()!==destinations[pending.step]) fail('Wallet receipt differs from the requested transaction.');
     if(BigInt(r.status)!==1n) fail('Transaction reverted. Review the receipt before preparing another request.');
-    if(pending.step===2) newId=minted(r);
+    if(pending.step===mintStep) newId=minted(r);
   }
   const head=await read('eth_getBlockByNumber',['latest',false]);
   const block=head.number;
@@ -123,17 +134,25 @@ async function next(){
     // Leave the hash intact across checks and reloads until the next request is recorded.
     if(BigInt(await read('eth_getTransactionCount',[owner,block]))<=BigInt(firstNonce+pending.step)) fail('Waiting for the confirmed request to appear at the current head.');
   }
-  const liquidity=await checkPosition(tokenId,block,-887220,887220);
+  if(!plan.walletOnly){
+    const liquidity=await checkPosition(tokenId,block,-887220,887220);
+    if(liquidity!==(newId ? plan.remaining : original)) fail('The source LP liquidity differs from the expected balance. Check wallet Activity.');
+  }
   if(newId){
-    if(liquidity!==plan.remaining || await checkPosition(newId,block,...plan.ticks)<=0n) fail('Waiting to verify the remaining liquidity and new NFT.');
+    if(await checkPosition(newId,block,...plan.ticks)<=0n) fail('Waiting to verify the new NFT.');
     return {done:`Confirmed. New LP NFT #${newId} belongs to your wallet. ${plan.result}`};
   }
-  if(liquidity!==original) fail('The original LP liquidity has changed. Review wallet Activity before using this plan.');
+  if(plan.walletOnly){
+    const [balance]=await contract(quote,call('70a08231',owner),block);
+    if(balance<desired0) fail('The enrolled wallet needs 700 f564 to fund this position.');
+    const slot=await contract('0x7fe977ba8a5b7b25b8805b3f9456d21d3a4a9934','0x3850c7bd',block);
+    if(slot.length!==7 || BigInt.asIntN(24,slot[1])>=BigInt(plan.ticks[0])) fail('The price must be above the range for a one-sided f564 deposit.');
+  }
   const confirmed=Number(BigInt(await read('eth_getTransactionCount',[owner,block])));
   const inFlight=Number(BigInt(await read('eth_getTransactionCount',[owner,'pending'])));
   if(inFlight!==confirmed) fail('Your wallet has a pending transaction. Wait for its receipt, then check status.');
   const step=confirmed-firstNonce;
-  if(step<0 || step>2) fail('The wallet nonce has moved beyond this plan. Review wallet Activity.');
+  if(step<0 || step>mintStep) fail('The wallet nonce has moved beyond this plan. Review wallet Activity.');
   for(let i=0;i<step;i++){
     const [allowance]=await contract([quote,base][i],call('dd62ed3e',owner,manager),block);
     if(allowance!==[desired0,desired1][i]) fail('The manager allowance differs from this step. Check wallet Activity.');
@@ -153,7 +172,7 @@ async function refresh(){
     $('connect').hidden=true;
     if(state.done){$('status').textContent=state.done; return;}
     visible=state.step; $('review').textContent=labels[visible]; $('review').hidden=false;
-    $('status').textContent=`Step ${visible+1} of 3. Review this request in your wallet.`;
+    $('status').textContent=`Step ${visible+1} of ${labels.length}. Review this request in your wallet.`;
   }catch(e){if(gen===generation) $('status').textContent=e.message;}
 }
 $('refresh').onclick=refresh;
