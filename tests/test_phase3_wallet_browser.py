@@ -68,7 +68,8 @@ def test_status_while_wallet_prompts_are_open():
 @pytest.mark.skipif(
     os.environ.get("PHASE2_BROWSER_TESTS") != "1", reason="Run make test-browser"
 )
-def test_half_lp_owner_calls_and_reload():
+@pytest.mark.parametrize("tight", [False, True], ids=["half", "remainder"])
+def test_lp_owner_calls_and_reload(tight):
     import time
 
     from eth_abi import decode, encode
@@ -81,9 +82,12 @@ def test_half_lp_owner_calls_and_reload():
     manager = MANAGER.lower()
     tokens = [PHASE3.quote.lower(), PHASE3.base.lower()]
     unit = 10**18
-    original = 63245875460548078554
+    original = 31622937730274039277 if tight else 63245875460548078554
+    remaining = 0 if tight else original // 2
+    dest_band = (-69120, -69060) if tight else BAND
+    nonce = 139 if tight else 134
     new_id = 235199
-    caps = [790 * unit, 999 * unit // 1000]
+    caps = [(515 if tight else 790) * unit, 999 * unit // 1000]
     sends = []
     now = int(time.time())
     approve_before_mint = []
@@ -96,7 +100,7 @@ def test_half_lp_owner_calls_and_reload():
 
     def position(id):
         narrow = id == new_id
-        liquidity = 10**18 if narrow else original // 2 if len(sends) == 3 else original
+        liquidity = 10**18 if narrow else remaining if len(sends) == 3 else original
         return raw(
             [
                 "uint96",
@@ -117,7 +121,7 @@ def test_half_lp_owner_calls_and_reload():
                 "0x" + "0" * 40,
                 *tokens,
                 3000,
-                *(BAND if narrow else FULL),
+                *(dest_band if narrow else FULL),
                 liquidity,
                 0,
                 0,
@@ -139,7 +143,7 @@ def test_half_lp_owner_calls_and_reload():
             [
                 (
                     "uint256,uint128,uint256,uint256,uint256",
-                    [NFT, original // 2, 998 * unit, caps[1], now + 300],
+                    [NFT, original - remaining, 998 * unit, caps[1], now + 300],
                 ),
                 (
                     "uint256,address,uint128,uint128",
@@ -150,9 +154,9 @@ def test_half_lp_owner_calls_and_reload():
                     [
                         *tokens,
                         3000,
-                        *BAND,
+                        *dest_band,
                         *caps,
-                        783 * unit,
+                        (505 if tight else 783) * unit,
                         994 * unit // 1000,
                         OWNER,
                         now + 300,
@@ -175,7 +179,7 @@ def test_half_lp_owner_calls_and_reload():
         if method == "eth_getBlockByNumber":
             return {"number": "0x12", "timestamp": hex(now)}
         if method == "eth_getTransactionCount":
-            return hex(134 + len(sends))
+            return hex(nonce + len(sends))
         if method == "eth_getTransactionReceipt":
             i = sends.index(params[0])
             return {
@@ -205,7 +209,7 @@ def test_half_lp_owner_calls_and_reload():
         if method == "eth_sendTransaction":
             i = len(sends)
             assert (
-                tx["nonce"] == hex(134 + i)
+                tx["nonce"] == hex(nonce + i)
                 and tx["from"] == OWNER
                 and tx["chainId"] == "0xaa36a7"
                 and tx["value"] == "0x0"
@@ -236,7 +240,10 @@ def test_half_lp_owner_calls_and_reload():
                 [
                     encode(["uint256"] * 2, [1000 * unit, unit]),
                     encode(["uint256"] * 2, [1000 * unit, unit]),
-                    encode(["uint256"] * 4, [new_id, 10**18, 786 * unit, caps[1]]),
+                    encode(
+                        ["uint256"] * 4,
+                        [new_id, 10**18, (510 if tight else 786) * unit, caps[1]],
+                    ),
                 ]
             ],
         )
@@ -245,18 +252,23 @@ def test_half_lp_owner_calls_and_reload():
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.expose_function("mockRpc", rpc)
-        url = "http://127.0.0.1:8765/lp-half.html"
+        filename = "lp-tight.html" if tight else "lp-half.html"
+        url = "http://127.0.0.1:8765/" + filename
         page.route(
-            "http://127.0.0.1:8765/lp-half.*",
-            lambda route: route.fulfill(path=root / route.request.url.split("/")[-1]),
+            "http://127.0.0.1:8765/lp-*",
+            lambda route: route.fulfill(
+                path=root / route.request.url.split("/")[-1].split("?")[0]
+            ),
         )
         page.add_init_script("window.ethereum={request:window.mockRpc}")
         page.goto(url)
         for index, label in enumerate(
             [
-                "Approve 790 f564",
+                f"Approve {caps[0] // unit} f564",
                 "Approve 0.999 fETH",
-                "Move half and mint new LP",
+                "Move remaining full-range liquidity"
+                if tight
+                else "Move half and mint new LP",
             ]
         ):
             page.get_by_role("button", name=label).click()

@@ -1,12 +1,17 @@
-// One owner-approved allocation, anchored to the original NFT and the observed account nonce.
+// Each wallet page has a fixed source position, amount, destination range and nonce sequence.
 const owner = '0xb6bf0ba3f43d4386216df037dca1a1203038e135';
 const manager = '0x1238536071e1c677a632429e3655c799b22cda52';
 const quote = '0xc319f958df8a74b077578b437c402dc7d7687864';
 const base = '0xe00296a373cd19e6abaf085e50a393938879737d';
-const chain = '0xaa36a7', tokenId = 234996n, original = 63245875460548078554n;
-const unit = 10n**18n, desired0 = 790n*unit, desired1 = 999n*unit/1000n;
-const min0 = 783n*unit, min1 = 994n*unit/1000n, max128 = (1n<<128n)-1n;
-const firstNonce = 134, labels = ['Approve 790 f564', 'Approve 0.999 fETH', 'Move half and mint new LP'];
+const plans = {
+  'lp-half.html': {initial:63245875460548078554n, remaining:31622937730274039277n, ticks:[-69180,-69000], quoteCap:790n, quoteMin:783n, nonce:134, action:'Move half and mint new LP', result:'Half the original liquidity remains in #234996.'},
+  'lp-tight.html': {initial:31622937730274039277n, remaining:0n, ticks:[-69120,-69060], quoteCap:515n, quoteMin:505n, nonce:139, action:'Move remaining full-range liquidity', result:'All remaining full-range liquidity was removed from #234996.'}
+};
+const plan = plans[location.pathname.split('/').pop()];
+const chain = '0xaa36a7', tokenId = 234996n, original = plan.initial;
+const unit = 10n**18n, desired0 = plan.quoteCap*unit, desired1 = 999n*unit/1000n;
+const min0 = plan.quoteMin*unit, min1 = 994n*unit/1000n, max128 = (1n<<128n)-1n;
+const firstNonce = plan.nonce, labels = [`Approve ${plan.quoteCap} f564`, 'Approve 0.999 fETH', plan.action];
 const key = `phase3-lp:${chain}:${owner}:${tokenId}:${firstNonce}`;
 const $ = id => document.getElementById(id);
 const fail = text => {throw Error(text);};
@@ -35,9 +40,9 @@ function multicall(calls){
 function request(step,deadline){
   if(step<2) return {to:[quote,base][step],data:call('095ea7b3',manager,[desired0,desired1][step])};
   return {to:manager,data:multicall([
-    call('0c49ccbe',tokenId,original/2n,998n*unit,desired1,deadline),
+    call('0c49ccbe',tokenId,original-plan.remaining,998n*unit,desired1,deadline),
     call('fc6f7865',tokenId,owner,max128,max128),
-    call('88316456',quote,base,3000,-69180,-69000,desired0,desired1,min0,min1,owner,deadline)
+    call('88316456',quote,base,3000,...plan.ticks,desired0,desired1,min0,min1,owner,deadline)
   ])};
 }
 
@@ -120,8 +125,8 @@ async function next(){
   }
   const liquidity=await checkPosition(tokenId,block,-887220,887220);
   if(newId){
-    if(liquidity!==original-original/2n || await checkPosition(newId,block,-69180,-69000)<=0n) fail('Waiting to verify the remaining liquidity and new NFT.');
-    return {done:`Confirmed. New LP NFT #${newId} belongs to your wallet. Half the original liquidity remains in #${tokenId}.`};
+    if(liquidity!==plan.remaining || await checkPosition(newId,block,...plan.ticks)<=0n) fail('Waiting to verify the remaining liquidity and new NFT.');
+    return {done:`Confirmed. New LP NFT #${newId} belongs to your wallet. ${plan.result}`};
   }
   if(liquidity!==original) fail('The original LP liquidity has changed. Review wallet Activity before using this plan.');
   const confirmed=Number(BigInt(await read('eth_getTransactionCount',[owner,block])));

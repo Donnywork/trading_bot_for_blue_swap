@@ -33,6 +33,8 @@ Spot trades share the liquidation sender lock and the 0.001 Sepolia ETH per-send
 
 ## Forward liquidity experiment
 
+The [tighter range wallet page](http://127.0.0.1:8765/lp-tight.html) prepares the second rebalance. It uses the remaining liquidity in NFT 234996 to fund a new position between 997.90 and 1,003.91 f564 per fETH. It approves up to 515 f564 and 0.999 fETH. The transaction returns unused tokens to the enrolled wallet and verifies that the source NFT has zero liquidity after the mint. This plan uses wallet nonces 139–141. Serve it with the same local server as the spot setup page.
+
 The owner's [half-position wallet page](http://127.0.0.1:8765/lp-half.html) uses the same local server as spot setup. For NFT 234996 it prepares two limited approvals to the Sepolia Uniswap V3 position manager and one atomic decrease, collection and mint. The reviewed sequence uses owner nonces 134–136. Review each request and click **Check status** after confirmation. The page verifies the owner and range of the new NFT and the remaining half of NFT 234996. A changed nonce, changed original position or failed simulation calls for a fresh review. The paper comparison ends when the owner removes reference liquidity.
 
 `phase3_lp_paper.py` compares the owner's full-range LP NFT 234996 with moving half its liquidity into 991.93–1,009.95 f564/fETH (ticks −69180 and −69000). Both start with the same tokens. The narrower position keeps any leftover tokens idle. The experiment begins at the pinned block in `logs/phase3/lp-paper/start.json`. Restart `watch` to resume from that same block. See the [launch commands](DEPLOY.md#phase-3-monitor).
