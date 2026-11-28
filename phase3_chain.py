@@ -13,6 +13,13 @@ from phase_markets import PHASE3
 
 PUBLIC_RPC = "https://ethereum-sepolia-rpc.publicnode.com"
 FEE, POOL = PHASE3.pools[0]
+SQRT_FIELD = next(
+    field["name"]
+    for event in config.pool_abi
+    if event.get("name") == "Swap"
+    for field in event["inputs"]
+    if field["type"] == "uint160"
+)
 ADDRESSES = {
     "pool": POOL,
     "credit": PHASE3.credit,

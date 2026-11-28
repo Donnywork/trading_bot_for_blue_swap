@@ -14,6 +14,7 @@ import requests
 
 from ledger import atomic_write
 from phase3_chain import PUBLIC_RPC, WAD, Chain
+from phase3_notices import actor, digest, notices
 from phase_markets import PHASE3, PHASE3_START
 from runtime import error_kind, rejected_log_range
 from watchdog import post_webhook
@@ -142,17 +143,6 @@ def alert(text):
             )
 
 
-def notices(rows):
-    for row in rows:
-        label, event, args = row["contract"], row["event"], row["args"]
-        if label in ("pool", "credit") or event not in ("Transfer", "Approval"):
-            actor = row["signer"] or args.get("account", "")
-            who = "market bot" if actor.lower() == PHASE3.market_bot.lower() else actor
-            yield f"Block {row['block']} {label} {event} {who} {row['tx']}"
-        elif event == "Approval" and args["spender"].lower() == PHASE3.credit.lower():
-            yield f"Block {row['block']} {args['owner']} approved {label} for credit operations"
-
-
 def risk_levels(health):
     return {
         a: ("liquidatable" if h < WAD else "near liquidation")
@@ -185,16 +175,9 @@ def run(directory, once=False):
             rows, reorg = sync(chain, journal, target)
             state.update(head=head, indexed_block=target, indexed_hash=journal.tip()[1])
             if ready and rows:
-                alerts = list(notices(rows))
-                if alerts:
-                    alert(
-                        "\n".join(alerts[:8])
-                        + (
-                            f"\n{len(alerts) - 8} additional events in journal"
-                            if len(alerts) > 8
-                            else ""
-                        )
-                    )
+                message = digest(notices(rows))
+                if message:
+                    alert(message)
             if reorg:
                 alert(f"Rebuilt reorganized Phase 3 history through block {target}")
                 state.pop("market", None)
@@ -216,7 +199,7 @@ def run(directory, once=False):
                 for addr, level in risk_levels(snap["borrower_health_wad"]).items():
                     if before.get(addr) != level:
                         alert(
-                            f"Block {target} {addr} {level}, health {snap['borrower_health_wad'][addr] / WAD:.4f}"
+                            f"{actor(addr)} is {level}. Borrower health {snap['borrower_health_wad'][addr] / WAD:.4f} (liquidation threshold 1.00)."
                         )
                 state["market"] = snap
                 last_snapshot = now

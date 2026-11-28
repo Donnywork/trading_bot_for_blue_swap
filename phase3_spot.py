@@ -12,6 +12,8 @@ import operator_lock
 import phase3_vault as vault
 from phase3_chain import FEE, POOL, WAD
 from phase3_monitor import CONTROL, alert
+from phase3_notices import amount as token_amount
+from phase3_notices import receipt
 from phase_markets import PHASE3
 from runtime import ConfigurationError
 
@@ -357,9 +359,13 @@ class Spot:
                     )
                 ),
             )
-            alert(
-                f"Phase 3 spot {side} confirmed ({detail['reason']}) in block {record['block']}, tx {record['tx_hash']}"
-            )
+            fill = record["spot_fill"]
+            if side == "buy":
+                text = f"Our spot vault bought {token_amount(fill['received'], 'fETH')} for {token_amount(fill['spent'], 'f564')} on a confirmed dip."
+            else:
+                reason = detail["reason"].replace("_", " ")
+                text = f"Our spot vault sold {token_amount(fill['spent'], 'fETH')} for {token_amount(fill['received'], 'f564')} ({reason})."
+            alert(text + receipt(record["tx_hash"]))
             return {"status": "confirmed", "tx_hash": record["tx_hash"]}
 
 

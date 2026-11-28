@@ -13,10 +13,9 @@ from pathlib import Path
 
 from web3 import Web3
 
-import config
 import ledger
 import operator_lock
-from phase3_chain import FEE, POOL, WAD, Chain
+from phase3_chain import FEE, POOL, SQRT_FIELD, WAD, Chain
 from phase3_spot import ENTRY_DISCOUNT_BPS
 from phase_markets import PHASE3
 
@@ -27,13 +26,6 @@ MANAGER = Web3.to_checksum_address("0x1238536071e1c677a632429e3655c799b22cda52")
 OWNER = "0xb6bf0ba3f43d4386216df037dca1a1203038e135"
 D = Decimal
 FRACTION = D(FEE) / 10**6
-SQRT_FIELD = next(
-    item["name"]
-    for event in config.pool_abi
-    if event.get("name") == "Swap"
-    for item in event["inputs"]
-    if item["type"] == "uint160"
-)
 
 
 @lru_cache(maxsize=1024)

@@ -21,6 +21,8 @@ tmux capture-pane -pt monitor
 
 The webhook file is optional. Without Discord, start the same tmux command using only `exec .venv/bin/python -u phase3_monitor.py`. A successful Discord post prints its HTTP status. `logs/phase3/state.json` gives the current health and snapshot block. `logs/phase3/events.sqlite3` retains canonical events beginning at deployment. The monitor checks every 15 seconds, follows the chain two blocks behind the head, samples market and borrower data every minute or after pool/credit activity, and checks the public competition controls every five minutes. A reorganization rewinds affected chunks and replays them. The journal includes historical events during startup. Discord activity notifications begin after the initial catch-up. A tmux session survives SSH disconnects and needs a fresh launch after a host reboot.
 
+Activity alerts name the trading account, show token amounts and link to the Sepolia transaction. Swap fees describe the whole pool. Spot fill alerts use receipt amounts. Liquidation close alerts show the enforced minimum gain before native gas. Restart the monitor and combined worker to pick up alert formatting changes.
+
 ## Phase 2 on Ubuntu
 
 Complete [the Phase 2 operator walkthrough](EVENT_CONTRACT_SETUP.md) first, through simulation. That guide owns contract deployment, verification, funding and owner actions. This section installs the same event service on a server; the legacy reference below is for `TradingBot` / `main.py`.

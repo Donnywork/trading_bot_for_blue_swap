@@ -13,6 +13,7 @@ import arbitrage
 import config
 import ledger
 import operator_lock
+import phase3_notices
 import phase3_vault as vault_cli
 from phase3_chain import PUBLIC_RPC, WAD, Chain
 from phase3_monitor import alert
@@ -256,8 +257,10 @@ class Trader:
                 self.artifact,
                 before_intent=final_check,
             )
+            debt = plan["args"][0][1]
             alert(
-                f"Atomic liquidation confirmed in block {record['block']}, tx {record['tx_hash']}"
+                f"Our credit vault liquidated a loan and closed the position. Minimum gain enforced on-chain {phase3_notices.amount(plan['args'][1], phase3_notices.token(debt))} before native gas."
+                + phase3_notices.receipt(record["tx_hash"])
             )
             return {"status": "confirmed", "tx_hash": record["tx_hash"]}
 

@@ -2,7 +2,7 @@
 
 **Phase 3 is underway.** Run `uv run python phase3_monitor.py` for the current single-pool market. It tracks every confirmed pool, token and credit-facility event, including previously unseen competitors. Read the [Phase 3 investigation](research/2026-11-24-phase3/README.md) and [monitor runbook](docs/DEPLOY.md#phase-3-monitor). The trading commands below target Phase 2.
 
-The [Phase 3 vault walkthrough](docs/PHASE3_VAULT.md) covers deployment, owner registration, funding, credit limits, and operator calls. Borrowing starts disabled. Phase 3 has its own verified address record and command line.
+The [Phase 3 vault walkthrough](docs/PHASE3_VAULT.md) covers deployment, owner registration, funding, credit limits, and operator calls. Borrowing starts disabled. Phase 3 has its own verified address record and command line. Discord alerts show who traded, the token amounts and a link to the Sepolia receipt.
 
 `phase3_auto.py --live` watches for eligible borrowers and executes atomic liquidation-and-close trades under the vault owner's per-token permissions. See [automatic liquidation setup](docs/PHASE3_VAULT.md#automatic-liquidations).
 

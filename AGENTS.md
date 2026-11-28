@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Phase 3 Discord alerts use `phase3_notices.py` to format decoded journal events and receipt amounts. Swap quantities use the trader's direction, prices use f564 per fETH, and LP collections may include principal. Keep full hashes in the journal and use labeled Sepolia links in Discord.
+
 `phase3_lp_paper.py start/watch/status` compares keeping NFT 234996 full range with shifting half to ticks −69180/−69000 on paper. The pinned forward baseline and results live under `logs/phase3/lp-paper/`. Preserve the baseline on restart. The watcher replays the monitor's read-only journal, values both inventories at the facility TWAP, and discloses the largest non-market-bot fee contributor. See `docs/PHASE3_SPOT.md#forward-liquidity-experiment`.
 
 Phase 3 spot entry size follows the smaller of the owner's on-chain quote cap and the trading vault's liquid f564. New buy receipts retain the observed cap for recovery. Pre-change receipts use the historical 250 f564 software ceiling. The unsigned starter allocation is 1,000 f564 with a 1.5 fETH exit cap.
